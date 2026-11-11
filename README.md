@@ -51,6 +51,7 @@ git push origin v0.2.78-build328
 ### Исходники и поддержка
 
 - [Архитектура рендера](ARCHITECTURE.md) и [настройки материалов](CUSTOM_GLASS.md).
+- [Как предложить изменения](CONTRIBUTING.md#русский).
 - [Сообщить об ошибке](https://github.com/Kostubet/CPI-Kostubet-Edition/issues/new/choose) или обсудить её в [Kostubet Topics](https://t.me/KostubetTopics).
 - [Лицензия GPL v3](COPYING), [благодарности и сторонний код](THIRD_PARTY_NOTICES.md), [поддержать разработку](https://pay.cloudtips.ru/p/e6230fb4).
 
@@ -72,4 +73,4 @@ Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-
 
 Use JDK 17 and Android SDK API 35. Run `./gradlew :app:assembleRelease :app:lintRelease :app:testReleaseUnitTest` or use `gradlew.bat` on Windows. [GitHub Actions](https://github.com/Kostubet/CPI-Kostubet-Edition/actions) runs these checks and uploads a test APK. A tag of the form `v<versionName>-build<versionCode>` publishes a signed prerelease and SHA-256 checksum after the checks pass.
 
-[Report a bug](https://github.com/Kostubet/CPI-Kostubet-Edition/issues/new/choose) · [Telegram forum](https://t.me/KostubetTopics) · [GPL v3](COPYING) · [Credits](THIRD_PARTY_NOTICES.md)
+[Contribute](CONTRIBUTING.md#english) · [Report a bug](https://github.com/Kostubet/CPI-Kostubet-Edition/issues/new/choose) · [Telegram forum](https://t.me/KostubetTopics) · [GPL v3](COPYING) · [Credits](THIRD_PARTY_NOTICES.md)
