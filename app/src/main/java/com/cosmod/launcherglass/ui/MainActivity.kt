@@ -1498,8 +1498,12 @@ class MainActivity : AppCompatActivity() {
             openScreen(Screen.CONTRIBUTORS)
         })
         divider(people)
-        add(people,preferenceLink(getString(R.string.ui_telegram_forum),"KostubetTopic's",R.drawable.ic_cpi_telegram){
+        add(people,preferenceLink(getString(R.string.ui_telegram_forum),"Kostubet Topics",R.drawable.ic_cpi_telegram){
             openLink("https://t.me/KostubetTopics")
+        })
+        divider(people)
+        add(people,preferenceLink(getString(R.string.ui_github_repository),"Kostubet/CPI-Kostubet-Edition",R.drawable.ic_cpi_code){
+            openLink("https://github.com/Kostubet/CPI-Kostubet-Edition")
         })
         add(body,card(people),bottom=10)
         buildSupport(body)

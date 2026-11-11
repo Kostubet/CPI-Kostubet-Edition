@@ -253,6 +253,7 @@
     <string name="ui_release_badge">Open-Beta</string>
     <string name="ui_about_author">Author</string>
     <string name="ui_telegram_forum">Telegram forum</string>
+    <string name="ui_github_repository">GitHub repository</string>
     <string name="ui_cpi_edition">Kostubet Edition</string>
     <string name="ui_contributor_help">Supported the project</string>
     <string name="ui_contributor_sources">Code contributions</string>
