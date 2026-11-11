@@ -8,7 +8,7 @@
 
 ## Русский
 
-Форк [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons), который развивает [Kostubet](https://github.com/Kostubet).
+Форк [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
 
 ### Возможности
 
@@ -57,7 +57,7 @@ git push origin v0.2.78-build328
 
 ## English
 
-CPI Kostubet Edition is a Kotlin LSPosed module for ColorOS maintained by [Kostubet](https://github.com/Kostubet). It extends [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
+CPI Kostubet Edition is a Kotlin LSPosed module for ColorOS. It extends [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
 
 - Frosted and Liquid Glass for icons, folders, widgets, the dock and page indicators.
 - Glass settings for notification banners, expanded Live Alerts, the volume panel and lock screen elements.
