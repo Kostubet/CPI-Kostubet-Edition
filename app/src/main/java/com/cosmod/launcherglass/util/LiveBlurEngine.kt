@@ -1,0 +1,465 @@
+package com.cosmod.launcherglass.util
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import com.cosmod.launcherglass.ui.SettingsProvider
+import com.cosmod.launcherglass.xposed.IconGlassHook
+import com.cosmod.launcherglass.xposed.PrefsHelper
+import java.util.concurrent.atomic.AtomicBoolean
+
+object LiveBlurEngine {
+
+    private const val TAG = "LiveBlurEngine"
+
+    @Volatile
+    var isMoving: Boolean = false
+        private set
+
+    @Volatile
+    var isResumed: Boolean = true
+        private set
+
+    @Volatile
+    var lastMotionTimeMs: Long = 0L
+        private set
+
+    @Volatile
+    var activePointerCount: Int = 0
+        private set
+
+    @Volatile private var nativeWallpaperOffset:Float?=null
+    @Volatile private var workspaceOffset=0f
+    private var computedWallpaperOffset:Float?=null
+    @Volatile private var nativeWallpaperAt=0L
+    private var computedWallpaperAt=0L
+    val wallpaperScrollRatio:Float get() {
+        val native=nativeWallpaperOffset
+        return if(native!=null && computedWallpaperAt-nativeWallpaperAt<=48L)native
+            else computedWallpaperOffset ?: native ?: workspaceOffset
+    }
+
+    fun onLauncherWallpaperOffset(offset:Float){
+        if(!offset.isFinite() || offset !in 0f..1f)return
+        if(computedWallpaperOffset==offset)return
+        computedWallpaperOffset=offset
+        computedWallpaperAt=SystemClock.uptimeMillis()
+        lastWorkspaceScrollMs=computedWallpaperAt
+        lastMotionTimeMs=lastWorkspaceScrollMs
+        IconGlassHook.requestLiveFrame(immediate=true)
+    }
+
+    fun onWallpaperOffset(offset:Float){
+        if(!offset.isFinite() || offset !in 0f..1f)return
+        nativeWallpaperAt=SystemClock.uptimeMillis()
+        if(nativeWallpaperOffset==offset)return
+        nativeWallpaperOffset=offset
+        onMainThread {
+            if(PrefsHelper.enabled && isResumed && !isAppLaunchInProgress){
+                lastWorkspaceScrollMs=SystemClock.uptimeMillis()
+                lastMotionTimeMs=lastWorkspaceScrollMs
+                IconGlassHook.requestLiveFrame(immediate=true)
+            }
+        }
+    }
+
+    private var lastWorkspaceScrollMs = 0L
+
+    /**
+     * Touch, scrolling, transitions or wallpaper motion during the settling
+     * window. Unlike [isMoving] this does not depend on the idle-pause switch,
+     * so per-frame work gated by it always stops on a stationary screen.
+     */
+    val hasRecentMotion: Boolean
+        get() {
+            val now = SystemClock.uptimeMillis()
+            return activePointerCount > 0 || now - lastMotionTimeMs < 600L || now < transitionRefreshUntilMs ||
+                isWallpaperMoving || transitionVisible()
+        }
+    val isWorkspaceScrolling: Boolean
+        get() = lastWorkspaceScrollMs > 0L && SystemClock.uptimeMillis() - lastWorkspaceScrollMs < 90L
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val isTickerRunning = AtomicBoolean(false)
+    private var transitionRefreshUntilMs = 0L
+    private var lastAppTransition=0L
+    private var holdHomeGeometryUntil=0L
+    private var unlockMotionUntil=0L
+    val isUnlockMotion get()=SystemClock.uptimeMillis()<unlockMotionUntil
+    val holdHomeGlassGeometry get()=activePointerCount==0 && !isWorkspaceScrolling && !isUnlockMotion &&
+        (isAppLaunchInProgress || SystemClock.uptimeMillis()<holdHomeGeometryUntil)
+
+    fun onUnlockMotionStarted()=onMainThread {
+        if(!PrefsHelper.enabled || !PrefsHelper.wallpaperEffectsEnabled)return@onMainThread
+        unlockMotionUntil=SystemClock.uptimeMillis()+850L
+        holdHomeGeometryUntil=0L
+        IconGlassHook.requestLiveFrame(immediate=true)
+    }
+    private var consecutiveTransitions=0
+    @Volatile var rapidTransitionsUntil=0L
+        private set
+
+    private fun noteAppTransition(){
+        val now=SystemClock.uptimeMillis()
+        val gap=now-lastAppTransition
+        if(gap<110L)return
+        lastAppTransition=now
+        consecutiveTransitions=if(gap<740L)(consecutiveTransitions+1).coerceAtMost(3) else 1
+        if(consecutiveTransitions>=3){
+            rapidTransitionsUntil=now+1500L
+            com.cosmod.launcherglass.xposed.NativeSurfaceLive.suspendForBurst()
+        }
+    }
+
+    @Volatile
+    var isAppLaunchInProgress: Boolean = false
+        private set
+
+    var isWallpaperMoving: Boolean = false
+        private set
+
+    fun onWallpaperMotion(moving: Boolean) = onMainThread {
+        isWallpaperMoving = moving
+        if (moving) startTickerIfNeeded()
+    }
+
+    fun onWallpaperFrameReady() = onMainThread {
+        if (!PrefsHelper.enabled || !PrefsHelper.wallpaperEffectsEnabled || !isResumed || isAppLaunchInProgress || deferWorkspaceSampling) return@onMainThread
+        if (PrefsHelper.blurMode == SettingsProvider.BLUR_MODE_LIVE) {
+            IconGlassHook.requestLiveFrame(immediate=isUnlockMotion)
+            if (!isTickerRunning.get()) {
+                lastMotionTimeMs = SystemClock.uptimeMillis()
+                startTickerIfNeeded()
+            }
+        } else IconGlassHook.invalidateActiveIcons()
+    }
+
+    @Volatile
+    var isWorkspaceBlurSuspended: Boolean = false
+        private set
+
+    private var drawerProgress = 1f // Native controller: 1 = closed, 0 = open.
+    private var drawerMotionUntil=0L
+    private var drawerRefreshQueued=false
+    val isDrawerTransitioning get()=SystemClock.uptimeMillis()<drawerMotionUntil
+    private var draggingItem=false
+    val deferWorkspaceSampling get()=isDrawerTransitioning || (draggingItem && !isWorkspaceScrolling)
+
+    fun onItemDragChanged(dragging:Boolean)=onMainThread {
+        if(draggingItem==dragging)return@onMainThread
+        draggingItem=dragging
+        if(!dragging && PrefsHelper.enabled && isResumed){
+            lastMotionTimeMs=SystemClock.uptimeMillis()
+            IconGlassHook.requestLiveFrame(immediate=true)
+            startTickerIfNeeded()
+        }
+    }
+    val drawerOccludesWorkspace get()=isWorkspaceBlurSuspended && drawerProgress<=.01f && !isDrawerTransitioning
+    private val settleDrawer=object:Runnable {
+        override fun run(){
+            val remaining=drawerMotionUntil-SystemClock.uptimeMillis()
+            if(remaining>0L){mainHandler.postDelayed(this,remaining);return}
+            drawerRefreshQueued=false
+            if(isResumed && PrefsHelper.enabled){
+                IconGlassHook.invalidateActiveIcons(onlyChangedDrawerSamples=true)
+                LauncherWallpaperCapture.startMotionWatch()
+            }
+        }
+    }
+    private fun drawerMoving(){
+        drawerMotionUntil=SystemClock.uptimeMillis()+110L
+        if(!drawerRefreshQueued){drawerRefreshQueued=true;mainHandler.postDelayed(settleDrawer,110L)}
+    }
+
+    fun onDrawerTargetChanged(opening: Boolean) = onMainThread {
+        if(opening!=isWorkspaceBlurSuspended)drawerMoving()
+        setWorkspaceBlurSuspended(opening)
+    }
+
+    fun onDrawerProgress(progress: Float) = onMainThread {
+        if (!progress.isFinite()) return@onMainThread
+        val next = progress.coerceIn(0f, 1f)
+        if(kotlin.math.abs(next-drawerProgress)>.001f)drawerMoving()
+        // Direction also covers user-controlled gestures, reversals and canceled
+        // openings. Resume on the first closing frame, before the drawer lands.
+        when {
+            next < drawerProgress -> setWorkspaceBlurSuspended(true)
+            next > drawerProgress -> setWorkspaceBlurSuspended(false)
+        }
+        drawerProgress = next
+    }
+
+    private fun setWorkspaceBlurSuspended(suspended: Boolean) {
+        if (isWorkspaceBlurSuspended == suspended) return
+        isWorkspaceBlurSuspended = suspended
+        if (suspended) {
+            if (!PrefsHelper.drawerBlurEnabled) stopFrameLoop()
+        } else {
+            lastMotionTimeMs = SystemClock.uptimeMillis()
+            transitionRefreshUntilMs = maxOf(transitionRefreshUntilMs, lastMotionTimeMs + 600L)
+            if (isResumed && !isAppLaunchInProgress) {
+                if(!isDrawerTransitioning)IconGlassHook.invalidateActiveIcons()
+                startTickerIfNeeded()
+                LauncherWallpaperCapture.startMotionWatch()
+            }
+        }
+    }
+
+    private fun hasLiveBlurWork(): Boolean = PrefsHelper.wallpaperEffectsEnabled &&
+        (!isWorkspaceBlurSuspended || PrefsHelper.drawerBlurEnabled)
+
+    private fun transitionVisible()=com.cosmod.launcherglass.xposed.NativeSurfaceLive.active
+    private fun workspaceVisible()=transitionVisible() || (isResumed && !isAppLaunchInProgress)
+    fun onNativeSurfacesChanged()=onMainThread {
+        if(transitionVisible()){
+            transitionRefreshUntilMs=maxOf(transitionRefreshUntilMs,SystemClock.uptimeMillis()+600L)
+            startTickerIfNeeded()
+        }
+    }
+    private fun stopFrameLoop() {
+        if(transitionVisible() && PrefsHelper.enabled){
+            startTickerIfNeeded()
+            return
+        }
+        if(!com.cosmod.launcherglass.xposed.NativeSurfaceLive.active)LauncherWallpaperCapture.stopMotionWatch()
+        mainHandler.removeCallbacks(tickerRunnable)
+        isTickerRunning.set(false)
+        isMoving = false
+        activePointerCount = 0
+        transitionRefreshUntilMs = 0L
+    }
+
+    fun onAppLaunchStarted() = onMainThread {
+        if(!isAppLaunchInProgress)noteAppTransition()
+        isAppLaunchInProgress = true
+        stopFrameLoop()
+    }
+
+    fun onHomeReturnStarted() = onMainThread {
+        val wasSuspended = isAppLaunchInProgress || !isResumed
+        if(wasSuspended){
+            noteAppTransition()
+            holdHomeGeometryUntil=SystemClock.uptimeMillis()+270L
+        }
+        isAppLaunchInProgress = false
+        isResumed = true
+        lastMotionTimeMs = SystemClock.uptimeMillis()
+        transitionRefreshUntilMs = maxOf(transitionRefreshUntilMs, lastMotionTimeMs + 600L)
+        if(wasSuspended){
+            IconGlassHook.invalidateActiveIcons(onlyChangedDrawerSamples=true)
+            if(!isUnlockMotion)com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onHomeReturn()
+            else com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onBackdropChanged()
+        }
+        startTickerIfNeeded()
+    }
+
+    @Volatile
+    var isEditing: Boolean = false
+        private set
+
+    fun onEditModeChanged(editing: Boolean) = onMainThread {
+        if (isEditing != editing) {
+            isEditing = editing
+            lastMotionTimeMs = SystemClock.uptimeMillis()
+            // Keep live material and the OEM animation alive during drag/edit.
+            // The ordinary idle and FPS gates still limit background work.
+            IconGlassHook.invalidateActiveIcons()
+            startTickerIfNeeded()
+            LauncherWallpaperCapture.startMotionWatch()
+        }
+    }
+
+    private fun onMainThread(action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) action()
+        else mainHandler.post { action() }
+    }
+
+    fun onTransitionStarted(durationMs: Long = 1200L) = onMainThread {
+        if (isAppLaunchInProgress || !isResumed) return@onMainThread
+        // A previous app's completion must not cancel a newer return animation.
+        transitionRefreshUntilMs = maxOf(transitionRefreshUntilMs, SystemClock.uptimeMillis() + durationMs)
+        startTickerIfNeeded()
+    }
+
+    fun onTransitionFinished() = onMainThread {
+        if (isAppLaunchInProgress || !isResumed) return@onMainThread
+        onTransitionStarted(600L)
+        IconGlassHook.invalidateActiveIcons()
+    }
+
+    private val tickerRunnable = object : Runnable {
+        override fun run() {
+            val now = SystemClock.uptimeMillis()
+            val isTransitioning = now < transitionRefreshUntilMs
+            if (!workspaceVisible() || !PrefsHelper.enabled || !hasLiveBlurWork() ||
+                PrefsHelper.blurMode != SettingsProvider.BLUR_MODE_LIVE) {
+                isTickerRunning.set(false)
+                isMoving = false
+                return
+            }
+
+            val settlingTimeMs = 600L // 600ms after last motion/scroll event has rested
+            val hasRecentMotion = (now - lastMotionTimeMs) < settlingTimeMs
+            val isUnderTouch = activePointerCount > 0
+            val isCurrentlyMoving = isUnderTouch || hasRecentMotion || isTransitioning || isWallpaperMoving || transitionVisible()
+
+            if (!isCurrentlyMoving) {
+                if (isMoving) {
+                    GlassLogger.i(TAG, "Screen idle -> Live blur ticker paused")
+                }
+                isMoving = false
+                isTickerRunning.set(false)
+                return
+            }
+
+            isMoving = true
+
+            // Geometry follows native pre-draw at the display's refresh rate.
+            // New wallpaper publications request their own frame. A timer must
+            // not manufacture 60 redundant traversals/s for a stationary touch.
+
+            // This runnable only checks whether activity has settled; it does
+            // not render a frame. Actual sampling is driven by pre-draw and
+            // wallpaper publications, so polling it at 60 Hz wastes UI-thread
+            // wakeups without improving animation cadence.
+            mainHandler.postDelayed(this, 100L)
+        }
+    }
+
+    fun startTickerIfNeeded() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { startTickerIfNeeded() }
+            return
+        }
+        if (!workspaceVisible() ||
+            !PrefsHelper.enabled || !hasLiveBlurWork() || PrefsHelper.blurMode != SettingsProvider.BLUR_MODE_LIVE) {
+            return
+        }
+
+        val fps = PrefsHelper.liveFps.coerceIn(1, 120)
+        if (isTickerRunning.compareAndSet(false, true)) {
+            if (!isMoving) {
+                GlassLogger.i(TAG, "Motion detected -> live blur activity check resumed (sampling limit ${fps} FPS)")
+            }
+            isMoving = true
+            mainHandler.removeCallbacks(tickerRunnable)
+            mainHandler.postDelayed(tickerRunnable, 100L)
+        }
+    }
+
+    fun onPrefsChanged() = onMainThread {
+        if(!PrefsHelper.enabled){
+            LauncherWallpaperCapture.stopMotionWatch()
+            mainHandler.removeCallbacks(tickerRunnable);isTickerRunning.set(false)
+            isMoving=false;isWallpaperMoving=false;activePointerCount=0
+            isEditing=false;isAppLaunchInProgress=false;isWorkspaceBlurSuspended=false;draggingItem=false
+            transitionRefreshUntilMs=0L
+            return@onMainThread
+        }
+        LauncherWallpaperCapture.stopMotionWatch()
+        IconGlassHook.invalidateFolderPreviews()
+        if (PrefsHelper.blurMode == SettingsProvider.BLUR_MODE_LIVE) {
+            lastMotionTimeMs = SystemClock.uptimeMillis()
+            mainHandler.removeCallbacks(tickerRunnable)
+            isTickerRunning.set(false)
+            isMoving = false
+            startTickerIfNeeded()
+        } else {
+            isTickerRunning.set(false)
+            isMoving = false
+            mainHandler.removeCallbacks(tickerRunnable)
+        }
+        IconGlassHook.invalidateActiveIcons()
+        LauncherWallpaperCapture.startMotionWatch()
+    }
+
+    fun invalidate() {
+        IconGlassHook.invalidateActiveIcons()
+    }
+
+    fun onTouch(event: MotionEvent) {
+        if (isAppLaunchInProgress) {
+            onHomeReturnStarted()
+        }
+        // Touch delivery proves the launcher is visible, including interrupted
+        // returns where ColorOS does not deliver another onResume.
+        isResumed = true
+        lastMotionTimeMs = SystemClock.uptimeMillis()
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                LauncherWallpaperCapture.startMotionWatch()
+                activePointerCount = 1
+                startTickerIfNeeded()
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                activePointerCount++
+                startTickerIfNeeded()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                startTickerIfNeeded()
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                activePointerCount = (activePointerCount - 1).coerceAtLeast(0)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                activePointerCount = 0
+            }
+        }
+    }
+
+    fun onScroll(scrollX: Int, view: View) {
+        val name = view.javaClass.name
+        if (!name.contains("Workspace") || name.contains("Recents") || name.contains("Task")) {
+            return
+        }
+
+        // Actual workspace scrolling is newer evidence than delayed lifecycle
+        // callbacks from an application that is already being dismissed.
+        isResumed=true
+        isAppLaunchInProgress=false
+        lastMotionTimeMs = SystemClock.uptimeMillis()
+        lastWorkspaceScrollMs = lastMotionTimeMs
+
+        val childCount = (view as? ViewGroup)?.childCount ?: 3
+        val maxScroll = (maxOf(1, childCount - 1) * view.width).coerceAtLeast(1)
+        workspaceOffset = (scrollX.toFloat() / maxScroll.toFloat()).coerceIn(0f, 1f)
+
+        // Reuse the current traversal and sample after the native scroll transform.
+        IconGlassHook.requestLiveFrame(immediate=true)
+        // Source capture continues at the configured rate.
+        startTickerIfNeeded()
+    }
+
+    fun onActivityPaused() = onMainThread {
+        draggingItem=false
+        isResumed = false
+        stopFrameLoop()
+    }
+
+    fun onActivityResumed() = onMainThread {
+        if(!isResumed || isAppLaunchInProgress){
+            holdHomeGeometryUntil=SystemClock.uptimeMillis()+270L
+            if(!isUnlockMotion)com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onHomeReturn()
+        }
+        isAppLaunchInProgress = false
+        isResumed = true
+        lastMotionTimeMs = SystemClock.uptimeMillis()
+        // Reset both halves of the scheduler together after rapid pause/resume.
+        mainHandler.removeCallbacks(tickerRunnable)
+        isTickerRunning.set(false)
+        transitionRefreshUntilMs = maxOf(transitionRefreshUntilMs, lastMotionTimeMs + 600L)
+        startTickerIfNeeded()
+        LauncherWallpaperCapture.startMotionWatch()
+        if(isUnlockMotion)IconGlassHook.requestLiveFrame(immediate=true)
+        else IconGlassHook.invalidateActiveIcons(onlyChangedDrawerSamples=true)
+    }
+
+    fun getLiveBlurBitmap(context: Context?, hostView: View?): Bitmap? {
+        return WallpaperHelper.getBlurredWallpaper(context)
+    }
+}

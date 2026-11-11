@@ -1,0 +1,22 @@
+name: Bug report / Ошибка
+description: Report an issue with CPI Kostubet Edition
+body:
+  - type: input
+    id: environment
+    attributes:
+      label: Device and versions / Устройство и версии
+      description: Model, firmware, launcher, CPI version and build number
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / Как воспроизвести
+      description: List the enabled settings, what happened, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics / Диагностика
+      description: Attach relevant log excerpts or a recording with personal data removed.

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CPI Kostubet Edition</string>
+    <string name="ui_photo_original">Original</string>
+    <string name="ui_photo_timer">Timer glass</string>
+    <string name="ui_glass_corner">Corner radius</string>
+    <string name="ui_glass_shade">Glass darkening</string>
+    <string name="ui_glass_glow">Bottom transparency</string>
+    <string name="ui_glass_rim">Glass edge</string>
+    <string name="ui_dock_glass">Dock glass</string>
+    <string name="ui_dock_glass_hint">Clear wallpaper glass without icon tint. Material and blur are independent of icons.</string>
+    <string name="ui_glass_off">Off</string>
+    <string name="ui_glass_opacity">Tint opacity</string>
+    <string name="ui_dock_inset">Padding around icons</string>
+    <string name="ui_dock_gradient">Dock gradient</string>
+</resources>

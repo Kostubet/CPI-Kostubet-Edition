@@ -1,0 +1,139 @@
+name: Android CI/CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*-build*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  verify:
+    name: Build, lint and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          cmdline-tools-version: '12266719'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'platforms;android-35 build-tools;34.0.0'
+      - name: Run Gradle checks
+        run: ./gradlew --no-daemon --console=plain :app:assembleRelease :app:lintRelease :app:testReleaseUnitTest
+      - name: Upload test and lint reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-checks
+          path: |
+            app/build/reports/tests/testReleaseUnitTest/
+            app/build/reports/lint-results-release.*
+          retention-days: 7
+      - name: Upload APK and build metadata
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cpi-preview
+          path: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/release/output-metadata.json
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish signed prerelease
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          cmdline-tools-version: '12266719'
+          log-accepted-android-sdk-licenses: 'false'
+          packages: 'build-tools;34.0.0'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cpi-preview
+          path: apk
+      - name: Validate release tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          expected="$(jq -er '.elements[0] | "v\(.versionName)-build\(.versionCode)"' apk/output-metadata.json)"
+          if [[ "$TAG" != "$expected" || ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-build[0-9]+$ ]]; then
+            echo "::error::Expected tag $expected, got $TAG"
+            exit 1
+          fi
+      - name: Sign and verify APK
+        env:
+          TAG: ${{ github.ref_name }}
+          CPI_KEYSTORE: ${{ secrets.CPI_SIGNING_KEYSTORE }}
+          CPI_STORE_PASSWORD: ${{ secrets.CPI_SIGNING_STORE_PASSWORD }}
+          CPI_KEY_PASSWORD: ${{ secrets.CPI_SIGNING_KEY_PASSWORD }}
+          CPI_KEY_ALIAS: ${{ vars.CPI_SIGNING_KEY_ALIAS }}
+          CPI_CERT_SHA256: ${{ vars.CPI_SIGNING_CERT_SHA256 }}
+        run: |
+          : "${CPI_KEYSTORE:?Configure CPI_SIGNING_KEYSTORE}"
+          : "${CPI_STORE_PASSWORD:?Configure CPI_SIGNING_STORE_PASSWORD}"
+          : "${CPI_KEY_PASSWORD:?Configure CPI_SIGNING_KEY_PASSWORD}"
+          : "${CPI_KEY_ALIAS:?Configure CPI_SIGNING_KEY_ALIAS}"
+          : "${CPI_CERT_SHA256:?Configure CPI_SIGNING_CERT_SHA256}"
+          signer="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          umask 077
+          key="$(mktemp "$RUNNER_TEMP/cpi-keystore.XXXXXX")"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$CPI_KEYSTORE" | base64 --decode > "$key"
+
+          mkdir -p dist
+          apk="CPI-Kostubet-Edition-${TAG#v}.apk"
+          "$signer" sign --ks "$key" --ks-key-alias "$CPI_KEY_ALIAS" \
+            --ks-pass env:CPI_STORE_PASSWORD --key-pass env:CPI_KEY_PASSWORD \
+            --out "dist/$apk" apk/app-release.apk
+          certificate="$("$signer" verify --print-certs "dist/$apk" |
+            awk -F ': ' '/certificate SHA-256 digest/ { print tolower($2); exit }')"
+          if [[ "$certificate" != "${CPI_CERT_SHA256,,}" ]]; then
+            echo "::error::APK signing certificate differs from the configured CPI certificate"
+            exit 1
+          fi
+          (cd dist && sha256sum "$apk" > "$apk.sha256")
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          draft="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [[ "$draft" == false ]]; then
+            echo "Release $TAG is already published."
+            exit 0
+          fi
+          if [[ "$draft" != true ]]; then
+            gh release create "$TAG" --verify-tag --draft --prerelease --generate-notes \
+              --title "CPI Kostubet Edition ${TAG#v}"
+          fi
+          gh release upload "$TAG" dist/*.apk dist/*.sha256 --clobber
+          gh release edit "$TAG" --draft=false

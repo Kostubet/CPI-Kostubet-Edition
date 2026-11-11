@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CPI Kostubet Edition</string>
+    <string name="ui_photo_original">Исходный</string>
+    <string name="ui_photo_timer">Стекло таймера</string>
+    <string name="ui_glass_corner">Скругление</string>
+    <string name="ui_glass_shade">Затемнение стекла</string>
+    <string name="ui_glass_glow">Прозрачность снизу</string>
+    <string name="ui_glass_rim">Стеклянная кромка</string>
+    <string name="ui_dock_glass">Стеклянный докбар</string>
+    <string name="ui_dock_glass_hint">Прозрачное стекло без оттенка иконок. Материал и размытие настраиваются отдельно от иконок.</string>
+    <string name="ui_glass_off">Выкл.</string>
+    <string name="ui_glass_opacity">Непрозрачность оттенка</string>
+    <string name="ui_dock_inset">Отступ от иконок</string>
+    <string name="ui_dock_gradient">Градиент докбара</string>
+</resources>

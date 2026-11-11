@@ -1,0 +1,9 @@
+<resources>
+    <color name="cpi_ui_background">#000000</color>
+    <color name="cpi_ui_panel">#1B1B1B</color>
+    <color name="cpi_ui_raised">#262626</color>
+    <color name="cpi_ui_text">#F3F3F4</color>
+    <color name="cpi_ui_muted">#A1A1A9</color>
+    <color name="cpi_ui_accent">#1683FF</color>
+    <color name="cpi_ui_switch_off">#535355</color>
+</resources>
