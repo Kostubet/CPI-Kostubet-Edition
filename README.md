@@ -8,7 +8,7 @@
 
 ## Русский
 
-Форк [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
+Модуль LSPosed на Kotlin, который добавляет Frosted и Liquid Glass для иконок лаунчера. Красивый фон иконок с гибкой настройкой. Форк [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
 
 ### Возможности
 
@@ -57,7 +57,7 @@ git push origin v0.2.78-build328
 
 ## English
 
-CPI Kostubet Edition is a Kotlin LSPosed module for ColorOS. It extends [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
+An LSPosed module written in Kotlin that brings Frosted and Liquid Glass design to launcher icons. A beautiful icon backdrop engine with nice customisation. A fork of [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
 
 - Frosted and Liquid Glass for icons, folders, widgets, the dock and page indicators.
 - Glass settings for notification banners, expanded Live Alerts, the volume panel and lock screen elements.
