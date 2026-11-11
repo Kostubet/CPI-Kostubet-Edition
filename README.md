@@ -2,6 +2,8 @@
 
 **Frosted и Liquid Glass для ColorOS** · модуль LSPosed на Kotlin
 
+[![Kostubet Topics in Telegram](https://img.shields.io/badge/Telegram-Kostubet%20Topics-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/KostubetTopics)
+
 [Русский](#русский) · [English](#english) · [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases) · [Actions](https://github.com/Kostubet/CPI-Kostubet-Edition/actions)
 
 ## Русский
