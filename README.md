@@ -37,13 +37,13 @@
 
 На Windows используйте `gradlew.bat`. Gradle записывает APK в `app/build/outputs/apk/release/app-release.apk`.
 
-GitHub Actions запускает сборку, lint и unit-тесты при изменениях `main` и в pull request. В отчёте запуска доступны APK `cpi-preview` и результаты проверок `android-checks`. APK из CI подписан тестовым ключом для пробной установки. Подписанные обновления находятся в Releases.
+GitHub Actions собирает APK и запускает lint и unit-тесты для `dev` (разработка), `beta` (тестирование) и `main` (стабильные версии). Откройте успешный запуск нужной ветки и скачайте APK из раздела **Artifacts** после входа в GitHub. Файл содержит канал, номер сборки и короткий хеш коммита. Сборки из Artifacts подписаны тестовым ключом. Для обновления установленного CPI используйте подписанный APK из Releases. [Сборки beta](https://github.com/Kostubet/CPI-Kostubet-Edition/actions/workflows/android.yml?query=branch%3Abeta) · [История изменений](CHANGELOG.md)
 
-Для новой публикации обновите `versionName` и `versionCode`, отправьте коммит и поставьте соответствующий тег. После проверок Actions подпишет APK и опубликует предварительный релиз с файлом SHA-256.
+Для релиза согласуйте перенос на `main`, обновите `versionName` и `versionCode` и отправьте утверждённый тег. После проверок Actions подготовит черновик с подписанным APK и SHA-256. Владелец проверяет черновик и нажимает **Publish release**.
 
 ~~~sh
-git tag v0.2.78-build328
-git push origin v0.2.78-build328
+git tag v0.2.78-buildNNN origin/main
+git push origin refs/tags/v0.2.78-buildNNN
 ~~~
 
 Для подписи используются секреты GitHub Actions `CPI_SIGNING_KEYSTORE`, `CPI_SIGNING_STORE_PASSWORD` и `CPI_SIGNING_KEY_PASSWORD`. Переменные `CPI_SIGNING_KEY_ALIAS` и `CPI_SIGNING_CERT_SHA256` задают псевдоним и отпечаток сертификата. Для обновления установленного CPI нужен прежний сертификат.
@@ -71,6 +71,6 @@ Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-
 
 ### Build and release
 
-Use JDK 17 and Android SDK API 35. Run `./gradlew :app:assembleRelease :app:lintRelease :app:testReleaseUnitTest` or use `gradlew.bat` on Windows. [GitHub Actions](https://github.com/Kostubet/CPI-Kostubet-Edition/actions) runs these checks and uploads a test APK. A tag of the form `v<versionName>-build<versionCode>` publishes a signed prerelease and SHA-256 checksum after the checks pass.
+Use JDK 17 and Android SDK API 35. Run `./gradlew :app:assembleRelease :app:lintRelease :app:testReleaseUnitTest` or use `gradlew.bat` on Windows. GitHub Actions checks `dev` (development), `beta` (testing) and `main` (stable). Sign in to download APKs from a successful run’s **Artifacts** section. These APKs use a test signing key. An approved `v<versionName>-build<versionCode>` tag on `main` prepares a signed release draft and SHA-256 checksum for the owner to publish. [Beta builds](https://github.com/Kostubet/CPI-Kostubet-Edition/actions/workflows/android.yml?query=branch%3Abeta) · [Changelog](CHANGELOG.md)
 
 [Contribute](CONTRIBUTING.md#english) · [Report a bug](https://github.com/Kostubet/CPI-Kostubet-Edition/issues/new/choose) · [Telegram forum](https://t.me/KostubetTopics) · [GPL v3](COPYING) · [Credits](THIRD_PARTY_NOTICES.md)

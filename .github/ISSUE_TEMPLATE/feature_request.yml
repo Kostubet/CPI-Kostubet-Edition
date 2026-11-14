@@ -1,0 +1,17 @@
+name: Feature request · Предложение
+description: Suggest an improvement for CPI Kostubet Edition
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case · Задача
+      description: What would you like to do with CPI? / Что вы хотите сделать с помощью CPI?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change · Предложение
+      description: Describe how the change should work. / Опишите, как должно работать изменение.
+    validations:
+      required: true
