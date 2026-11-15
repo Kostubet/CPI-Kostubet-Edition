@@ -9,7 +9,7 @@ import kotlin.math.roundToInt
 
 /** One retained material per visible target. Stock content stays above the plate. */
 internal class LockscreenMaterial {
-    private data class Sample(val image:Bitmap,val source:RectF,val width:Int,val height:Int,val corner:Float,val profile:Profile,val glyphs:Boolean,val neutral:Boolean)
+    private data class Sample(val image:Bitmap,val source:RectF,val width:Int,val height:Int,val corner:Float,val profile:Profile,val glyphs:Boolean,val neutral:Boolean,val clipped:Boolean)
     private val node=RenderNode("CPI.lockscreenGlass")
     private var current:Sample?=null
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
@@ -88,7 +88,7 @@ internal class LockscreenMaterial {
                 else->.96f
             }
             if(exactPath!=null)canvas.clipPath(path)
-            drawBackdrop(canvas,view,image,profile,corner,backdropAlpha*amount,glyphs,neutral)
+            drawBackdrop(canvas,view,image,profile,corner,backdropAlpha*amount,glyphs,neutral,exactPath!=null)
             val base=frame.color
             val dark=androidx.core.graphics.ColorUtils.calculateLuminance(base)<.40
             val tone=if(neutral){
@@ -125,7 +125,7 @@ internal class LockscreenMaterial {
         }finally {canvas.restoreToCount(mixed)}
     }
 
-    private fun drawBackdrop(canvas:Canvas,view:View,image:Bitmap,profile:Profile,corner:Float,alpha:Float,glyphs:Boolean,neutral:Boolean){
+    private fun drawBackdrop(canvas:Canvas,view:View,image:Bitmap,profile:Profile,corner:Float,alpha:Float,glyphs:Boolean,neutral:Boolean,clipped:Boolean){
         screenMatrix.reset()
         view.transformMatrixToGlobal(screenMatrix)
         mapped.set(local)
@@ -142,7 +142,7 @@ internal class LockscreenMaterial {
         val width=local.width().roundToInt().coerceAtLeast(1)
         val height=local.height().roundToInt().coerceAtLeast(1)
         val filter=if(glyphs)glyphColors else if(neutral)saturationFilter else null
-        if(!profile.liquid || Build.VERSION.SDK_INT<33 || !lens(image,profile,corner,width,height,glyphs,neutral,filter)){
+        if(!profile.liquid || Build.VERSION.SDK_INT<33 || !lens(image,profile,corner,width,height,glyphs,neutral,filter,clipped)){
             val shader=GlassGeometry.wallpaperShader(image)
             shader.setLocalMatrix(Matrix().apply {setRectToRect(source,local,Matrix.ScaleToFit.FILL)})
             paint.shader=shader
@@ -162,9 +162,10 @@ internal class LockscreenMaterial {
     }
 
     @androidx.annotation.RequiresApi(33)
-    private fun lens(image:Bitmap,profile:Profile,corner:Float,width:Int,height:Int,glyphs:Boolean,neutral:Boolean,filter:ColorMatrixColorFilter?):Boolean {
+    private fun lens(image:Bitmap,profile:Profile,corner:Float,width:Int,height:Int,glyphs:Boolean,neutral:Boolean,filter:ColorMatrixColorFilter?,clipped:Boolean):Boolean {
         if(current?.let {it.image===image && it.source==source && it.width==width && it.height==height &&
-                it.corner==corner && it.profile==profile && it.glyphs==glyphs && it.neutral==neutral}==true && node.hasDisplayList())return true
+                it.corner==corner && it.profile==profile && it.glyphs==glyphs && it.neutral==neutral &&
+                it.clipped==clipped}==true && node.hasDisplayList())return true
         val lens=LiquidGlassShader.shared() ?: return false
         val mask=masked ?: RuntimeShader("""
             uniform float2 size;
@@ -175,12 +176,15 @@ internal class LockscreenMaterial {
                 return half4(1.0-smoothstep(-.85,.45,d));
             }
         """).also {masked=it}
-        if(maskWidth!=width || maskHeight!=height || maskCorner!=corner){
+        // Exact paths already clip the lens output. Keep the native radius
+        // for refraction, but leave the inner mask rectangular.
+        val maskRadius=if(clipped)0f else corner
+        if(maskWidth!=width || maskHeight!=height || maskCorner!=maskRadius){
             mask.setFloatUniform("size",width.toFloat(),height.toFloat())
-            mask.setFloatUniform("radius",corner)
+            mask.setFloatUniform("radius",maskRadius)
             maskWidth=width
             maskHeight=height
-            maskCorner=corner
+            maskCorner=maskRadius
         }
         // A thin digit cannot use the displacement of a plate the size of its bounding box.
         val strength=if(glyphs)(profile.distortion*.30f).roundToInt() else profile.distortion
@@ -194,7 +198,7 @@ internal class LockscreenMaterial {
             val recording=node.beginRecording()
             try {recording.drawColor(Color.BLACK)}finally {node.endRecording()}
         }
-        current=Sample(image,RectF(source),width,height,corner,profile,glyphs,neutral)
+        current=Sample(image,RectF(source),width,height,corner,profile,glyphs,neutral,clipped)
         return true
     }
 }

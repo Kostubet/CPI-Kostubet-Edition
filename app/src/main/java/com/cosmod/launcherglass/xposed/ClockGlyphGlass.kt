@@ -38,6 +38,11 @@ internal class ClockGlyphGlass {
         half4 main(float2 p) {
             half4 ink=glyph.eval(p);
             if(ink.a<=.002)return half4(0.0);
+            // The OnePlus accent is part of the native glyph, not the lens.
+            // Work in unpremultiplied color so antialiased edges keep it too.
+            float3 original=float3(ink.rgb)/ink.a;
+            float red=original.r-max(original.g,original.b);
+            if(original.r>.45 && red>.20)return ink;
             float stepSize=max(1.0,width);
             float2 g=float2(
                 glyph.eval(p+float2(stepSize,0)).a-glyph.eval(p-float2(stepSize,0)).a,
@@ -55,7 +60,8 @@ internal class ClockGlyphGlass {
             float3 light=float3(.93,.95,1.0);
             float shine=max(dot(normal,float2(.49,-.87)),0.0)*edge;
             float3 glass=mix(rgb,light,.10+veil*.58+shine*.30);
-            return half4(half3(glass)*ink.a,ink.a);
+            float keepAccent=smoothstep(.06,.20,red)*smoothstep(.30,.45,original.r);
+            return mix(half4(half3(glass)*ink.a,ink.a),ink,half(keepAccent));
         }
     """.trimIndent())
 

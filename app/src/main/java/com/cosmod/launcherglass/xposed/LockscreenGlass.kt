@@ -11,7 +11,9 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -43,6 +45,7 @@ internal object LockscreenGlass {
     private const val WALLPAPER_ANIM="com.oplus.systemui.keyguard.anim.OplusWallpaperAnimControllerImpl"
     private const val SCRIM="com.oplus.systemui.statusbar.phone.ScrimBlurStateUtilsExImpl"
     private const val NOTIFICATION="com.android.systemui.statusbar.notification.row.NotificationBackgroundView"
+    private const val NOTIFICATION_ROW="com.android.systemui.statusbar.notification.row.ExpandableNotificationRow"
     private const val KEYGUARD_STATE="com.android.systemui.statusbar.policy.KeyguardStateControllerImpl"
     private const val PIN_ROOT="com.android.keyguard.KeyguardPINView"
     private const val COUI_PIN_ROOT="com.oplus.keyguard.security.view.OplusKeyguardPinBaseInputView"
@@ -53,19 +56,26 @@ internal object LockscreenGlass {
     private const val PLUGIN_SHORTCUT="com.oplus.keyguard.ui.base.widget.OplusLaunchableImageView"
     private const val PLUGIN_SHORTCUTS="com.oplus.keyguard.ui.base.view.BottomAffordanceContainer"
     private const val WIDGET_CARD="com.oplus.keyguard.style.widgets.container.view.CardView"
-    private const val INSTANT_CARD="com.oplus.keyguard.style.widgets.container.view.InstantCardView"
+    private const val EMPTY_CARD="com.oplus.keyguard.style.widgets.container.view.EmptyCardView"
     private const val CAPSULE_BG="com.oplus.systemui.notification.lockscreen.capsule.CapsuleBackgroundView"
     private const val CAPSULE_ITEM="com.oplus.systemui.notification.lockscreen.capsule.CapsuleItemView"
     private const val CLOCK_PLUGIN="com.oplus.keyguard.personality.clocks"
     private const val BASE_CLOCK="com.oplus.keyguard.clock.base.ui.view.ClockTimeView"
+    private const val GALLERY_CLOCK="com.oplus.keyguard.clock.gallery.view.BaseSingleClockView"
+    private const val TEXT_CLOCK_TIME="com.oplus.keyguard.clock.text.widget.TextTimeTextView"
     private val clockGroups=setOf(BASE_CLOCK,"com.oplus.keyguard.clock.digital.ui.view.ClockTimeView")
     private val clockGlyphViews=setOf(
+        "com.oplus.keyguard.clock.base.widget.CustomizedTextView",
+        "com.oplus.keyguard.clock.common.widget.CustomizedTextView",
         "com.oplus.keyguard.clock.digital.widget.MyCustomizedTextView",
         "com.oplus.keyguard.clock.gallery.widget.MyCustomizedTextView",
         "com.oplus.keyguard.clock.text.widget.MyCustomizedTextView")
     private val stockClockDigits=setOf("tv_hour","tv_minute","tv_colon")
     private val clockBounds=RectF()
-    private val widgetLeafOwners=HashSet<Class<*>>()
+    private val clockGlyphOwners=HashSet<Pair<Class<*>,String>>()
+    private val clockGlyphTypes=HashMap<Class<*>,Boolean>()
+    private val clockGlyphs=WeakHashMap<View,Boolean>()
+    private val widgetCardTypes=HashMap<Class<*>,Boolean>()
     private val clockText=setOf("com.android.systemui.shared.clocks.AnimatableClockView","com.android.keyguard.AnimatableClockView")
     private val main=Handler(Looper.getMainLooper())
     private class Target {
@@ -73,7 +83,7 @@ internal object LockscreenGlass {
         var transitionMaterial:LockscreenMaterial?=null
         var pinKeys:Array<LockscreenMaterial?>?=null
         var glyph:ClockGlyphGlass?=null
-        var clockParent:WeakReference<ViewGroup>?=null
+        var widgetBackground:WeakReference<View>?=null
         private var widgetPaint:Paint?=null
         private var widgetTone:IconPalette.WallpaperTone?=null
         private var widgetTint:LockscreenSettings.WidgetTint?=null
@@ -132,8 +142,7 @@ internal object LockscreenGlass {
     private val capsuleMotion=WeakHashMap<View,CapsuleMotion>()
     private val rowMotion=WeakHashMap<View,CapsuleMotion>()
     private val transitionAdd=Paint().apply {blendMode=BlendMode.PLUS}
-    private val widgetRoots=WeakHashMap<ViewGroup,WeakReference<View>>()
-    private val widgetPlates=WeakHashMap<View,Boolean>()
+    private val widgetBackgrounds=WeakHashMap<View,WeakReference<ViewGroup>>()
     private var notificationId=View.NO_ID
     private var capsuleTitleId=View.NO_ID
     private var clockHostId=View.NO_ID
@@ -298,9 +307,10 @@ internal object LockscreenGlass {
             groupOverrides.clear()
             inspectedGroups.clear()
             hookedGroupOwners.clear()
-            widgetRoots.clear()
-            widgetPlates.clear()
-            widgetLeafOwners.clear()
+            clockGlyphOwners.clear()
+            clockGlyphTypes.clear()
+            clockGlyphs.clear()
+            clearWidgetBackgrounds()
         }else if(hooks.isEmpty()){
             try {installDrawing()}
             catch(t:Throwable){
@@ -311,9 +321,10 @@ internal object LockscreenGlass {
                 groupOverrides.clear()
                 inspectedGroups.clear()
                 hookedGroupOwners.clear()
-                widgetRoots.clear()
-                widgetPlates.clear()
-                widgetLeafOwners.clear()
+                clockGlyphOwners.clear()
+                clockGlyphTypes.clear()
+                clockGlyphs.clear()
+                clearWidgetBackgrounds()
                 profiles=emptyMap()
                 clearBouncer=false
                 GlassLogger.e("LockscreenGlass","Lockscreen hooks unavailable",t)
@@ -338,6 +349,7 @@ internal object LockscreenGlass {
             capsuleMotion.clear()
             rowMotion.clear()
             movingTargets.clear()
+            clearWidgetBackgrounds()
             views.values.forEach {it.discard()}
         }
         repaint()
@@ -360,9 +372,9 @@ internal object LockscreenGlass {
         repaint()
     }
     private fun repaint(){
-        views.strongSnapshot().forEach { (view,target)->
+        if(Surface.WIDGETS !in profiles)clearWidgetBackgrounds()
+        views.keys.weakSnapshot().forEach { view->
             if(view.isAttachedToWindow)view.invalidate()
-            target.clockParent?.get()?.takeIf {it.isAttachedToWindow}?.invalidate()
         }
     }
     fun diagnostics()="lockscreen profiles="+profiles.keys+", visible="+visible+", targets="+knownTargets+", rendered="+rendered+", wallpaper="+wallpaperSource
@@ -371,26 +383,40 @@ internal object LockscreenGlass {
         val loader=loader ?: return
         hook(ViewGroup::class.java,"dispatchDraw",arrayOf(Canvas::class.java),object:XC_MethodHook(){
             override fun beforeHookedMethod(p:MethodHookParam){
+                if(!visible || Looper.myLooper()!==Looper.getMainLooper())return
                 val view=p.thisObject as ViewGroup
-                if(visible && view.javaClass !in groupOverrides)beginGroup(p,view)
+                if(view.javaClass !in groupOverrides)beginGroup(p,view)
             }
             override fun afterHookedMethod(p:MethodHookParam){endGroup(p)}
+        })
+        hook(View::class.java,"onAttachedToWindow",emptyArray(),object:XC_MethodHook(){
+            override fun afterHookedMethod(p:MethodHookParam){
+                if(p.hasThrowable() || Looper.myLooper()!==Looper.getMainLooper())return
+                val view=p.thisObject as View
+                if(Surface.CLOCK in profiles)discoverClockGlyph(view)
+                if(Surface.WIDGETS in profiles && view is ViewGroup && isWidgetCard(view))hookGroupOverride(view.javaClass)
+            }
         })
         hook(ViewGroup::class.java,"drawChild",
             arrayOf(Canvas::class.java,View::class.java,Long::class.javaPrimitiveType!!),object:XC_MethodHook(){
                 override fun beforeHookedMethod(p:MethodHookParam){
-                    if(!visible || drawingClock || Surface.CLOCK !in profiles)return
+                    if(!visible || Looper.myLooper()!==Looper.getMainLooper())return
                     val child=p.args[1] as View
-                    val parent=p.thisObject as ViewGroup
-                    val name=child.javaClass.name
-                    if(name in clockGroups || name in clockText ||
-                        name in clockGlyphViews && belongsToClock(child) ||
-                        child is TextView && isStockClockDigit(child)){
-                        beginClockChild(p,parent,child)
-                    }
+                    if(Surface.CLOCK in profiles)discoverClockGlyph(child)
+                    if(Surface.WIDGETS in profiles && child is ViewGroup && isWidgetCard(child))hookGroupOverride(child.javaClass)
                 }
-                override fun afterHookedMethod(p:MethodHookParam){endClockChild(p)}
             })
+        hook(View::class.java,"drawBackground",arrayOf(Canvas::class.java),object:XC_MethodHook(){
+            override fun beforeHookedMethod(p:MethodHookParam){
+                if(!visible || Looper.myLooper()!==Looper.getMainLooper())return
+                val view=p.thisObject as View
+                val card=widgetBackgrounds[view]?.get() ?: return
+                val profile=profiles[Surface.WIDGETS] ?: return
+                if(LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.WIDGETS))!=true)return
+                val canvas=p.args[0] as Canvas
+                if(renderable(card,canvas) && isWidgetBackground(view,card))p.result=null
+            }
+        })
         val imageHook=object:XC_MethodHook(){
             override fun beforeHookedMethod(p:MethodHookParam){
                 if(!visible)return
@@ -578,7 +604,8 @@ internal object LockscreenGlass {
         val same=previous!=null && current[0]==previous.top && current[4]==previous.bottom
         val stockTop=if(same)previous!!.stockTop else current[0]
         val stockBottom=if(same)previous!!.stockBottom else current[4]
-        val radius=minOf(view.width,height)*corner/100f
+        // A zero-radius compositor update is ignored by ColorOS.
+        val radius=(minOf(view.width,height)*corner/100f).coerceAtLeast(.01f)
         val top=if(stockTop>0f)radius else 0f
         val bottom=if(stockBottom>0f)radius else 0f
         if(current[0]==top && current[4]==bottom)return
@@ -592,7 +619,8 @@ internal object LockscreenGlass {
         val view=p.thisObject as View
         if(notificationId!=View.NO_ID && view.id!=notificationId)return
         val row=view.parent as? View ?: return
-        if(row.id!=rowId && !row.javaClass.name.endsWith("ExpandableNotificationRow"))return
+        if((rowId==View.NO_ID || row.id!=rowId) &&
+            generateSequence(row.javaClass as Class<*>?) {it.superclass}.none {it.name==NOTIFICATION_ROW})return
         val canvas=p.args[0] as Canvas
         if(!renderable(view,canvas))return
         try {
@@ -606,19 +634,22 @@ internal object LockscreenGlass {
             fun inset(clip:String,overlap:String)=maxOf((NativeIconAccess.field(view,clip) as? Int ?: 0),
                 (NativeIconAccess.field(view,overlap) as? Int ?: 0),0)
             val top=inset("mClipTopAmount","mTopOverlap")
-            val bottom=actual-inset("mClipBottomAmount","mBottomOverlap")
+            val bottomInset=inset("mClipBottomAmount","mBottomOverlap")
+            val bottom=actual-bottomInset
             if(bottom<=top)return
             val width=(NativeIconAccess.call(view,"getActualWidth") as? Int ?: view.width).coerceIn(1,view.width)
             val left=if(NativeIconAccess.call(view,"isAlignedToRight")==true)view.width-width else 0
             val transition=rowMotion[row]?.progress ?: 0f
             if(transition>=.999f)return
-            p.setObjectExtra("cpiLockNotificationLayer",NotificationLayer(left,width,actual,top,bottom,transition))
+            val base=if(NativeIconAccess.field(view,"mBottomIsRounded")==true &&
+                NativeIconAccess.field(view,"mBottomAmountClips")==true)bottom else actual
+            p.setObjectExtra("cpiLockNotificationLayer",NotificationLayer(left,width,base,top,bottom,transition))
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","notification") {"Native notification kept: "+t.javaClass.simpleName}
         }
     }
 
-    private data class NotificationLayer(val left:Int,val width:Int,val actual:Int,val top:Int,val bottom:Int,val progress:Float)
+    private data class NotificationLayer(val left:Int,val width:Int,val height:Int,val top:Int,val bottom:Int,val progress:Float)
     private class CapsuleMotion(var progress:Float,var row:WeakReference<View>?=null)
 
     private fun updateCapsuleProgress(p:XC_MethodHook.MethodHookParam){
@@ -682,6 +713,7 @@ internal object LockscreenGlass {
 
     private val notificationPath=Path()
     private val notificationRadii=FloatArray(8)
+    private val nativeNotificationRect=RectF()
 
     private fun endNotification(p:XC_MethodHook.MethodHookParam){
         val layer=p.getObjectExtra("cpiLockNotificationLayer") as? NotificationLayer ?: return
@@ -693,33 +725,47 @@ internal object LockscreenGlass {
             val view=p.thisObject as View
             val frame=LockscreenBackdrop.frame ?: return
             if(!canvas.clipRect(layer.left,layer.top,layer.left+layer.width,layer.bottom))return
-            notificationBounds.set(layer.left.toFloat(),0f,(layer.left+layer.width).toFloat(),layer.actual.toFloat())
-            // ColorOS may draw the background through its compositor, outside
-            // a Canvas layer. Use the live geometry from the view, rather
-            // than assuming the native backdrop supplies alpha to SRC_ATOP.
-            val visibleHeight=(layer.bottom-layer.top).toFloat()
-            val maxRadius=minOf(layer.width.toFloat(),visibleHeight)*.30f
+            notificationBounds.set(layer.left.toFloat(),0f,(layer.left+layer.width).toFloat(),layer.height.toFloat())
+            val ext=NativeIconAccess.field(view,"mExt")
+            val base=NativeIconAccess.call(view,"getBaseBackgroundLayer") as? Drawable
+            val stackedMask=ext?.let {NativeIconAccess.call(it,"getStackedNotificationMaskColor") as? Int} ?: 0
+            val native=ext?.takeIf {stackedMask!=0}?.let {NativeIconAccess.call(it,"getOplusColorBg") as? Drawable}
+                ?.takeUnless {it.bounds.isEmpty} ?: base
+            native?.bounds?.let {bounds->
+                nativeNotificationRect.set(bounds)
+                if(!nativeNotificationRect.isEmpty && nativeNotificationRect.width()>=layer.width*.5f &&
+                    nativeNotificationRect.intersect(layer.left.toFloat(),0f,
+                        (layer.left+layer.width).toFloat(),layer.bottom.toFloat())){
+                    // Preserve the actual bounds, including the unshown portion
+                    // above a card clipped by the rest of the stack.
+                    notificationBounds.set(bounds)
+                }
+            }
+            val diameter=minOf(notificationBounds.width(),notificationBounds.height())
+            val maxRadius=diameter*.5f
             val nativeRadii=NativeIconAccess.field(view,"mCornerRadii") as? FloatArray
-            val fallback=minOf(layer.width.toFloat(),visibleHeight)*.22f
+            val fallback=diameter*.22f
             for(i in notificationRadii.indices){
                 val value=nativeRadii?.getOrNull(i)?.takeIf {it.isFinite()} ?: fallback
                 notificationRadii[i]=value.coerceIn(0f,maxRadius)
             }
             val radius=notificationRadii.maxOrNull() ?: fallback
             notificationPath.rewind()
-            val base=NativeIconAccess.call(view,"getBaseBackgroundLayer") as? Drawable
-            val nativeShape=base?.let {AlertContour.resolve(view,it)}
+            val nativeShape=native?.let {AlertContour.resolve(view,it)}
             val compatible=nativeShape?.nativePath==true &&
                 kotlin.math.abs(nativeShape.bounds.left-notificationBounds.left)<2f &&
                 kotlin.math.abs(nativeShape.bounds.right-notificationBounds.right)<2f &&
                 kotlin.math.abs(nativeShape.bounds.top-notificationBounds.top)<2f &&
                 kotlin.math.abs(nativeShape.bounds.bottom-notificationBounds.bottom)<2f
-            if(compatible)notificationPath.set(nativeShape!!.path)
+            if(compatible)notificationPath.set(nativeShape.path)
             else notificationPath.addRoundRect(notificationBounds,notificationRadii,Path.Direction.CW)
+            // The OEM contour is already rounded. Use it as the single alpha
+            // boundary instead of multiplying it by another rounded mask.
             if(layer.progress>0f && layer.progress<1f && Surface.CAPSULE in profiles){
                 drawHandoff(canvas,view,notificationBounds,radius,layer.progress,onCapsule=false,path=notificationPath)
             }else target(view,Surface.NOTIFICATIONS).material.draw(canvas,view,Surface.NOTIFICATIONS,profile,frame,
-                bounds=notificationBounds,nativeRadius=radius,useNativeMask=false,drawRim=false,exactPath=notificationPath)
+                bounds=notificationBounds,nativeRadius=radius,useNativeMask=false,drawRim=false,
+                exactPath=notificationPath)
             rendered.add(Surface.NOTIFICATIONS)
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","notification") {"Native notification kept: "+t.javaClass.simpleName}
@@ -772,10 +818,7 @@ internal object LockscreenGlass {
                     XposedHelpers.findClassIfExists(PLUGIN_SHORTCUT,view.javaClass.classLoader)?.let(::hookShortcut)
                 }
             }
-            name==INSTANT_CARD || name==WIDGET_CARD->{
-                if(Surface.WIDGETS in profiles && widgetPlate(view)===view)beginWidget(p,view)
-            }
-            widgetPlates.containsKey(view)->beginWidget(p,view)
+            Surface.WIDGETS in profiles && isWidgetCard(view)->beginWidget(p,view)
             pinClass?.isInstance(view)==true->{
                 var parent=view.parent
                 repeat(7){
@@ -791,7 +834,7 @@ internal object LockscreenGlass {
         }
     }
 
-    private fun beginWidget(p:XC_MethodHook.MethodHookParam,view:View){
+    private fun beginWidget(p:XC_MethodHook.MethodHookParam,view:ViewGroup){
         val profile=profiles[Surface.WIDGETS] ?: return
         val canvas=p.args[0] as Canvas
         if(!renderable(view,canvas))return
@@ -800,6 +843,7 @@ internal object LockscreenGlass {
         if(frame?.images?.containsKey(profile.sourceRadius(Surface.WIDGETS))==true){
             try {
                 target.material.draw(canvas,view,Surface.WIDGETS,profile,frame)
+                updateWidgetBackground(view,target)
                 rendered.add(Surface.WIDGETS)
             }catch(t:Throwable){GlassLogger.limited("LockscreenGlass","widgetDraw"){"Native widget kept: "+t.javaClass.simpleName}}
         }
@@ -824,72 +868,80 @@ internal object LockscreenGlass {
         return isHost
     }
 
-    private fun widgetPlate(root:ViewGroup):View {
-        val tolerance=(root.resources.displayMetrics.density*3).toInt()
-        val provider=runCatching {
-            NativeIconAccess.field(root,"instantCardWidget")?.let {NativeIconAccess.call(it,"getView")} as? View
-        }.getOrNull()?.takeIf {it.parent!=null && it.width>=root.width*.70f && it.height>=root.height*.70f}
-        var plate:View=provider ?: root
-        var deepestBackground:View?=plate.takeIf {it.background!=null}
-        for(depth in 0 until 12){
-            val wrapper=plate as? ViewGroup ?: break
-            var fullSize:View?=null
-            for(index in 0 until wrapper.childCount){
-                val child=wrapper.getChildAt(index)
-                if(child.visibility==View.VISIBLE && child.width>0 && child.height>0 &&
-                    kotlin.math.abs(child.width-wrapper.width)<=tolerance &&
-                    kotlin.math.abs(child.height-wrapper.height)<=tolerance &&
-                    kotlin.math.abs(child.left)<=tolerance && kotlin.math.abs(child.top)<=tolerance &&
-                    (child is ViewGroup || child.background!=null)){
-                    fullSize=child
-                    break
-                }
-            }
-            plate=fullSize ?: break
-            if(plate.background!=null)deepestBackground=plate
-        }
-        plate=deepestBackground ?: plate
-        val old=widgetRoots[root]?.get()
-        if(old!==plate){
-            if(old!=null)widgetPlates.remove(old)
-            if(plate!==root){
-                if(plate is ViewGroup)hookGroupOverride(plate.javaClass)
-                else if(!hookWidgetLeaf(plate.javaClass))plate=root
-                if(plate!==root)widgetPlates[plate]=true
-            }
-            widgetRoots[root]=WeakReference(plate)
-            GlassLogger.limited("LockscreenGlass","widget-plate") {"Widget glass layer: "+plate.javaClass.simpleName}
-        }
-        return plate
+    private fun isWidgetCard(view:View)=widgetCardTypes.getOrPut(view.javaClass){
+        view.javaClass.name.startsWith("com.oplus.keyguard.style.widgets.") &&
+            generateSequence(view.javaClass as Class<*>?) {it.superclass}
+                .takeWhile {it.name!=EMPTY_CARD}.any {it.name==WIDGET_CARD}
     }
 
-    private fun hookWidgetLeaf(type:Class<*>):Boolean {
-        val owner=generateSequence(type){it.superclass}.firstOrNull {candidate->
-            candidate.declaredMethods.any {it.name=="onDraw" && it.parameterTypes.contentEquals(arrayOf(Canvas::class.java))}
-        } ?: return false
-        if(owner==View::class.java)return false
-        return runCatching {
-            if(owner !in widgetLeafOwners){
-                hook(owner,"onDraw",arrayOf(Canvas::class.java),object:XC_MethodHook(){
-                    override fun beforeHookedMethod(p:MethodHookParam){
-                        val view=p.thisObject as View
-                        if(visible && view in widgetPlates)beginWidget(p,view)
-                    }
-                    override fun afterHookedMethod(p:MethodHookParam){endGroup(p)}
-                })
-                widgetLeafOwners.add(owner)
-            }
-            true
-        }.getOrDefault(false)
+    private fun isWidgetBackground(view:View,card:ViewGroup):Boolean {
+        val background=view.background ?: return false
+        if(view !is ViewGroup)return false
+        if(background !is ColorDrawable && background !is GradientDrawable &&
+            background.javaClass.name!="com.android.internal.graphics.drawable.BackgroundBlurDrawable")return false
+        var child:View=view
+        while(child!==card){
+            if(child.visibility!=View.VISIBLE || !fillsWidget(child,card))return false
+            child=child.parent as? View ?: return false
+        }
+        return true
+    }
+
+    private fun fillsWidget(view:View,card:ViewGroup):Boolean {
+        val tolerance=card.resources.displayMetrics.density*2
+        return view.width>0 && view.height>0 &&
+            kotlin.math.abs(view.width-card.width)<=tolerance &&
+            kotlin.math.abs(view.height-card.height)<=tolerance &&
+            kotlin.math.abs(view.left)<=tolerance && kotlin.math.abs(view.top)<=tolerance
+    }
+
+    private fun updateWidgetBackground(card:ViewGroup,target:Target){
+        // Card providers can replace their content view after loading. Only
+        // replace a full-size background, leaving provider drawing intact.
+        var wrapper=card
+        var plate:View?=null
+        while(wrapper.childCount==1){
+            val child=wrapper.getChildAt(0) as? ViewGroup ?: break
+            if(!fillsWidget(child,card))break
+            if(isWidgetBackground(child,card))plate=child
+            wrapper=child
+        }
+        val old=target.widgetBackground?.get()
+        if(old===plate)return
+        if(old!=null && widgetBackgrounds[old]?.get()===card){
+            widgetBackgrounds.remove(old)
+            old.invalidate()
+        }
+        target.widgetBackground=plate?.let(::WeakReference)
+        if(plate!=null){
+            widgetBackgrounds[plate]=WeakReference(card)
+            plate.invalidate()
+        }
+    }
+
+    private fun clearWidgetBackgrounds(){
+        val backgrounds=widgetBackgrounds.keys.weakSnapshot()
+        widgetBackgrounds.clear()
+        views.values.forEach {it.widgetBackground=null}
+        backgrounds.forEach {it.invalidate()}
     }
 
     private fun belongsToClock(view:View):Boolean {
+        if(view.javaClass.name==TEXT_CLOCK_TIME)return true
         var parent=view.parent as? View
         repeat(10){
             val group=parent ?: return false
-            if(group.javaClass.name in clockGroups || group is ViewGroup && isClockHost(group) ||
-                group.javaClass.name.startsWith("com.oplus.keyguard.clock.") &&
-                group.javaClass.name.endsWith(".ClockViewRoot"))return true
+            if(group.javaClass.name in clockGroups || group is ViewGroup && isClockHost(group))return true
+            if(group.javaClass.name.startsWith("com.oplus.keyguard.clock.gallery.view.") &&
+                generateSequence(group.javaClass as Class<*>?) {it.superclass}.any {it.name==GALLERY_CLOCK}){
+                // Gallery clocks use the same text class for time, date and
+                // the week label. Resolve the actual time view by identity.
+                return runCatching {
+                    NativeIconAccess.call(group,"getRealTimeView")===view ||
+                        NativeIconAccess.call(group,"getTimeTextView")===view ||
+                        NativeIconAccess.call(group,"getTimeTextViewExt")===view
+                }.getOrDefault(false)
+            }
             parent=group.parent as? View
         }
         return false
@@ -907,7 +959,8 @@ internal object LockscreenGlass {
                 hook(owner,"dispatchDraw",arrayOf(Canvas::class.java),object:XC_MethodHook(){
                     override fun beforeHookedMethod(p:MethodHookParam){
                         val view=p.thisObject as ViewGroup
-                        if(!visible || view.javaClass !in groupOverrides || !activeGroupOverrides.add(view))return
+                        if(!visible || Looper.myLooper()!==Looper.getMainLooper() ||
+                            view.javaClass !in groupOverrides || !activeGroupOverrides.add(view))return
                         p.setObjectExtra("cpiLockGroupOverride",true)
                         beginGroup(p,view)
                     }
@@ -945,30 +998,63 @@ internal object LockscreenGlass {
     private var drawingClock=false
 
     private fun isStockClockDigit(view:View):Boolean {
-        if(view.id==View.NO_ID ||
-            (view.parent?.parent as? View)?.javaClass?.name!="com.oplus.systemui.shared.clocks.RedHorizontalSingleClockView")return false
-        return runCatching {view.resources.getResourceEntryName(view.id) in stockClockDigits}.getOrDefault(false)
+        if(view !is TextView || view.id==View.NO_ID)return false
+        val inStockClock=generateSequence(view.parent as? View) {it.parent as? View}.take(5)
+            .any {it.javaClass.name=="com.oplus.systemui.shared.clocks.RedHorizontalSingleClockView"}
+        return inStockClock && runCatching {
+            view.resources.getResourceEntryName(view.id) in stockClockDigits
+        }.getOrDefault(false)
     }
 
-    private fun beginClockChild(p:XC_MethodHook.MethodHookParam,parent:ViewGroup,child:View){
+    private fun isClockGlyph(view:View):Boolean {
+        val type=view.javaClass
+        val custom=clockGlyphTypes.getOrPut(type){
+            type.name.startsWith("com.oplus.keyguard.clock.") &&
+                generateSequence(type as Class<*>?) {it.superclass}.any {it.name in clockGlyphViews}
+        }
+        return type.name in clockText || (if(custom)belongsToClock(view) else isStockClockDigit(view))
+    }
+
+    private fun discoverClockGlyph(view:View){
+        if(view !is TextView || view in clockGlyphs || !isClockGlyph(view))return
+        clockGlyphs[view]=true
+        val name=view.javaClass.name
+        // These plug-ins draw text from their own draw override, including
+        // animated drawable digits which need the same coverage as text.
+        val methodName=if(name.startsWith("com.oplus.keyguard.clock.gallery.widget.") ||
+            name.startsWith("com.oplus.keyguard.clock.text.widget."))"draw" else "onDraw"
+        val parameters=arrayOf<Class<*>>(Canvas::class.java)
+        runCatching {
+            val owner=generateSequence(view.javaClass as Class<*>?) {it.superclass}.firstOrNull {type->
+                type.declaredMethods.any {it.name==methodName && it.parameterTypes.contentEquals(parameters)}
+            } ?: return
+            if(owner==View::class.java)return
+            if(clockGlyphOwners.add(owner to methodName))hook(owner,methodName,parameters,object:XC_MethodHook(){
+                override fun beforeHookedMethod(p:MethodHookParam){
+                    if(!visible || drawingClock || Looper.myLooper()!==Looper.getMainLooper())return
+                    val glyph=p.thisObject as View
+                    if(isClockGlyph(glyph))beginClockGlyph(p,glyph)
+                }
+                override fun afterHookedMethod(p:MethodHookParam){endClockGlyph(p)}
+            })
+            view.invalidate()
+        }.onFailure {
+            GlassLogger.limited("LockscreenGlass","glyph-hook") {"Clock draw hook unavailable: "+it.javaClass.simpleName}
+        }
+    }
+
+    private fun beginClockGlyph(p:XC_MethodHook.MethodHookParam,view:View){
         val profile=profiles[Surface.CLOCK] ?: return
         val canvas=p.args[0] as Canvas
-        if(!renderable(child,canvas))return
-        val target=target(child,Surface.CLOCK)
-        if(target.clockParent?.get()!==parent)target.clockParent=WeakReference(parent)
-        movingTargets[parent]=true
+        if(!renderable(view,canvas))return
+        val target=target(view,Surface.CLOCK)
         val image=LockscreenBackdrop.frame?.images?.get(profile.sourceRadius(Surface.CLOCK)) ?: return
-        clockBounds.set(0f,0f,child.width.toFloat(),child.height.toFloat())
-        child.matrix.mapRect(clockBounds)
-        clockBounds.offset(child.left.toFloat(),child.top.toFloat())
-        val padding=parent.resources.displayMetrics.density*8f
-        clockBounds.inset(-padding,-padding)
-        if(clockBounds.isEmpty)return
+        clockBounds.set(0f,0f,view.width.toFloat(),view.height.toFloat())
 
         if(android.os.Build.VERSION.SDK_INT>=33){
             runCatching {
                 val glyph=target.glyph ?: ClockGlyphGlass().also {target.glyph=it}
-                val recording=glyph.record(parent,clockBounds,image,profile)
+                val recording=glyph.record(view,clockBounds,image,profile)
                 p.setObjectExtra("cpiClockCanvas",canvas)
                 p.setObjectExtra("cpiClockGlyph",glyph)
                 p.args[0]=recording
@@ -985,24 +1071,23 @@ internal object LockscreenGlass {
         drawingClock=true
     }
 
-    private fun endClockChild(p:XC_MethodHook.MethodHookParam){
+    private fun endClockGlyph(p:XC_MethodHook.MethodHookParam){
         val original=p.getObjectExtra("cpiClockCanvas") as? Canvas
         val saved=p.getObjectExtra("cpiClockLayer") as? Int
         if(original==null && saved==null)return
-        val child=p.args[1] as View
+        val view=p.thisObject as View
         try {
             if(original!=null && android.os.Build.VERSION.SDK_INT>=33){
                 val glyph=p.getObjectExtra("cpiClockGlyph") as ClockGlyphGlass
                 glyph.finish(original,!p.hasThrowable())
             }else if(saved!=null && !p.hasThrowable()){
-                val parent=p.thisObject as ViewGroup
                 val bounds=p.getObjectExtra("cpiClockBounds") as RectF
                 val profile=profiles[Surface.CLOCK] ?: return
-                views[child]?.material?.draw(p.args[0] as Canvas,parent,Surface.CLOCK,profile,
+                views[view]?.material?.draw(p.args[0] as Canvas,view,Surface.CLOCK,profile,
                     LockscreenBackdrop.frame,glyphs=true,bounds=bounds)
             }
             if(!p.hasThrowable() && rendered.add(Surface.CLOCK)){
-                GlassLogger.i("LockscreenGlass","Clock glass composited on "+child.javaClass.simpleName)
+                GlassLogger.i("LockscreenGlass","Clock glass applied to "+view.javaClass.simpleName)
             }
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","clock-composite") {"Clock render failed: "+t.javaClass.simpleName}
