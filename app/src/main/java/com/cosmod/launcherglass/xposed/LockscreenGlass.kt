@@ -11,6 +11,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.RenderEffect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -35,6 +36,7 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
+import java.lang.reflect.Method
 import java.util.WeakHashMap
 
 /** System UI render hooks. Authentication and notification contents stay in their native views. */
@@ -63,6 +65,8 @@ internal object LockscreenGlass {
     private const val BASE_CLOCK="com.oplus.keyguard.clock.base.ui.view.ClockTimeView"
     private const val GALLERY_CLOCK="com.oplus.keyguard.clock.gallery.view.BaseSingleClockView"
     private const val TEXT_CLOCK_TIME="com.oplus.keyguard.clock.text.widget.TextTimeTextView"
+    private const val CLOCK_EFFECT_HELPER="com.oplus.keyguard.clock.common.view.livecontent.effect.shader.glass.GlassEffectHelper"
+    private const val CARD_CSS_BACKGROUND="org.hapjs.component.view.drawable.CSSBackgroundDrawable"
     private val clockGroups=setOf(BASE_CLOCK,"com.oplus.keyguard.clock.digital.ui.view.ClockTimeView")
     private val clockGlyphViews=setOf(
         "com.oplus.keyguard.clock.base.widget.CustomizedTextView",
@@ -75,6 +79,13 @@ internal object LockscreenGlass {
     private val clockGlyphOwners=HashSet<Pair<Class<*>,String>>()
     private val clockGlyphTypes=HashMap<Class<*>,Boolean>()
     private val clockGlyphs=WeakHashMap<View,Boolean>()
+    private val clockEffectLoaders=HashSet<ClassLoader>()
+    private val nativeClockEffects=WeakHashMap<View,RenderEffect>()
+    private val compositedClocks=WeakHashMap<View,RenderEffect>()
+    private val clockPosition=IntArray(2)
+    private val mountPosition=IntArray(2)
+    private var clockRefreshPending=false
+    private val clockLayoutChanged=View.OnLayoutChangeListener { _,_,_,_,_,_,_,_,_->scheduleClockRefresh() }
     private val widgetCardTypes=HashMap<Class<*>,Boolean>()
     private val clockText=setOf("com.android.systemui.shared.clocks.AnimatableClockView","com.android.keyguard.AnimatableClockView")
     private val main=Handler(Looper.getMainLooper())
@@ -83,7 +94,8 @@ internal object LockscreenGlass {
         var transitionMaterial:LockscreenMaterial?=null
         var pinKeys:Array<LockscreenMaterial?>?=null
         var glyph:ClockGlyphGlass?=null
-        var widgetBackground:WeakReference<View>?=null
+        val widgetBackgrounds=ArrayList<WeakReference<View>>()
+        val nextWidgetBackgrounds=ArrayList<View>()
         private var widgetPaint:Paint?=null
         private var widgetTone:IconPalette.WallpaperTone?=null
         private var widgetTint:LockscreenSettings.WidgetTint?=null
@@ -143,6 +155,10 @@ internal object LockscreenGlass {
     private val rowMotion=WeakHashMap<View,CapsuleMotion>()
     private val transitionAdd=Paint().apply {blendMode=BlendMode.PLUS}
     private val widgetBackgrounds=WeakHashMap<View,WeakReference<ViewGroup>>()
+    private val nativeWidgetEffects=WeakHashMap<View,RenderEffect>()
+    private val suppressedWidgetEffects=WeakHashMap<View,Boolean>()
+    private var widgetEffectSetter:Method?=null
+    private var restoringWidgetEffect=false
     private var notificationId=View.NO_ID
     private var capsuleTitleId=View.NO_ID
     private var clockHostId=View.NO_ID
@@ -309,8 +325,13 @@ internal object LockscreenGlass {
             hookedGroupOwners.clear()
             clockGlyphOwners.clear()
             clockGlyphTypes.clear()
-            clockGlyphs.clear()
+            clearClockGlyphs()
+            clockEffectLoaders.clear()
+            restoreNativeClocks()
+            nativeClockEffects.clear()
             clearWidgetBackgrounds()
+            nativeWidgetEffects.clear()
+            widgetEffectSetter=null
         }else if(hooks.isEmpty()){
             try {installDrawing()}
             catch(t:Throwable){
@@ -323,8 +344,13 @@ internal object LockscreenGlass {
                 hookedGroupOwners.clear()
                 clockGlyphOwners.clear()
                 clockGlyphTypes.clear()
-                clockGlyphs.clear()
+                clearClockGlyphs()
+                clockEffectLoaders.clear()
+                restoreNativeClocks()
+                nativeClockEffects.clear()
                 clearWidgetBackgrounds()
+                nativeWidgetEffects.clear()
+                widgetEffectSetter=null
                 profiles=emptyMap()
                 clearBouncer=false
                 GlassLogger.e("LockscreenGlass","Lockscreen hooks unavailable",t)
@@ -344,6 +370,7 @@ internal object LockscreenGlass {
         visible=show
         wallpaperRetry=false
         if(show)prepareWallpaper()else{
+            restoreNativeClocks()
             LockscreenBackdrop.stop()
             restoreNotificationCorners()
             capsuleMotion.clear()
@@ -373,14 +400,22 @@ internal object LockscreenGlass {
     }
     private fun repaint(){
         if(Surface.WIDGETS !in profiles)clearWidgetBackgrounds()
+        else if(visible)refreshWidgetEffects()
+        if(Surface.CLOCK !in profiles || !visible)restoreNativeClocks()
+        else if(android.os.Build.VERSION.SDK_INT>=33)nativeClockEffects.strongSnapshot().forEach { (view,effect)->
+            if(view.isAttachedToWindow)applyClockEffect(view,effect)
+        }
         views.keys.weakSnapshot().forEach { view->
             if(view.isAttachedToWindow)view.invalidate()
         }
     }
-    fun diagnostics()="lockscreen profiles="+profiles.keys+", visible="+visible+", targets="+knownTargets+", rendered="+rendered+", wallpaper="+wallpaperSource
+    fun diagnostics()="lockscreen profiles="+profiles.keys+", visible="+visible+", targets="+knownTargets+", rendered="+rendered+
+        ", wallpaper="+wallpaperSource+", clock mounts="+compositedClocks.size+", widget plates="+widgetBackgrounds.size+
+        ", widget compositor="+suppressedWidgetEffects.size
 
     private fun installDrawing(){
         val loader=loader ?: return
+        installWidgetEffectHook(loader)
         hook(ViewGroup::class.java,"dispatchDraw",arrayOf(Canvas::class.java),object:XC_MethodHook(){
             override fun beforeHookedMethod(p:MethodHookParam){
                 if(!visible || Looper.myLooper()!==Looper.getMainLooper())return
@@ -877,8 +912,10 @@ internal object LockscreenGlass {
     private fun isWidgetBackground(view:View,card:ViewGroup):Boolean {
         val background=view.background ?: return false
         if(view !is ViewGroup)return false
+        val className=background.javaClass.name
         if(background !is ColorDrawable && background !is GradientDrawable &&
-            background.javaClass.name!="com.android.internal.graphics.drawable.BackgroundBlurDrawable")return false
+            className!=CARD_CSS_BACKGROUND && !className.startsWith("com.oplus.posteffect.") &&
+            className!="com.android.internal.graphics.drawable.BackgroundBlurDrawable")return false
         var child:View=view
         while(child!==card){
             if(child.visibility!=View.VISIBLE || !fillsWidget(child,card))return false
@@ -896,34 +933,134 @@ internal object LockscreenGlass {
     }
 
     private fun updateWidgetBackground(card:ViewGroup,target:Target){
-        // Card providers can replace their content view after loading. Only
-        // replace a full-size background, leaving provider drawing intact.
-        var wrapper=card
-        var plate:View?=null
-        while(wrapper.childCount==1){
-            val child=wrapper.getChildAt(0) as? ViewGroup ?: break
-            if(!fillsWidget(child,card))break
-            if(isWidgetBackground(child,card))plate=child
-            wrapper=child
+        val next=target.nextWidgetBackgrounds
+        next.clear()
+        collectWidgetBackgrounds(card,card,next,0)
+        val previous=target.widgetBackgrounds
+        if(previous.size==next.size && previous.indices.all {previous[it].get()===next[it]}){
+            next.clear()
+            return
         }
-        val old=target.widgetBackground?.get()
-        if(old===plate)return
-        if(old!=null && widgetBackgrounds[old]?.get()===card){
-            widgetBackgrounds.remove(old)
-            old.invalidate()
+        for(reference in previous){
+            val old=reference.get() ?: continue
+            if(old !in next && widgetBackgrounds[old]?.get()===card){
+                widgetBackgrounds.remove(old)
+                if(old!==card)old.invalidate()
+            }
         }
-        target.widgetBackground=plate?.let(::WeakReference)
-        if(plate!=null){
-            widgetBackgrounds[plate]=WeakReference(card)
-            plate.invalidate()
+        previous.clear()
+        for(plate in next){
+            previous.add(WeakReference(plate))
+            if(widgetBackgrounds[plate]?.get()!==card){
+                widgetBackgrounds[plate]=WeakReference(card)
+                plate.postInvalidateOnAnimation()
+                val background=plate.background?.javaClass?.name
+                GlassLogger.limited("LockscreenGlass","widget-bg-"+background){
+                    "Replacing widget background "+background
+                }
+            }
+        }
+        next.clear()
+        refreshWidgetEffects()
+    }
+
+    private fun collectWidgetBackgrounds(
+        wrapper:ViewGroup,card:ViewGroup,result:MutableList<View>,depth:Int
+    ){
+        if(isWidgetBackground(wrapper,card))result.add(wrapper)
+        if(depth>=12)return
+        for(index in 0 until wrapper.childCount){
+            val child=wrapper.getChildAt(index) as? ViewGroup ?: continue
+            if(child.visibility==View.VISIBLE && fillsWidget(child,card)){
+                collectWidgetBackgrounds(child,card,result,depth+1)
+            }
         }
     }
 
     private fun clearWidgetBackgrounds(){
         val backgrounds=widgetBackgrounds.keys.weakSnapshot()
         widgetBackgrounds.clear()
-        views.values.forEach {it.widgetBackground=null}
+        views.values.forEach {it.widgetBackgrounds.clear()}
         backgrounds.forEach {it.invalidate()}
+        suppressedWidgetEffects.keys.weakSnapshot().forEach { setWidgetEffectSuppressed(it,false) }
+    }
+
+    private fun installWidgetEffectHook(loader:ClassLoader){
+        runCatching {
+            val type=XposedHelpers.findClassIfExists("com.oplus.view.OplusViewBackgroundRenderEffect",loader) ?: return
+            val method=type.getDeclaredMethod("setBackgroundRenderEffect",RenderEffect::class.java,View::class.java)
+            hooks+=XposedBridge.hookMethod(method,object:XC_MethodHook(){
+                override fun beforeHookedMethod(p:MethodHookParam){
+                    if(restoringWidgetEffect || Looper.myLooper()!==Looper.getMainLooper())return
+                    val view=p.args[1] as? View ?: return
+                    val card=findWidgetCard(view) ?: return
+                    val effect=p.args[0] as? RenderEffect
+                    if(effect==null){
+                        nativeWidgetEffects.remove(view)
+                        suppressedWidgetEffects.remove(view)
+                    }else{
+                        nativeWidgetEffects[view]=effect
+                        if(shouldReplaceWidgetEffect(view,card)){
+                            p.args[0]=null
+                            suppressedWidgetEffects[view]=true
+                            logWidgetEffect(view)
+                        }
+                    }
+                }
+            })
+            widgetEffectSetter=method
+        }.onFailure {
+            GlassLogger.limited("LockscreenGlass","widget-effect-hook") {"Native widget effect kept: "+it.javaClass.simpleName}
+        }
+    }
+
+    private fun findWidgetCard(view:View):ViewGroup? {
+        var parent:View?=view
+        repeat(12){
+            val node=parent ?: return null
+            if(node is ViewGroup && isWidgetCard(node))return node
+            parent=node.parent as? View
+        }
+        return null
+    }
+
+    private fun shouldReplaceWidgetEffect(view:View,card:ViewGroup):Boolean {
+        if(!visible || !card.isShown)return false
+        val profile=profiles[Surface.WIDGETS] ?: return false
+        if(LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.WIDGETS))!=true)return false
+        var child=view
+        while(child!==card){
+            if(!fillsWidget(child,card))return false
+            child=child.parent as? View ?: return false
+        }
+        return true
+    }
+
+    private fun refreshWidgetEffects(){
+        for(view in nativeWidgetEffects.keys.weakSnapshot()){
+            val card=findWidgetCard(view)
+            val suppress=card!=null && shouldReplaceWidgetEffect(view,card)
+            if(suppress!=(view in suppressedWidgetEffects))setWidgetEffectSuppressed(view,suppress)
+        }
+    }
+
+    private fun setWidgetEffectSuppressed(view:View,suppress:Boolean){
+        val setter=widgetEffectSetter ?: return
+        val native=nativeWidgetEffects[view] ?: return
+        restoringWidgetEffect=true
+        try {
+            setter.invoke(null,if(suppress)null else native,view)
+            if(suppress){
+                suppressedWidgetEffects[view]=true
+                logWidgetEffect(view)
+            }else suppressedWidgetEffects.remove(view)
+        }catch(t:Throwable){
+            GlassLogger.limited("LockscreenGlass","widget-effect-update") {"Native widget effect kept: "+t.javaClass.simpleName}
+        }finally {restoringWidgetEffect=false}
+    }
+
+    private fun logWidgetEffect(view:View){
+        GlassLogger.limited("LockscreenGlass","widget-native-effect") {"Replacing widget compositor material on "+view.javaClass.simpleName}
     }
 
     private fun belongsToClock(view:View):Boolean {
@@ -997,6 +1134,110 @@ internal object LockscreenGlass {
 
     private var drawingClock=false
 
+    private fun scheduleClockRefresh(){
+        if(clockRefreshPending || !visible || Surface.CLOCK !in profiles)return
+        clockRefreshPending=true
+        Choreographer.getInstance().postFrameCallback {
+            clockRefreshPending=false
+            if(visible && Surface.CLOCK in profiles && android.os.Build.VERSION.SDK_INT>=33){
+                nativeClockEffects.strongSnapshot().forEach { (view,effect)->
+                    if(view.isAttachedToWindow)applyClockEffect(view,effect)
+                }
+            }
+        }
+    }
+
+    private fun hookClockEffects(view:View){
+        if(android.os.Build.VERSION.SDK_INT<33)return
+        val classLoader=view.javaClass.classLoader ?: return
+        if(!clockEffectLoaders.add(classLoader))return
+        val helper=XposedHelpers.findClassIfExists(CLOCK_EFFECT_HELPER,classLoader) ?: return
+        runCatching {
+            hook(helper,"setRenderEffectImpl",emptyArray(),object:XC_MethodHook(){
+                override fun afterHookedMethod(p:MethodHookParam){
+                    if(p.hasThrowable() || Looper.myLooper()!==Looper.getMainLooper())return
+                    runCatching {
+                        val mounts=NativeIconAccess.field(p.thisObject,"effectMap") as? Map<*,*> ?: return
+                        for((mount,builder) in mounts){
+                            val view=mount as? View ?: continue
+                            if(builder==null)continue
+                            val native=NativeIconAccess.call(builder,"getRenderEffect") as? RenderEffect ?: continue
+                            nativeClockEffects[view]=native
+                            if(visible)applyClockEffect(view,native,force=true)
+                        }
+                    }.onFailure {
+                        GlassLogger.limited("LockscreenGlass","native-clock-mount") {"Native clock effect kept: "+it.javaClass.simpleName}
+                    }
+                }
+            })
+            hooks+=XposedBridge.hookAllMethods(helper,"releaseBuilder",object:XC_MethodHook(){
+                override fun afterHookedMethod(p:MethodHookParam){
+                    if(Looper.myLooper()!==Looper.getMainLooper())return
+                    val view=p.args.firstOrNull() as? View ?: return
+                    nativeClockEffects.remove(view)
+                    compositedClocks.remove(view)
+                }
+            })
+        }.onFailure {
+            GlassLogger.limited("LockscreenGlass","native-clock-hook") {"Native clock reversal unavailable: "+it.javaClass.simpleName}
+        }
+    }
+
+    @androidx.annotation.RequiresApi(33)
+    private fun applyClockEffect(view:View,native:RenderEffect,force:Boolean=false){
+        val profile=profiles[Surface.CLOCK] ?: return
+        if(view.width<=0 || view.height<=0 || view.display?.displayId!=Display.DEFAULT_DISPLAY)return
+        val wallpaper=LockscreenBackdrop.frame?.images?.get(profile.sourceRadius(Surface.CLOCK)) ?: return
+        runCatching {
+            view.getLocationOnScreen(mountPosition)
+            var top=Int.MAX_VALUE
+            var bottom=Int.MIN_VALUE
+            for(digit in clockGlyphs.keys.weakSnapshot()){
+                if(!digit.isShown || digit.alpha<=.01f || digit.width<=0 || digit.height<=0)continue
+                var parent:View?=digit
+                while(parent!=null && parent!==view)parent=parent.parent as? View
+                if(parent!==view)continue
+                digit.getLocationOnScreen(clockPosition)
+                val y=clockPosition[1]-mountPosition[1]
+                top=minOf(top,y)
+                bottom=maxOf(bottom,y+digit.height)
+            }
+            if(bottom<=top)return
+            val target=target(view,Surface.CLOCK)
+            val glyph=target.glyph ?: ClockGlyphGlass().also {target.glyph=it}
+            val effect=glyph.afterNative(view,wallpaper,profile,native,
+                top.coerceAtLeast(0).toFloat(),bottom.coerceAtMost(view.height).toFloat())
+            if(force || compositedClocks[view]!==effect){
+                view.setRenderEffect(effect)
+                compositedClocks[view]=effect
+            }
+            if(rendered.add(Surface.CLOCK)){
+                GlassLogger.i("LockscreenGlass","Clock glass chained after ColorOS on "+view.javaClass.simpleName)
+            }
+        }.onFailure {
+            GlassLogger.limited("LockscreenGlass","native-clock-chain") {"Native clock effect kept: "+it.javaClass.simpleName}
+        }
+    }
+
+    private fun restoreNativeClocks(){
+        if(android.os.Build.VERSION.SDK_INT<33)return
+        val mounts=compositedClocks.keys.weakSnapshot()
+        compositedClocks.clear()
+        for(view in mounts){
+            val effect=nativeClockEffects[view] ?: continue
+            runCatching {view.setRenderEffect(effect)}
+        }
+    }
+
+    private fun hasNativeClockEffect(view:View):Boolean {
+        var parent:View?=view
+        while(parent!=null){
+            if(parent in nativeClockEffects)return true
+            parent=parent.parent as? View
+        }
+        return false
+    }
+
     private fun isStockClockDigit(view:View):Boolean {
         if(view !is TextView || view.id==View.NO_ID)return false
         val inStockClock=generateSequence(view.parent as? View) {it.parent as? View}.take(5)
@@ -1016,8 +1257,13 @@ internal object LockscreenGlass {
     }
 
     private fun discoverClockGlyph(view:View){
+        if(view.javaClass.name in clockGroups)hookClockEffects(view)
         if(view !is TextView || view in clockGlyphs || !isClockGlyph(view))return
+        if(view.javaClass.name.startsWith("com.oplus.keyguard.clock."))hookClockEffects(view)
         clockGlyphs[view]=true
+        view.removeOnLayoutChangeListener(clockLayoutChanged)
+        view.addOnLayoutChangeListener(clockLayoutChanged)
+        if(hasNativeClockEffect(view))scheduleClockRefresh()
         val name=view.javaClass.name
         // These plug-ins draw text from their own draw override, including
         // animated drawable digits which need the same coverage as text.
@@ -1045,6 +1291,9 @@ internal object LockscreenGlass {
 
     private fun beginClockGlyph(p:XC_MethodHook.MethodHookParam,view:View){
         val profile=profiles[Surface.CLOCK] ?: return
+        // ColorOS encodes digit regions in the original glyph colors.
+        // Leave them available to its shader and apply CPI after decoding.
+        if(hasNativeClockEffect(view))return
         val canvas=p.args[0] as Canvas
         if(!renderable(view,canvas))return
         val target=target(view,Surface.CLOCK)
@@ -1069,6 +1318,11 @@ internal object LockscreenGlass {
         p.setObjectExtra("cpiClockLayer",canvas.saveLayer(clockBounds,null))
         p.setObjectExtra("cpiClockBounds",RectF(clockBounds))
         drawingClock=true
+    }
+
+    private fun clearClockGlyphs(){
+        clockGlyphs.keys.weakSnapshot().forEach {it.removeOnLayoutChangeListener(clockLayoutChanged)}
+        clockGlyphs.clear()
     }
 
     private fun endClockGlyph(p:XC_MethodHook.MethodHookParam){
