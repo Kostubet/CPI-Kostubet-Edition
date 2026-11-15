@@ -1183,8 +1183,8 @@ internal object LockscreenGlass {
         }
     }
 
-    @androidx.annotation.RequiresApi(33)
     private fun applyClockEffect(view:View,native:RenderEffect,force:Boolean=false){
+        if(android.os.Build.VERSION.SDK_INT<33)return
         val profile=profiles[Surface.CLOCK] ?: return
         if(view.width<=0 || view.height<=0 || view.display?.displayId!=Display.DEFAULT_DISPLAY)return
         val wallpaper=LockscreenBackdrop.frame?.images?.get(profile.sourceRadius(Surface.CLOCK)) ?: return
