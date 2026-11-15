@@ -56,13 +56,16 @@ internal object LockscreenBackdrop {
         launch()
     }
 
-    fun stop(){
+    fun stop(retainClockRadius:Int?=null){
         if(desired==null && frame==null)return
         revision++
         main.removeCallbacks(refreshLive)
         desired=null
         pending=null
-        frame=null
+        val last=frame
+        frame=if(retainClockRadius!=null && last?.source=="file" && !last.live){
+            last.images[retainClockRadius]?.let {last.copy(images=mapOf(retainClockRadius to it))}
+        }else null
     }
 
     private fun launch(){

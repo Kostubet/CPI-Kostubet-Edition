@@ -1716,8 +1716,8 @@ class MainActivity : AppCompatActivity() {
                 add(details,liquid)
                 if(surface!=LockscreenSettings.Surface.CLOCK){
                     opticalSection(details,surface.edgeSurface,getString(R.string.edge_title))
-                    darkContourSection(details,surface.edgeSurface,getString(R.string.ui_dark_contour))
                 }
+                darkContourSection(details,surface.edgeSurface,getString(R.string.ui_dark_contour))
             }
         }
     }
