@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reuse a bounded static backdrop across AOD wake and optimize live wallpaper sampling for lock screen glass. Preserve the native clock rendering when Colorful Engine combines the clock with the wallpaper.
 - Fade in each lock screen glass surface when waking from AOD. Coordinate the clock material with the native ColorOS unlock transition.
 - Fade in clock glass on wake and blend back to the native clock during unlock. Improve glyph contrast and add independent dark contour controls for the lock screen clock.
 - Reworked lock screen glass to use native clock glyphs, keep the red OnePlus accent, and follow notification bounds as cards stack. Widget glass now stays attached to its card when the provider reloads.

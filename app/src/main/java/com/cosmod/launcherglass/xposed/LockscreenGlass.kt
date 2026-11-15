@@ -43,6 +43,7 @@ import de.robv.android.xposed.XposedHelpers
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.util.WeakHashMap
+import kotlin.math.roundToInt
 
 /** System UI render hooks. Authentication and notification contents stay in their native views. */
 internal object LockscreenGlass {
@@ -108,7 +109,7 @@ internal object LockscreenGlass {
     private val widgetCardTypes=HashMap<Class<*>,Boolean>()
     private val clockText=setOf("com.android.systemui.shared.clocks.AnimatableClockView","com.android.keyguard.AnimatableClockView")
     private val main=Handler(Looper.getMainLooper())
-    private class Target {
+    private class Target(val surface:Surface) {
         val material=LockscreenMaterial()
         var transitionMaterial:LockscreenMaterial?=null
         var pinKeys:Array<LockscreenMaterial?>?=null
@@ -415,7 +416,7 @@ internal object LockscreenGlass {
                 (clockAmount>0f || clockAnimator!=null)){
                 finishClockTransition()
             }
-            if(!show && (!locked || Surface.CLOCK !in profiles) && clockAnimator==null && clockHandoff==null)LockscreenBackdrop.stop()
+            if(!show && (!locked || profiles.isEmpty()) && clockAnimator==null && clockHandoff==null)LockscreenBackdrop.stop()
             return
         }
         visible=show
@@ -454,11 +455,11 @@ internal object LockscreenGlass {
         }
         surfaceEntrances++
         surfaceAnimator=ValueAnimator.ofFloat(surfaceAmount,1f).apply {
-            duration=365L
+            duration=440L
             interpolator=clockTransitionCurve
             addUpdateListener {
                 surfaceAmount=it.animatedValue as Float
-                for(view in views.keys)if(view.isShown)view.invalidate()
+                for((view,target) in views)if(target.surface!=Surface.CLOCK && view.isShown)view.invalidate()
                 for(plate in widgetBackgrounds.keys)if(plate.isShown)plate.invalidate()
             }
             addListener(object:AnimatorListenerAdapter(){
@@ -479,7 +480,7 @@ internal object LockscreenGlass {
         if(clockAnimator!=null && clockDestination==1f || clockAnimator==null && clockAmount>=1f)return
         if(ValueAnimator.areAnimatorsEnabled()){
             clockEntrances++
-            animateClock(1f,365L)
+            animateClock(1f,440L)
         }else{
             clockAmount=1f
             refreshClockMaterial()
@@ -521,13 +522,14 @@ internal object LockscreenGlass {
         releasedClockMounts.clear()
         clockGlyphs.keys.weakSnapshot().forEach {if(it.isAttachedToWindow)it.invalidate()}
         if(!visible){
-            // Keep a single static sample during AOD. The clock can start
-            // fading in before the other surfaces finish preparing their blur.
+            // Keep a bounded static backdrop ready for the next wake.
+            // Live wallpaper capture and blur jobs stop in AOD.
             val sleeping=(!interactive || dozing) && !keyguardOccluded &&
                 (keyguardShowing ?: (keyguard?.isKeyguardLocked==true))
-            val clockRadius=profiles[Surface.CLOCK]?.sourceRadius(Surface.CLOCK)?.takeIf {sleeping}
-            LockscreenBackdrop.stop(clockRadius)
-            views.values.forEach {it.discard()}
+            val clockRadius=profiles[Surface.CLOCK]?.sourceRadius(Surface.CLOCK)
+            if(!LockscreenBackdrop.stop(keepStatic=sleeping,clockRadius=clockRadius)){
+                views.values.forEach {it.discard()}
+            }
         }
     }
 
@@ -561,7 +563,7 @@ internal object LockscreenGlass {
         ", wallpaper="+wallpaperSource+", clock mounts="+compositedClocks.size+", widget plates="+widgetBackgrounds.size+
         ", widget compositor="+suppressedWidgetEffects.size+", clock amount="+clockAmount+
         ", clock wake="+clockEntrances+", clock exit="+clockExits+", clock handoff="+clockHandoffs+
-        ", surface amount="+surfaceAmount+", surface wake="+surfaceEntrances
+        ", surface amount="+surfaceAmount+", surface wake="+surfaceEntrances+", wake cache hits="+LockscreenBackdrop.cacheHits
 
     private fun installDrawing(){
         val loader=loader ?: return
@@ -1045,8 +1047,8 @@ internal object LockscreenGlass {
         movingTargets[view]=true
         val tint=profile.widgetTint ?: return
         val tone=frame?.wallpaperTone ?: return
-        val paint=target.tintPaint(tone,tint) ?: return
-        if(surfaceAmount<1f)return
+        val transparency=100-((100-tint.transparency)*surfaceAmount).roundToInt()
+        val paint=target.tintPaint(tone,if(transparency==tint.transparency)tint else tint.copy(transparency=transparency)) ?: return
         p.setObjectExtra("cpiLockWidgetLayer",canvas.saveLayer(0f,0f,view.width.toFloat(),view.height.toFloat(),paint))
     }
 
@@ -1277,7 +1279,7 @@ internal object LockscreenGlass {
         view.display?.displayId==Display.DEFAULT_DISPLAY
 
     private fun target(view:View,surface:Surface):Target {
-        val target=views.getOrPut(view){Target()}
+        val target=views.getOrPut(view){Target(surface)}
         if(knownTargets.add(surface))GlassLogger.i("LockscreenGlass","Found "+surface.id+" on "+view.javaClass.simpleName)
         return target
     }
@@ -1415,7 +1417,15 @@ internal object LockscreenGlass {
         if(android.os.Build.VERSION.SDK_INT<33 || clockAmount<=0f)return
         val profile=profiles[Surface.CLOCK] ?: return
         if(view.width<=0 || view.height<=0 || view.display?.displayId!=Display.DEFAULT_DISPLAY)return
-        val wallpaper=LockscreenBackdrop.frame?.images?.get(profile.sourceRadius(Surface.CLOCK)) ?: return
+        val frame=LockscreenBackdrop.frame ?: return
+        // Colorful Engine already refracts its own live backdrop at native
+        // resolution. Sampling its final frame into the glyph would feed the
+        // mirrored digit texture back into the clock.
+        if(frame.livePackage==LockscreenBackdrop.COLORFUL_ENGINE){
+            if(compositedClocks.remove(view)!=null)view.setRenderEffect(native)
+            return
+        }
+        val wallpaper=frame.images[profile.sourceRadius(Surface.CLOCK)] ?: return
         runCatching {
             view.getLocationOnScreen(mountPosition)
             var top=Int.MAX_VALUE
@@ -1519,6 +1529,7 @@ internal object LockscreenGlass {
 
     private fun beginClockGlyph(p:XC_MethodHook.MethodHookParam,view:View){
         val profile=profiles[Surface.CLOCK] ?: return
+        if(LockscreenBackdrop.frame?.livePackage==LockscreenBackdrop.COLORFUL_ENGINE)return
         // ColorOS encodes digit regions in the original glyph colors.
         // Leave them available to its shader and apply CPI after decoding.
         if(hasNativeClockEffect(view))return
