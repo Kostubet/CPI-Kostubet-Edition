@@ -93,6 +93,13 @@ internal object LockscreenGlass {
     private var clockAnimator:ValueAnimator?=null
     private var clockAmount=0f
     private var clockDestination=0f
+    private var surfaceAnimator:ValueAnimator?=null
+    private var surfaceAmount=0f
+    private var surfaceEntrances=0
+    private var clockHandoff:Any?=null
+    private var clockHandoffs=0
+    private val releasedClockMounts=WeakHashMap<View,Boolean>()
+    private val finishClockHandoff=Runnable {endClockHandoff()}
     private var clockContour=ClockDarkContour()
     private val clockTransitionCurve=PathInterpolator(.28f,0f,.36f,1f)
     private var clockEntrances=0
@@ -408,7 +415,7 @@ internal object LockscreenGlass {
                 (clockAmount>0f || clockAnimator!=null)){
                 finishClockTransition()
             }
-            if(!show && (!locked || Surface.CLOCK !in profiles) && clockAnimator==null)LockscreenBackdrop.stop()
+            if(!show && (!locked || Surface.CLOCK !in profiles) && clockAnimator==null && clockHandoff==null)LockscreenBackdrop.stop()
             return
         }
         visible=show
@@ -416,11 +423,16 @@ internal object LockscreenGlass {
         if(show){
             prepareWallpaper()
             showClockWhenReady()
+            showSurfacesWhenReady()
         }else{
+            val fade=surfaceAnimator
+            surfaceAnimator=null
+            fade?.cancel()
+            surfaceAmount=0f
             if(interactive && !dozing && !keyguardOccluded && !locked &&
                 Surface.CLOCK in profiles && clockAmount>0f && ValueAnimator.areAnimatorsEnabled()){
                 clockExits++
-                animateClock(0f,(26000L/unlockSpeed).coerceIn(180L,380L))
+                if(clockHandoff==null)animateClock(0f,(32000L/unlockSpeed).coerceIn(220L,460L))
             }else finishClockTransition()
             restoreNotificationCorners()
             capsuleMotion.clear()
@@ -431,9 +443,38 @@ internal object LockscreenGlass {
         repaint()
     }
 
+    private fun showSurfacesWhenReady(){
+        if(!visible || surfaceAmount>=1f || surfaceAnimator!=null)return
+        val images=LockscreenBackdrop.frame?.images ?: return
+        if(profiles.none {(surface,profile)->surface!=Surface.CLOCK && profile.sourceRadius(surface) in images})return
+        if(!ValueAnimator.areAnimatorsEnabled()){
+            surfaceAmount=1f
+            repaint()
+            return
+        }
+        surfaceEntrances++
+        surfaceAnimator=ValueAnimator.ofFloat(surfaceAmount,1f).apply {
+            duration=365L
+            interpolator=clockTransitionCurve
+            addUpdateListener {
+                surfaceAmount=it.animatedValue as Float
+                for(view in views.keys)if(view.isShown)view.invalidate()
+                for(plate in widgetBackgrounds.keys)if(plate.isShown)plate.invalidate()
+            }
+            addListener(object:AnimatorListenerAdapter(){
+                override fun onAnimationEnd(animation:Animator){
+                    if(surfaceAnimator!==animation)return
+                    surfaceAnimator=null
+                    refreshWidgetEffects()
+                }
+            })
+        }
+        surfaceAnimator?.start()
+    }
+
     private fun showClockWhenReady(){
         val profile=profiles[Surface.CLOCK] ?: return
-        if(!visible || LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.CLOCK))!=true)return
+        if(!visible || clockHandoff!=null || LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.CLOCK))!=true)return
         // A relock can interrupt the clock's exit. Reverse from the current material.
         if(clockAnimator!=null && clockDestination==1f || clockAnimator==null && clockAmount>=1f)return
         if(ValueAnimator.areAnimatorsEnabled()){
@@ -469,11 +510,15 @@ internal object LockscreenGlass {
     }
 
     private fun finishClockTransition(){
+        main.removeCallbacks(finishClockHandoff)
+        clockHandoff=null
         val previous=clockAnimator
         clockAnimator=null
         previous?.cancel()
         clockAmount=0f
         restoreNativeClocks()
+        releasedClockMounts.keys.weakSnapshot().forEach(nativeClockEffects::remove)
+        releasedClockMounts.clear()
         clockGlyphs.keys.weakSnapshot().forEach {if(it.isAttachedToWindow)it.invalidate()}
         if(!visible){
             // Keep a single static sample during AOD. The clock can start
@@ -501,6 +546,7 @@ internal object LockscreenGlass {
             main.postDelayed({if(visible && LockscreenBackdrop.frame?.images.isNullOrEmpty())prepareWallpaper(refresh=true)},750L)
         }
         showClockWhenReady()
+        showSurfacesWhenReady()
         repaint()
     }
     private fun repaint(){
@@ -514,7 +560,8 @@ internal object LockscreenGlass {
     fun diagnostics()="lockscreen profiles="+profiles.keys+", visible="+visible+", targets="+knownTargets+", rendered="+rendered+
         ", wallpaper="+wallpaperSource+", clock mounts="+compositedClocks.size+", widget plates="+widgetBackgrounds.size+
         ", widget compositor="+suppressedWidgetEffects.size+", clock amount="+clockAmount+
-        ", clock wake="+clockEntrances+", clock exit="+clockExits
+        ", clock wake="+clockEntrances+", clock exit="+clockExits+", clock handoff="+clockHandoffs+
+        ", surface amount="+surfaceAmount+", surface wake="+surfaceEntrances
 
     private fun installDrawing(){
         val loader=loader ?: return
@@ -546,13 +593,21 @@ internal object LockscreenGlass {
             })
         hook(View::class.java,"drawBackground",arrayOf(Canvas::class.java),object:XC_MethodHook(){
             override fun beforeHookedMethod(p:MethodHookParam){
-                if(!visible || Looper.myLooper()!==Looper.getMainLooper())return
+                if(!visible || surfaceAmount<=0f || Looper.myLooper()!==Looper.getMainLooper())return
                 val view=p.thisObject as View
                 val card=widgetBackgrounds[view]?.get() ?: return
                 val profile=profiles[Surface.WIDGETS] ?: return
                 if(LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.WIDGETS))!=true)return
                 val canvas=p.args[0] as Canvas
-                if(renderable(card,canvas) && isWidgetBackground(view,card))p.result=null
+                if(!renderable(card,canvas) || !isWidgetBackground(view,card))return
+                if(surfaceAmount>=1f)p.result=null
+                else p.setObjectExtra("cpiLockWidgetBackground",canvas.saveLayerAlpha(
+                    view.scrollX.toFloat(),view.scrollY.toFloat(),(view.width+view.scrollX).toFloat(),
+                    (view.height+view.scrollY).toFloat(),((1f-surfaceAmount)*255).toInt()))
+            }
+            override fun afterHookedMethod(p:MethodHookParam){
+                val saved=p.getObjectExtra("cpiLockWidgetBackground") as? Int ?: return
+                (p.args[0] as Canvas).restoreToCount(saved)
             }
         })
         val imageHook=object:XC_MethodHook(){
@@ -673,7 +728,7 @@ internal object LockscreenGlass {
     }
 
     private fun drawNumericKey(p:XC_MethodHook.MethodHookParam){
-        if(!visible)return
+        if(!visible || surfaceAmount<=0f)return
         val profile=profiles[Surface.PIN] ?: return
         val view=p.thisObject as View
         if(view.javaClass.name!=NUMERIC_PIN || !isInPinLayout(view))return
@@ -702,7 +757,7 @@ internal object LockscreenGlass {
             val keys=target.pinKeys ?: arrayOfNulls<LockscreenMaterial>(12).also {target.pinKeys=it}
             val index=row*3+column
             val material=keys[index] ?: LockscreenMaterial().also {keys[index]=it}
-            material.draw(canvas,view,Surface.PIN,profile,frame,bounds=pinBounds,amount=opacity)
+            material.draw(canvas,view,Surface.PIN,profile,frame,bounds=pinBounds,amount=opacity*surfaceAmount)
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","numeric-pin") {"Native PIN drawing kept: "+t.javaClass.simpleName}
         }
@@ -752,7 +807,7 @@ internal object LockscreenGlass {
     }
 
     private fun beginNotification(p:XC_MethodHook.MethodHookParam){
-        if(!visible)return
+        if(!visible || surfaceAmount<=0f)return
         val profile=profiles[Surface.NOTIFICATIONS] ?: return
         val view=p.thisObject as View
         if(notificationId!=View.NO_ID && view.id!=notificationId)return
@@ -835,7 +890,7 @@ internal object LockscreenGlass {
         val mix=progress*progress*(3f-2f*progress)
         // Native row and capsule can both be visible during the morph. Their
         // combined module contribution stays at one plate throughout.
-        val visibility=if(onCapsule)mix else 1f-mix
+        val visibility=(if(onCapsule)mix else 1f-mix)*surfaceAmount
         if(visibility<=0f)return
         val save=canvas.saveLayerAlpha(bounds,(visibility*255).toInt())
         try {
@@ -903,7 +958,7 @@ internal object LockscreenGlass {
                 drawHandoff(canvas,view,notificationBounds,radius,layer.progress,onCapsule=false,path=notificationPath)
             }else target(view,Surface.NOTIFICATIONS).material.draw(canvas,view,Surface.NOTIFICATIONS,profile,frame,
                 bounds=notificationBounds,nativeRadius=radius,useNativeMask=false,drawRim=false,
-                exactPath=notificationPath)
+                exactPath=notificationPath,amount=surfaceAmount)
             rendered.add(Surface.NOTIFICATIONS)
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","notification") {"Native notification kept: "+t.javaClass.simpleName}
@@ -911,7 +966,7 @@ internal object LockscreenGlass {
     }
 
     private fun drawCapsule(p:XC_MethodHook.MethodHookParam){
-        if(!visible || p.hasThrowable() || Surface.CAPSULE !in profiles)return
+        if(!visible || surfaceAmount<=0f || p.hasThrowable() || Surface.CAPSULE !in profiles)return
         val view=p.thisObject as View
         val item=view.parent as? View ?: return
         if(item.javaClass.name!=CAPSULE_ITEM)return
@@ -940,7 +995,7 @@ internal object LockscreenGlass {
                 }else {
                     val profile=profiles[Surface.CAPSULE] ?: return
                     target(view,Surface.CAPSULE).material.draw(canvas,view,Surface.CAPSULE,profile,LockscreenBackdrop.frame,
-                        bounds=capsuleBounds,nativeRadius=radius,exactPath=path)
+                        bounds=capsuleBounds,nativeRadius=radius,exactPath=path,amount=surfaceAmount)
                 }
             }finally {canvas.restoreToCount(clip)}
         }catch(t:Throwable){
@@ -980,15 +1035,18 @@ internal object LockscreenGlass {
         val target=target(view,Surface.WIDGETS)
         if(frame?.images?.containsKey(profile.sourceRadius(Surface.WIDGETS))==true){
             try {
-                target.material.draw(canvas,view,Surface.WIDGETS,profile,frame)
                 updateWidgetBackground(view,target)
-                rendered.add(Surface.WIDGETS)
+                if(surfaceAmount>0f){
+                    target.material.draw(canvas,view,Surface.WIDGETS,profile,frame,amount=surfaceAmount)
+                    rendered.add(Surface.WIDGETS)
+                }
             }catch(t:Throwable){GlassLogger.limited("LockscreenGlass","widgetDraw"){"Native widget kept: "+t.javaClass.simpleName}}
         }
         movingTargets[view]=true
         val tint=profile.widgetTint ?: return
         val tone=frame?.wallpaperTone ?: return
         val paint=target.tintPaint(tone,tint) ?: return
+        if(surfaceAmount<1f)return
         p.setObjectExtra("cpiLockWidgetLayer",canvas.saveLayer(0f,0f,view.width.toFloat(),view.height.toFloat(),paint))
     }
 
@@ -1128,7 +1186,7 @@ internal object LockscreenGlass {
     }
 
     private fun shouldReplaceWidgetEffect(view:View,card:ViewGroup):Boolean {
-        if(!visible || !card.isShown)return false
+        if(!visible || surfaceAmount<1f || !card.isShown)return false
         val profile=profiles[Surface.WIDGETS] ?: return false
         if(LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.WIDGETS))!=true)return false
         var child=view
@@ -1229,9 +1287,11 @@ internal object LockscreenGlass {
         val profile=profiles[surface] ?: return
         val canvas=p.args[0] as? Canvas ?: return
         if(!renderable(view,canvas))return
+        val target=target(view,surface)
+        if(surfaceAmount<=0f)return
         try {
-            target(view,surface).material.draw(canvas,view,surface,profile,LockscreenBackdrop.frame,background,
-                bounds=bounds,nativeRadius=nativeRadius)
+            target.material.draw(canvas,view,surface,profile,LockscreenBackdrop.frame,background,
+                bounds=bounds,nativeRadius=nativeRadius,amount=surfaceAmount)
         }catch(t:Throwable){GlassLogger.limited("LockscreenGlass","draw-"+surface.id) {"Native rendering kept: "+t.javaClass.simpleName}}
     }
 
@@ -1263,6 +1323,7 @@ internal object LockscreenGlass {
         if(android.os.Build.VERSION.SDK_INT<33)return
         val classLoader=view.javaClass.classLoader ?: return
         if(!clockEffectLoaders.add(classLoader))return
+        hookClockHandoff(classLoader)
         val helper=XposedHelpers.findClassIfExists(CLOCK_EFFECT_HELPER,classLoader) ?: return
         runCatching {
             hook(helper,"setRenderEffectImpl",emptyArray(),object:XC_MethodHook(){
@@ -1274,6 +1335,7 @@ internal object LockscreenGlass {
                             val view=mount as? View ?: continue
                             if(builder==null)continue
                             val native=NativeIconAccess.call(builder,"getRenderEffect") as? RenderEffect ?: continue
+                            releasedClockMounts.remove(view)
                             nativeClockEffects[view]=native
                             if(clockAmount>0f)applyClockEffect(view,native,force=true)
                         }
@@ -1286,6 +1348,11 @@ internal object LockscreenGlass {
                 override fun afterHookedMethod(p:MethodHookParam){
                     if(Looper.myLooper()!==Looper.getMainLooper())return
                     val view=p.args.firstOrNull() as? View ?: return
+                    if(clockHandoff!=null && compositedClocks.containsKey(view)){
+                        releasedClockMounts[view]=true
+                        runCatching {view.setRenderEffect(compositedClocks[view])}
+                        return
+                    }
                     nativeClockEffects.remove(view)
                     compositedClocks.remove(view)
                 }
@@ -1293,6 +1360,55 @@ internal object LockscreenGlass {
         }.onFailure {
             GlassLogger.limited("LockscreenGlass","native-clock-hook") {"Native clock reversal unavailable: "+it.javaClass.simpleName}
         }
+    }
+
+    private fun hookClockHandoff(classLoader:ClassLoader){
+        val container=XposedHelpers.findClassIfExists("com.oplus.keyguard.clock.digital.ui.view.ClockContainer",classLoader) ?: return
+        fun targetIsUnlock(scene:Any?)=(scene as? Enum<*>)?.name=="UNLOCK"
+        fun start(p:XC_MethodHook.MethodHookParam,scene:Any?){
+            if(Looper.myLooper()!==Looper.getMainLooper() || !targetIsUnlock(scene) || dozing || !interactive ||
+                keyguardOccluded || clockAmount<=0f)return
+            if(clockHandoff===p.thisObject)return
+            clockHandoff=p.thisObject
+            clockHandoffs++
+            animateClock(0f,(42000L/unlockSpeed).coerceIn(300L,600L))
+            main.removeCallbacks(finishClockHandoff)
+            main.postDelayed(finishClockHandoff,900L)
+        }
+        val finish=object:XC_MethodHook(){
+            override fun afterHookedMethod(p:MethodHookParam){
+                if(Looper.myLooper()===Looper.getMainLooper() && targetIsUnlock(p.args.getOrNull(1)) &&
+                    clockHandoff===p.thisObject)endClockHandoff()
+            }
+        }
+        runCatching {
+            val prefix="dispatchLayoutTransition"
+            val suffix="\$KeyguardPersonalityClocks_release"
+            hooks+=XposedBridge.hookAllMethods(container,prefix+"Prepared"+suffix,object:XC_MethodHook(){
+                override fun beforeHookedMethod(p:MethodHookParam){start(p,p.args.getOrNull(1))}
+            })
+            hooks+=XposedBridge.hookAllMethods(container,prefix+"Start"+suffix,object:XC_MethodHook(){
+                override fun beforeHookedMethod(p:MethodHookParam){
+                    val anchor=p.args.firstOrNull() ?: return
+                    start(p,NativeIconAccess.call(anchor,"getToScene"))
+                }
+            })
+            hooks+=XposedBridge.hookAllMethods(container,prefix+"End"+suffix,finish)
+            hooks+=XposedBridge.hookAllMethods(container,prefix+"Cancel"+suffix,finish)
+        }.onFailure {GlassLogger.limited("LockscreenGlass","clock-handoff") {"Clock transition hook unavailable: "+it.javaClass.simpleName}}
+    }
+
+    private fun endClockHandoff(){
+        if(clockHandoff==null)return
+        main.removeCallbacks(finishClockHandoff)
+        clockHandoff=null
+        for(view in releasedClockMounts.keys.weakSnapshot()){
+            nativeClockEffects.remove(view)
+            if(compositedClocks.remove(view)!=null)runCatching {view.setRenderEffect(null)}
+        }
+        releasedClockMounts.clear()
+        if(visible)showClockWhenReady()
+        else if(clockAnimator==null)finishClockTransition()
     }
 
     private fun applyClockEffect(view:View,native:RenderEffect,force:Boolean=false){
@@ -1336,7 +1452,7 @@ internal object LockscreenGlass {
         val mounts=compositedClocks.keys.weakSnapshot()
         compositedClocks.clear()
         for(view in mounts){
-            val effect=nativeClockEffects[view] ?: continue
+            val effect=nativeClockEffects[view]?.takeUnless {view in releasedClockMounts}
             runCatching {view.setRenderEffect(effect)}
         }
     }
