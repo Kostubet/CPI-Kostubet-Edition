@@ -91,6 +91,8 @@
     <string name="ui_module_description">Набор инструментов для настройки стекла и системных эффектов ColorOS</string>
     <string name="ui_log_error">Ошибка чтения логов: %1$s</string>
     <string name="ui_flux_only_title">Неподдерживаемый стиль иконок</string>
+    <string name="ui_native_icon_colors">Цвета иконок ColorOS</string>
+    <string name="ui_native_icon_colors_hint">На рабочем столе зажмите пустое место → «Обои и стиль» → «Значки».</string>
     <string name="ui_flux_only_warning">Сейчас выбран другой стиль иконок. CPI Kostubet Edition на данный момент поддерживает только иконки Flux. Для корректного отображения и анимаций выберите Flux в системных настройках иконок.</string>
     <string name="ui_credits_title">С помощью</string>
     <string name="ui_link_error">Не удалось открыть ссылку</string>
