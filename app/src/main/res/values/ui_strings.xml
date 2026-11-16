@@ -91,8 +91,6 @@
     <string name="ui_module_description">A toolbox for launcher glass and system effects on ColorOS</string>
     <string name="ui_log_error">Could not read logs: %1$s</string>
     <string name="ui_flux_only_title">Unsupported icon style</string>
-    <string name="ui_native_icon_colors">ColorOS icon colors</string>
-    <string name="ui_native_icon_colors_hint">Touch and hold an empty spot on the home screen, then select Wallpapers &amp; style → Icons.</string>
     <string name="ui_flux_only_warning">A different icon style is selected. CPI Kostubet Edition currently supports only Flux icons. Select Flux in the system icon settings for correct appearance and animations.</string>
     <string name="ui_credits_title">With help from</string>
     <string name="ui_link_error">Could not open link</string>

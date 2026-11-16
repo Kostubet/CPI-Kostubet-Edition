@@ -27,8 +27,6 @@
 
 Основная конфигурация разработки — OnePlus 13, ColorOS 17 и системный лаунчер 17.3.12. Доступность отдельных эффектов зависит от версии прошивки и лаунчера. [Подробнее об установке](INSTALL.md#русский)
 
-Без LSPosed можно выбрать штатные цвета значков ColorOS. Откройте **Функции → Иконки → Цвета иконок ColorOS** и следуйте подсказке. Этот пункт ведёт на рабочий стол, где редактор значков открывается штатным жестом.
-
 ### Сборка и публикация
 
 Понадобятся JDK 17 и Android SDK API 35. Укажите SDK через `ANDROID_HOME` или `local.properties`.
@@ -70,8 +68,6 @@ An LSPosed module written in Kotlin that brings Frosted and Liquid Glass design 
 ### Installation
 
 Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases). Enable the module in LSPosed or Vector and select the system launcher. Select **System UI** for system overlays and the lock screen. Enable the stock **Flux** icon style for icon styling. The main development device is the OnePlus 13 on ColorOS 17 with launcher 17.3.12. Feature availability depends on the firmware. [Full installation guide](INSTALL.md#english)
-
-Stock ColorOS icon colors are available without LSPosed. Go to **Features → Icons → ColorOS icon colors** for the shortcut and instructions to open the system editor from the home screen.
 
 ### Build and release
 

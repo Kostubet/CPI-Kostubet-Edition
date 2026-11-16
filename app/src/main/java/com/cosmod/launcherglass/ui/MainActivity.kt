@@ -1536,18 +1536,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun iconsSection(body:LinearLayout){
-        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        if (packageManager.resolveActivity(home, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
-                ?.activityInfo?.packageName in setOf("com.android.launcher", "com.oplus.launcher", "com.oppo.launcher", "com.coloros.launcher")) {
-            add(body, card(preferenceLink(getString(R.string.ui_native_icon_colors),
-                getString(R.string.ui_native_icon_colors_hint)) {
-                try {
-                    startActivity(home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                } catch (_: ActivityNotFoundException) {
-                    Toast.makeText(this, R.string.ui_native_icon_colors_hint, Toast.LENGTH_LONG).show()
-                }
-            }), bottom=8)
-        }
         val iconSize=slider(getString(R.string.ui_icon_size),"launcher_icon_size",70,130,"%",
             getString(R.string.ui_icon_size_hint))
         gate(iconSize,::master)
