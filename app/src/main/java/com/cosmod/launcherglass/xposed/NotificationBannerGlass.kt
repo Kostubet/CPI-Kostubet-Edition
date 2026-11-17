@@ -21,6 +21,9 @@ import android.view.View
 import android.view.ViewTreeObserver
 import android.view.animation.LinearInterpolator
 import com.cosmod.launcherglass.util.GlassLogger
+import com.cosmod.launcherglass.BuildConfig
+import com.cosmod.launcherglass.ui.BannerTestNotification
+import com.cosmod.launcherglass.ui.NativePreviewScenes.Scene
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import java.lang.ref.WeakReference
@@ -48,6 +51,10 @@ internal object NotificationBannerGlass {
     private var corner = 38
     private var shadowStrength = 42
     private var shadowSize = 12
+    private var rimStrength=55
+    private var rimWidth=25
+    private var rimSoftness=65
+    private val glassRim=com.cosmod.launcherglass.util.VolumeRim()
     private var openingBlur = 16
     private var openSpeed = 100
     private var closeSpeed = 100
@@ -63,6 +70,46 @@ internal object NotificationBannerGlass {
     private var exits = 0L
     private var lens = Bundle()
     private val drawn = WeakHashMap<View, Boolean>()
+    private val previewScenes = arrayOfNulls<Scene>(3)
+    private val lastPreviewPost = LongArray(3)
+    private var capturingBackground: View? = null
+
+    fun snapshotPreview(style: Int): Scene? {
+        val scene = previewScenes.getOrNull(style) ?: return null
+        val content = scene.content.copy(android.graphics.Bitmap.Config.ARGB_8888, false) ?: return null
+        return Scene(content)
+    }
+
+    private fun rememberTestBanner(row: View, background: View, height: Int) {
+        val entry = NativeIconAccess.call(row, "getEntry") ?: return
+        val notification = NativeIconAccess.call(entry, "getSbn") as? android.service.notification.StatusBarNotification
+            ?: return
+        if (notification.packageName != BuildConfig.APPLICATION_ID || notification.id != BannerTestNotification.ID) return
+        val style = notification.notification.extras.getInt(BannerTestNotification.PREVIEW_STYLE, -1)
+        if (style !in previewScenes.indices || lastPreviewPost[style] == notification.postTime) return
+        lastPreviewPost[style] = notification.postTime
+        row.post {
+            if (!row.isShown || !isBanner(background)) return@post
+            if (NativeIconAccess.call(row, "getEntry") !== entry) return@post
+            val area = RectF(background.left.toFloat(), background.top.toFloat(),
+                (background.left + background.width).toFloat(), (background.top + height).toFloat())
+            val path = Path().apply { addRect(area, Path.Direction.CW) }
+            try {
+                capturingBackground = background
+                background.invalidate()
+                val captured = NativeMaterialPreview.capture(area, path, foreground = row::draw) ?: return@post
+                captured.shape?.recycle()
+                previewScenes[style]?.content?.recycle()
+                previewScenes[style] = Scene(captured.content)
+            } catch (error: Exception) {
+                GlassLogger.limited("BannerGlass", "preview") { "Native test banner capture unavailable: $error" }
+            } finally {
+                capturingBackground = null
+                background.invalidate()
+                row.invalidate()
+            }
+        }
+    }
     private val motions = WeakHashMap<Any, Motion>()
     private val entrancesInFlight = WeakHashMap<View, Entrance>()
     private val shadows = WeakHashMap<View, Shadow>()
@@ -172,6 +219,9 @@ internal object NotificationBannerGlass {
         corner = prefs.getInt("banner_glass_corner", 38).coerceIn(0, 50)
         shadowStrength = prefs.getInt("banner_shadow_strength", 42).coerceIn(0, 100)
         shadowSize = prefs.getInt("banner_shadow_size", 12).coerceIn(0, 24)
+        rimStrength=prefs.getInt("banner_glass_rim",55).coerceIn(0,100)
+        rimWidth=prefs.getInt("banner_rim_width",25).coerceIn(0,100)
+        rimSoftness=prefs.getInt("banner_rim_softness",65).coerceIn(0,100)
         openingBlur = prefs.getInt("banner_motion_blur", 16).coerceIn(0, 24)
         openSpeed = prefs.getInt("banner_open_speed", 100).coerceIn(50, 180)
         closeSpeed = prefs.getInt("banner_close_speed", 100).coerceIn(50, 180)
@@ -248,6 +298,10 @@ internal object NotificationBannerGlass {
         XposedBridge.hookMethod(draw, object : XC_MethodHook() {
                 override fun beforeHookedMethod(p: MethodHookParam) {
                     val view = p.thisObject as View
+                    if (capturingBackground === view) {
+                        p.result = null
+                        return
+                    }
                     if (!isBanner(view)) {
                         if (drawn.remove(view)!=null) {
                             AlertBackdrop.forgetBanner(view)
@@ -270,6 +324,7 @@ internal object NotificationBannerGlass {
                         val bottom = h - maxOf(clipBottom?.getInt(view) ?: 0, overlapBottom?.getInt(view) ?: 0)
                         if (view.width <= 0 || bottom <= top || !view.isShown) return@safely
                         val first = drawn.put(view,true)==null
+                        if (first) rememberTestBanner(parent, view, h)
                         val frame = AlertBackdrop.bannerFrame(view)
                         if(first && animate && ValueAnimator.areAnimatorsEnabled() &&
                             (!dedicatedMotion || (parent.parent as? View)?.javaClass?.name != WINDOW+"HeadsUpLayout")) {
@@ -443,6 +498,7 @@ internal object NotificationBannerGlass {
         drawTint(canvas, height, radius)
         paint.color=if(dark)0x38000000 else 0x20ffffff
         canvas.drawRoundRect(bounds,radius,radius,paint)
+        glassRim.draw(canvas,bounds,radius,view.resources.displayMetrics.density*(.35f+rimWidth*.018f),rimStrength,rimSoftness)
         edge.rewind()
         edge.addRoundRect(bounds, radius, radius, Path.Direction.CW)
         EdgeLight.drawPath(canvas, edge, bounds, view, .85f, GlassSurface.BANNERS)

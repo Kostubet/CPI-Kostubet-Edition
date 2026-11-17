@@ -15,6 +15,7 @@ internal object FolderSettings {
     @Volatile var processing=Processing(10,0,0,50,false)
         private set
     private var stamp:List<Any>?=null
+    private var inheritedFilter:ColorMatrixColorFilter?=null
     @Volatile private var dark=true
     private data class LargeStyle(val liquid:Boolean,val width:Int,val strength:Int,val opacity:Int)
     @Volatile private var large:LargeStyle?=null
@@ -22,18 +23,35 @@ internal object FolderSettings {
         val ownStyle=if(own)selected else null
         val plateColor=if(dark)0x181818 else 0xeeeeee
         val normal=ownStyle?.copy(plateColor=plateColor) ?: GlassStyle.icons().copy(
-            folder=true,surfaceScope=GlassSurface.FOLDERS,plateColor=plateColor,volumeOpacity=0)
+            folder=true,surfaceScope=GlassSurface.FOLDERS,plateColor=plateColor,volumeOpacity=0,filter=inheritedFilter,
+            newEngine=KyantGlassEngine.enabled(GlassSurface.FOLDERS),engineOptics=KyantGlassEngine.optics(GlassSurface.FOLDERS))
         val independent=if(expanded)large else null
-        return independent?.let {normal.copy(liquid=it.liquid,width=it.width,distortion=it.strength,opacity=it.opacity)} ?: normal
+        return independent?.let {
+            val engine=KyantGlassEngine.largeFolderOptics()
+            normal.copy(liquid=it.liquid,width=it.width,distortion=it.strength,opacity=it.opacity,
+                newEngine=KyantGlassEngine.largeFolders,engineOptics=engine,
+                radius=engine.radius,largeFolderBackdrop=true)
+        } ?: normal
+    }
+    fun largeBackdrop():Processing? {
+        val custom=large ?: return null
+        val source=if(own)processing else Processing(PrefsHelper.blurRadius,PrefsHelper.blurQuality,
+            PrefsHelper.blurVibrancy,PrefsHelper.blurLightening,PrefsHelper.liquidGlass)
+        return source.copy(radius=KyantGlassEngine.largeFolderOptics().radius,liquid=custom.liquid)
     }
     fun update(bundle:Bundle):Boolean {
         val signature=ArrayList<Any>()
+        val sharedSaturation=if(bundle.getBoolean(SettingsProvider.KEY_BLUR_TONE_ENABLED))
+            bundle.getInt(SettingsProvider.KEY_BLUR_SATURATION,100).coerceIn(0,200)else 100
+        signature.add(sharedSaturation)
         signature.add(bundle.getBoolean(FolderSettingsKeys.OWN,false))
         signature.add(bundle.getBoolean(SettingsProvider.KEY_DEVELOPER_MODE,false))
         val darkIcons=bundle.getBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK,true)
         signature.add(darkIcons)
         val dispersion=GlassDispersionSettings.strength(bundle,GlassDispersionSettings.FOLDERS)
         signature.add(dispersion)
+        signature.add(KyantGlassEngine.enabled(GlassSurface.FOLDERS,bundle))
+        signature.add(KyantGlassEngine.optics(GlassSurface.FOLDERS,bundle))
         FolderSettingsKeys.integers.forEach {signature.add(bundle.getInt(FolderSettingsKeys.key(it),SettingsDefaults.integer(it)))}
         FolderSettingsKeys.booleans.forEach {signature.add(bundle.getBoolean(FolderSettingsKeys.key(it),SettingsDefaults.boolean(it)))}
         val largeStyle=if(bundle.getBoolean("large_folder_glass_own",false))LargeStyle(
@@ -46,14 +64,15 @@ internal object FolderSettings {
         if(stamp==signature)return false
         large=largeStyle
         stamp=signature
+        inheritedFilter=if(sharedSaturation==100)null else ColorMatrixColorFilter(ColorMatrix().apply {setSaturation(sharedSaturation/100f)})
         dark=darkIcons
         own=bundle.getBoolean(FolderSettingsKeys.OWN,false)
         fun number(key:String,max:Int)=bundle.getInt(FolderSettingsKeys.key(key),SettingsDefaults.integer(key)).coerceIn(0,max)
         fun bool(key:String)=bundle.getBoolean(FolderSettingsKeys.key(key),SettingsDefaults.boolean(key))
         val developer=bundle.getBoolean(SettingsProvider.KEY_DEVELOPER_MODE,false)
         val tone=bool(SettingsProvider.KEY_BLUR_TONE_ENABLED)
-        val radius=if(bool(SettingsProvider.KEY_BLUR_RADIUS_ENABLED))number(SettingsProvider.KEY_BLUR_RADIUS,50)else 0
-        val quality=if(developer)number(SettingsProvider.KEY_BLUR_QUALITY,100)else 0
+        val radius=number(SettingsProvider.KEY_BLUR_RADIUS,50)
+        val quality=0
         val liquid=number(SettingsProvider.KEY_BLUR_STYLE,1)==1 && Build.VERSION.SDK_INT>=33
         val vibrancy=if(tone)number(SettingsProvider.KEY_BLUR_VIBRANCY,200)else 0
         processing=Processing(radius,quality,vibrancy,if(tone)number(SettingsProvider.KEY_BLUR_LIGHTENING,100)else 50,liquid)

@@ -18,15 +18,13 @@ object FastBlur {
         return out
     }
 
-    private fun stackBlur(pix: IntArray, w: Int, h: Int, radius: Int) {
+    internal fun stackBlur(pix: IntArray, w: Int, h: Int, radius: Int) {
+        if (radius < 1) return
         val wm = w - 1
         val hm = h - 1
-        val wh = w * h
         val div = radius + radius + 1
 
-        val r = IntArray(wh)
-        val g = IntArray(wh)
-        val b = IntArray(wh)
+        val horizontal = IntArray(w * h)
         var rsum: Int
         var gsum: Int
         var bsum: Int
@@ -36,11 +34,15 @@ object FastBlur {
         var yw: Int
         val vmin = IntArray(Math.max(w, h))
 
-        var divsum = (div + 1) shr 1
-        divsum *= divsum
-        val dv = IntArray(256 * divsum)
-        for (idx in 0 until 256 * divsum) {
-            dv[idx] = idx / divsum
+        val radiusPlusOne = radius + 1
+        val divisor = radiusPlusOne * radiusPlusOne
+        // Fixed-point division avoids both a quadratic lookup table and
+        // repeated integer divides. For an 8-bit weighted sum that fits in
+        // Int, rounding up this reciprocal still gives the same floor.
+        val reciprocal = ((1L shl 55) + divisor - 1) / divisor
+        fun average(sum: Int) = ((sum * reciprocal) ushr 55).toInt()
+        fun rgb(red: Int, green: Int, blue: Int): Int {
+            return (average(red) shl 16) or (average(green) shl 8) or average(blue)
         }
 
         yw = 0
@@ -51,7 +53,7 @@ object FastBlur {
         var stackstart: Int
         var sir: IntArray
         var rbs: Int
-        val r1 = radius + 1
+        val r1 = radiusPlusOne
         var routsum: Int
         var goutsum: Int
         var boutsum: Int
@@ -92,16 +94,14 @@ object FastBlur {
             stackpointer = radius
 
             for (xIdx in 0 until w) {
-                r[yi] = dv[rsum]
-                g[yi] = dv[gsum]
-                b[yi] = dv[bsum]
+                horizontal[yi] = rgb(rsum, gsum, bsum)
 
                 rsum -= routsum
                 gsum -= goutsum
                 bsum -= boutsum
 
-                stackstart = stackpointer - radius + div
-                sir = stack[stackstart % div]
+                stackstart = stackpointer - radius
+                sir = stack[if (stackstart < 0) stackstart + div else stackstart]
 
                 routsum -= sir[0]
                 goutsum -= sir[1]
@@ -124,7 +124,7 @@ object FastBlur {
                 gsum += ginsum
                 bsum += binsum
 
-                stackpointer = (stackpointer + 1) % div
+                if (++stackpointer == div) stackpointer = 0
                 sir = stack[stackpointer % div]
 
                 routsum += sir[0]
@@ -154,13 +154,14 @@ object FastBlur {
             for (idx in -radius..radius) {
                 yi = Math.max(0, yp) + xIdx
                 sir = stack[idx + radius]
-                sir[0] = r[yi]
-                sir[1] = g[yi]
-                sir[2] = b[yi]
+                p = horizontal[yi]
+                sir[0] = p ushr 16
+                sir[1] = (p ushr 8) and 255
+                sir[2] = p and 255
                 rbs = r1 - Math.abs(idx)
-                rsum += r[yi] * rbs
-                gsum += g[yi] * rbs
-                bsum += b[yi] * rbs
+                rsum += sir[0] * rbs
+                gsum += sir[1] * rbs
+                bsum += sir[2] * rbs
                 if (idx > 0) {
                     rinsum += sir[0]
                     ginsum += sir[1]
@@ -177,14 +178,14 @@ object FastBlur {
             yi = xIdx
             stackpointer = radius
             for (yIdx in 0 until h) {
-                pix[yi] = (0xff000000.toInt() and pix[yi]) or (dv[rsum] shl 16) or (dv[gsum] shl 8) or dv[bsum]
+                pix[yi] = (0xff000000.toInt() and pix[yi]) or rgb(rsum, gsum, bsum)
 
                 rsum -= routsum
                 gsum -= goutsum
                 bsum -= boutsum
 
-                stackstart = stackpointer - radius + div
-                sir = stack[stackstart % div]
+                stackstart = stackpointer - radius
+                sir = stack[if (stackstart < 0) stackstart + div else stackstart]
 
                 routsum -= sir[0]
                 goutsum -= sir[1]
@@ -193,11 +194,10 @@ object FastBlur {
                 if (xIdx == 0) {
                     vmin[yIdx] = Math.min(yIdx + r1, hm) * w
                 }
-                p = xIdx + vmin[yIdx]
-
-                sir[0] = r[p]
-                sir[1] = g[p]
-                sir[2] = b[p]
+                p = horizontal[xIdx + vmin[yIdx]]
+                sir[0] = p ushr 16
+                sir[1] = (p ushr 8) and 255
+                sir[2] = p and 255
 
                 rinsum += sir[0]
                 ginsum += sir[1]
@@ -207,7 +207,7 @@ object FastBlur {
                 gsum += ginsum
                 bsum += binsum
 
-                stackpointer = (stackpointer + 1) % div
+                if (++stackpointer == div) stackpointer = 0
                 sir = stack[stackpointer]
 
                 routsum += sir[0]

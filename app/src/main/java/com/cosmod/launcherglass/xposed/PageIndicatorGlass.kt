@@ -40,7 +40,7 @@ internal object PageIndicatorGlass {
             bundle.getInt("indicator_glass_distortion",80).coerceIn(0,300),
             bundle.getInt("indicator_glass_dispersion",0).coerceIn(0,100))
         val nextKeepVisible=bundle.getBoolean("indicator_keep_visible",true)
-        if(next!=profile){
+        if(next!=profile || next.style!=profile.style){
             profile=next
             views.keys.weakSnapshot().forEach {it.invalidate()}
         }

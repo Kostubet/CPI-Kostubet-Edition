@@ -36,6 +36,9 @@ internal object GlassGeometry {
         val width=mask.width
         val height=mask.height
         if(width<3 || height<3)return mask
+        // Native anti-aliased coverage is already precise. A second blur softens it into a halo.
+        val partial=shape.alpha.count {val a=it.toInt() and 255;a in 16..239}
+        if(partial>=maxOf(4,min(width,height)/10))return mask
         val pixels=IntArray(width*height)
         val alpha=shape.alpha
         for(y in 0 until height){
@@ -112,25 +115,9 @@ internal object GlassGeometry {
             // Infer subpixel distance from the alpha ramp and its local normal.
             depth[i]=(.5f+(coverage/255f-.5f)/max(.35f,gradient)).coerceIn(0f,1.75f)
         }
-        val diagonal=1.41421356f
-        for(y in 0 until h)for(x in 0 until w){
-            val i=y*w+x
-            if(x>0)depth[i]=min(depth[i],depth[i-1]+1f)
-            if(y>0){
-                depth[i]=min(depth[i],depth[i-w]+1f)
-                if(x>0)depth[i]=min(depth[i],depth[i-w-1]+diagonal)
-                if(x<w-1)depth[i]=min(depth[i],depth[i-w+1]+diagonal)
-            }
-        }
-        for(y in h-1 downTo 0)for(x in w-1 downTo 0){
-            val i=y*w+x
-            if(x<w-1)depth[i]=min(depth[i],depth[i+1]+1f)
-            if(y<h-1){
-                depth[i]=min(depth[i],depth[i+w]+1f)
-                if(x>0)depth[i]=min(depth[i],depth[i+w-1]+diagonal)
-                if(x<w-1)depth[i]=min(depth[i],depth[i+w+1]+diagonal)
-            }
-        }
+        for(i in depth.indices)depth[i]*=depth[i]
+        com.cosmod.launcherglass.util.EuclideanDistance.transform(depth,w,h)
+        for(i in depth.indices)depth[i]=sqrt(depth[i])
         shape.depth=depth
         return depth
     }

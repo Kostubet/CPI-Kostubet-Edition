@@ -56,8 +56,12 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
         shader.setFloatUniform("size",width.toFloat(),height.toFloat())
         shader.setFloatUniform("rounding",rounding)
         shader.setFloatUniform("bevelWidth",.015f+style.width*.0014f)
-        shader.setFloatUniform("distortion",style.distortion/50f)
-        shader.setFloatUniform("dispersion",style.dispersion.coerceIn(0,100)*.01f)
+        shader.setFloatUniform("lensHeight",style.engineOptics.heightScale)
+        shader.setFloatUniform("distortion",if(style.liquid)style.distortion/50f else 0f)
+        shader.setFloatUniform("dispersion",if(style.liquid)style.dispersion.coerceIn(0,100)*.01f else 0f)
+        shader.setFloatUniform("kyantEngine",if(style.newEngine)1f else 0f)
+        shader.setFloatUniform("engineOptics",style.engineOptics.power*.01f,
+            style.engineOptics.edgeWidth*.01f,style.engineOptics.edgeLight*.01f)
     }
     private fun colors(filter:ColorMatrixColorFilter?){
         val matrix=ColorMatrix()
@@ -106,13 +110,40 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
             uniform float rounding;
             uniform float bevelWidth;
             uniform float distortion;
+            uniform float lensHeight;
             uniform float dispersion;
+            uniform float kyantEngine;
+            uniform float3 engineOptics;
             uniform float4 rowR;
             uniform float4 rowG;
             uniform float4 rowB;
             uniform float3 bias;
         """
-        private const val LENS="""
+        private const val LENS=KyantGlassEngine.AGSL+"""
+            float2 kyantOffset(float2 xy,float radius) {
+                float2 halfSize=size*.5;
+                float2 p=xy-halfSize;
+                float edge=min(size.x,size.y);
+                float bevel=max(1.0,edge*clamp(bevelWidth*1.9,.035,.45));
+                float distance=-kyantSd(p,halfSize,radius);
+                if(distance>=bevel)return float2(0.0);
+                float roll=kyantCircularProfile(1.0-max(0.0,distance)/bevel);
+                float2 normal=kyantNormal(p,halfSize,min(radius*1.5,min(halfSize.x,halfSize.y)));
+                float2 depth=.28*p/max(length(p),.001);
+                float strength=.24*distortion*engineOptics.x;
+                float shift=strength/(1.0+.85*strength);
+                return -normalize(normal+depth+float2(.0001))*roll*edge*shift;
+            }
+            half4 kyantGlint(half4 pixel,float2 xy,float radius) {
+                float2 halfSize=size*.5;
+                float2 p=xy-halfSize;
+                float d=kyantSd(p,halfSize,radius);
+                float width=max(.7,min(size.x,size.y)*(.008+.055*engineOptics.y));
+                float edge=1.0-smoothstep(0.0,width,-d);
+                float2 normal=kyantNormal(p,halfSize,min(radius*1.5,min(halfSize.x,halfSize.y)));
+                float glint=kyantDirectionalHighlight(normal,1.36,1.25)*edge*engineOptics.z*.36;
+                return half4(min(pixel.rgb+half3(glint)*pixel.a,half3(pixel.a)),pixel.a);
+            }
             float2 spectrumOffset(float2 p, float r) {
                 if(dispersion<=0.0)return float2(0.0);
                 float edge=min(size.x,size.y);
@@ -185,14 +216,17 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
             half4 main(float2 xy) {
                 half alpha=mask.eval(xy).a;
                 if(alpha<=.001)return half4(0.0);
-                float2 coord=crop.xy+(xy+lensSample(xy))*crop.zw/size;
+                float radius=rounding*min(size.x,size.y);
+                float2 shift=kyantEngine>.5 ? kyantOffset(xy,radius) : lensSample(xy);
+                float2 coord=crop.xy+(xy+lensHeight*shift)*crop.zw/size;
                 half4 pixel=backdrop.eval(coord);
-                float2 prism=spectrumOffset(xy,rounding*min(size.x,size.y))*crop.zw/size;
+                float2 prism=lensHeight*spectrumOffset(xy,radius)*crop.zw/size;
                 if(dot(prism,prism)>.0001){
                     pixel.r=backdrop.eval(coord+prism).r;
                     pixel.b=backdrop.eval(coord-prism).b;
                 }
-                return shade(pixel,alpha);
+                half4 resultColor=shade(pixel,alpha);
+                return kyantEngine>.5 ? kyantGlint(resultColor,xy,radius) : resultColor;
             }
         """
         // Lifted variant: "backdrop" is the RenderEffect input of a node that
@@ -217,20 +251,22 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 if(alpha<=.001)return half4(0.0);
                 float radius=nativeContour>.5 ? contourRadius(p) : rounding*min(size.x,size.y);
                 float opticalRadius=rounding*min(size.x,size.y);
-                float2 lens=nativeContour>.5 ? softLens(p,radius,opticalRadius) : lensSample(p);
-                float2 q=clamp(xy+lens,float2(.5),limit-float2(.5));
+                float2 lens=kyantEngine>.5 ? kyantOffset(p,radius) :
+                    (nativeContour>.5 ? softLens(p,radius,opticalRadius) : lensSample(p));
+                float2 q=clamp(xy+lensHeight*lens,float2(.5),limit-float2(.5));
                 half4 pixel=backdrop.eval(q);
                 if(pixel.a<.999)pixel+=backdrop.eval(xy)*(half(1.0)-pixel.a);
                 if(pixel.a<=.001)return half4(0.0);
                 half4 color=pixel/pixel.a;
-                float2 prism=spectrumOffset(p,radius);
+                float2 prism=lensHeight*spectrumOffset(p,radius);
                 if(dot(prism,prism)>.0001){
                     half4 red=backdrop.eval(clamp(q+prism,float2(.5),limit-float2(.5)));
                     half4 blue=backdrop.eval(clamp(q-prism,float2(.5),limit-float2(.5)));
                     if(red.a>.01)color.r=red.r/red.a;
                     if(blue.a>.01)color.b=blue.b/blue.a;
                 }
-                return shade(color,alpha)*pixel.a;
+                half4 resultColor=shade(color,alpha)*pixel.a;
+                return kyantEngine>.5 ? kyantGlint(resultColor,p,radius) : resultColor;
             }
         """
     }

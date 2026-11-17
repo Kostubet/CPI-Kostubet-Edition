@@ -9,7 +9,7 @@ import com.cosmod.launcherglass.ui.SettingsProvider
 object RuntimeReport {
     fun loaded(context:Context,role:String){
         try {context.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_REPORT_RUNTIME,role,
-            Bundle().apply {putString("version",BuildConfig.VERSION_NAME)})}
+            Bundle().apply {putString("version",BuildConfig.VERSION_NAME);putInt("build",BuildConfig.VERSION_CODE)})}
         catch(_:Exception){/* Settings remain usable before the provider is available. */}
     }
 }

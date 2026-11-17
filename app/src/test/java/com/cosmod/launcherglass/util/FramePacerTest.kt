@@ -3,7 +3,7 @@ import org.junit.Assert.*
 import org.junit.Test
 class FramePacerTest {
     @Test fun displayRatesAreNotHalvedByMillisecondRounding(){
-        for(display in listOf(60,90,120))for(limit in listOf(30,60,120)){
+        for(display in listOf(24,30,48,60,90,120,165))for(limit in listOf(30,60,120)){
             val p=FramePacer();val frames=(0 until display*3).count {p.ready(it*1_000_000_000L/display,limit)}
             assertTrue("display=$display limit=$limit frames=$frames",kotlin.math.abs(minOf(display,limit)*3-frames)<=1)
         }

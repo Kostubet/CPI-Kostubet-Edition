@@ -52,6 +52,9 @@ object IconBitmapProcessor {
     }
 
     @Synchronized
+    fun previewLayers(src:Bitmap,opacity:Int):ProcessedIcon?=processIcon(src,opacity)
+
+    @Synchronized
     fun getOrProcess(src: Bitmap, bgOpacity: Int): ProcessedIcon? {
         if (src.isRecycled) return null
         if (cachedOpacity != bgOpacity) {

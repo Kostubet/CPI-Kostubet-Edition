@@ -14,7 +14,6 @@ import android.os.Looper
 import android.os.PowerManager
 import android.view.SurfaceControl
 import android.view.WindowManager
-import com.cosmod.launcherglass.util.FastBlur
 import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.GpuWallpaperBlur
 import com.cosmod.launcherglass.util.IconPalette
@@ -26,43 +25,74 @@ import kotlin.math.roundToInt
 /** Reads wallpaper data only. A single bounded job serves all visible profiles. */
 internal object LockscreenBackdrop {
     data class Frame(val images:Map<Int,Bitmap>,val color:Int,val source:String,
-        val wallpaperTone:IconPalette.WallpaperTone?,val live:Boolean=false)
+        val wallpaperTone:IconPalette.WallpaperTone?,val live:Boolean=false,val livePackage:String?=null,
+        val captureSurface:SurfaceControl?=null)
+    const val COLORFUL_ENGINE="com.heytap.colorfulengine"
     private val main=Handler(Looper.getMainLooper())
-    private val worker by lazy {Executors.newSingleThreadExecutor()}
+    private val workerDelegate=lazy {Executors.newSingleThreadExecutor()}
+    private val worker by workerDelegate
     private var jobRunning=false
     private var revision=0
     private var pending:Request?=null
     private var desired:Request?=null
+    private var liveMisses=0
     private val refreshLive=Runnable {
         val request=desired ?: return@Runnable
-        if(frame?.live==true)prepare(request.context,request.controller,request.animation,request.radii,refresh=true)
+        val last=frame?.takeIf {it.live} ?: return@Runnable
+        val next=request.copy(revision=++revision,previousLive=last)
+        desired=next
+        pending=next
+        launch()
     }
     var frame:Frame?=null
         private set
+    private var frameHeight=0
+    var cacheHits=0
+        private set
 
     private data class Request(val context:Context,val controller:Any?,val animation:Any?,
-        val radii:Set<Int>,val height:Int,val revision:Int)
+        val radii:Set<Int>,val height:Int,val revision:Int,val previousLive:Frame?=null)
 
     fun prepare(context:Context,controller:Any?,animation:Any?,radii:Set<Int>,refresh:Boolean=false){
         if(radii.isEmpty()){stop();return}
         val height=minOf(PerformancePolicy.sourceHeight,if(PerformancePolicy.economy)720 else 1056)
         val old=desired
+        val cached=frame
+        if(!refresh && old==null && frameHeight==height && cached!=null && cached.source=="file" &&
+            cached.images.keys==radii){
+            cacheHits++
+            return
+        }
         if(!refresh && old!=null && old.controller===controller && old.animation===animation &&
             old.radii==radii && old.height==height)return
         main.removeCallbacks(refreshLive)
+        liveMisses=0
         val request=Request(context,controller,animation,radii,height,++revision)
         desired=request
         pending=request
         launch()
     }
 
-    fun stop(){
-        if(desired==null && frame==null)return
+    fun stop(keepStatic:Boolean=false,clockRadius:Int?=null):Boolean {
+        if(desired==null && frame==null)return false
         revision++
         main.removeCallbacks(refreshLive)
+        liveMisses=0
         desired=null
         pending=null
-        frame=null
+        val last=frame
+        if(workerDelegate.isInitialized() && (jobRunning || last?.live==true))worker.execute {GpuWallpaperBlur.closePhoto()}
+        val budget=if(PerformancePolicy.economy)6L shl 20 else 16L shl 20
+        val retained=keepStatic && last?.source=="file" && !last.live &&
+            last.images.values.sumOf {it.width.toLong()*it.height*4}<=budget
+        frame=when {
+            retained->last
+            keepStatic && clockRadius!=null && last?.source=="file" && !last.live->
+                last.images[clockRadius]?.let {last.copy(images=mapOf(clockRadius to it))}
+            else->null
+        }
+        if(frame==null)frameHeight=0
+        return retained
     }
 
     private fun launch(){
@@ -71,15 +101,27 @@ internal object LockscreenBackdrop {
         pending=null
         jobRunning=true
         worker.execute {
+            val start=android.os.SystemClock.uptimeMillis()
             val result=runCatching {load(request)}.onFailure {
                 GlassLogger.limited("LockscreenGlass","wallpaper") {"Wallpaper source unavailable"}
-            }.getOrNull()
+            }.getOrNull() ?: request.previousLive
+            val elapsed=android.os.SystemClock.uptimeMillis()-start
             main.post {
                 jobRunning=false
                 if(revision==request.revision){
+                    val changed=frame?.images!==result?.images
                     frame=result
-                    LockscreenGlass.wallpaperChanged()
-                    if(result?.live==true)main.postDelayed(refreshLive,if(PerformancePolicy.economy)140L else 85L)
+                    frameHeight=request.height
+                    if(changed)LockscreenGlass.wallpaperChanged()
+                    if(result?.live==true){
+                        liveMisses=if(changed && result.source=="live wallpaper layer")0
+                            else (liveMisses+1).coerceAtMost(5)
+                        val interval=if(liveMisses==0)1000L/PerformancePolicy.captureFps()
+                            else minOf(1000L,50L shl liveMisses)
+                        main.postDelayed(refreshLive,(interval-elapsed).coerceAtLeast(1L))
+                    }
+                }else if(result!=null && result.images!==request.previousLive?.images){
+                    recycleImages(result.images.values)
                 }
                 launch()
             }
@@ -88,16 +130,25 @@ internal object LockscreenBackdrop {
 
     private fun load(request:Request):Frame {
         val manager=WallpaperManager.getInstance(request.context)
-        val shared=runCatching {manager.getWallpaperId(WallpaperManager.FLAG_LOCK)<0}.getOrDefault(false)
-        val flag=if(shared)WallpaperManager.FLAG_SYSTEM else WallpaperManager.FLAG_LOCK
-        val colors=runCatching {manager.getWallpaperColors(flag)}.getOrNull()
-        val color=colors?.primaryColor?.toArgb() ?: Color.rgb(75,79,101)
-        val tone=IconPalette.wallpaperTone(colors)
+        val previous=request.previousLive
+        val flag=if(previous==null)wallpaperFlag(manager) else WallpaperManager.FLAG_LOCK
+        val colors=if(previous==null)runCatching {manager.getWallpaperColors(flag)}.getOrNull() else null
+        val color=previous?.color ?: colors?.primaryColor?.toArgb() ?: Color.rgb(75,79,101)
+        val tone=previous?.wallpaperTone ?: IconPalette.wallpaperTone(colors)
+        val livePackage=previous?.livePackage ?: activeLivePackage(manager,flag)
         var sourceName="file"
-        val liveWallpaper=runCatching {manager.wallpaperInfo!=null}.getOrDefault(false)
         // System UI's wallpaper-only capture never includes the notification
         // stack, clocks or the bouncer itself.
-        val live=if(liveWallpaper)readVisibleWallpaper(request.context) else null
+        val liveHeight=minOf(request.height,if(PerformancePolicy.economy)720 else 1080)
+        val liveSurface=livePackage?.let {name->
+            previous?.captureSurface?.takeIf {it.isValid}
+                ?: runCatching {wallpaperSurface(request.context,request.animation,name)}.getOrNull()
+        }
+        val sampled=liveSurface?.let {captureWallpaperLayer(request.context,it,liveHeight)}
+        val live=livePackage?.let {
+            sampled ?: readVisibleWallpaper(request.context)
+        }
+        if(live==null && previous!=null)return previous.copy(captureSurface=null)
         val source=if(live!=null){
             sourceName="live wallpaper layer"
             live
@@ -106,37 +157,67 @@ internal object LockscreenBackdrop {
             readVisibleWallpaper(request.context)
         } ?: run {
             sourceName="ColorOS wallpaper layer"
-            captureWallpaperLayer(request,manager,flag)
+            runCatching {wallpaperSurface(request.context,request.animation,livePackage)}.getOrNull()
+                ?.let {captureWallpaperLayer(request.context,it,request.height)}
         } ?: run {
             sourceName="ColorOS wallpaper bitmap"
             request.controller?.let {controller->
                 runCatching {XposedHelpers.callMethod(controller,"copyWallpaperBitmap") as? Bitmap}.getOrNull()
             }
         }
-        if(source==null || source.isRecycled)return Frame(emptyMap(),color,"unavailable",tone)
-        val height=minOf(source.height,request.height)
+        if(source==null || source.isRecycled)
+            return Frame(emptyMap(),color,"unavailable",tone,livePackage!=null,livePackage)
+        val height=minOf(source.height,if(live!=null)liveHeight else request.height)
         val width=(source.width.toFloat()*height/source.height).roundToInt().coerceAtLeast(1)
         val scaled=Bitmap.createScaledBitmap(source,width,height,true)
         val images=LinkedHashMap<Int,Bitmap>()
         try {
-            for(radius in request.radii){
+            for(key in request.radii){
+                val radius=key%100
+                val opacity=if(key<100)100 else key/100
                 val amount=radius*height/800f
-                val output=if(amount<1f)scaled else runCatching {
-                    GpuWallpaperBlur.blurPhoto(scaled,width,height,amount)
+                val output=if(amount<1f || opacity<=0)scaled else runCatching {
+                    GpuWallpaperBlur.blurPhoto(scaled,width,height,amount,opacity)
                 }.getOrElse {
                     val readable=if(scaled.config==Bitmap.Config.HARDWARE)scaled.copy(Bitmap.Config.ARGB_8888,false) else scaled
-                    try {FastBlur.blur(readable,amount.roundToInt())}
+                    try {com.cosmod.launcherglass.util.GlassBlur.bitmap(readable,amount,opacity)}
                     finally {if(readable!==scaled)readable.recycle()}
                 }
-                images[radius]=output
+                images[key]=output
             }
+        }catch(t:Throwable){
+            recycleImages(images.values.filter {it!==source && it!==scaled})
+            images.clear()
+            throw t
         }finally {
-            GpuWallpaperBlur.closePhoto()
+            if(live==null)GpuWallpaperBlur.closePhoto()
             if(scaled!==source && images.values.none {it===scaled})scaled.recycle()
             if(images.values.none {it===source})source.recycle()
         }
-        return Frame(images,color,sourceName,tone,live!=null)
+        return Frame(images,color,sourceName,tone,livePackage!=null,livePackage,liveSurface.takeIf {sampled!=null})
     }
+
+    private fun recycleImages(images:Collection<Bitmap>){
+        images.toSet().forEach(Bitmap::recycle)
+    }
+
+    fun activeLivePackage(context:Context):String? {
+        val manager=WallpaperManager.getInstance(context)
+        return activeLivePackage(manager,wallpaperFlag(manager))
+    }
+
+    private fun wallpaperFlag(manager:WallpaperManager)=
+        if(runCatching {manager.getWallpaperId(WallpaperManager.FLAG_LOCK)<0}.getOrDefault(false))
+            WallpaperManager.FLAG_SYSTEM else WallpaperManager.FLAG_LOCK
+
+    private fun activeLivePackage(manager:WallpaperManager,flag:Int):String?=runCatching {
+        if(Build.VERSION.SDK_INT>=34){
+            manager.getWallpaperInfo(flag)?.packageName ?: manager.wallpaperInfo?.packageName?.takeIf {
+                flag==WallpaperManager.FLAG_SYSTEM ||
+                    manager.getWallpaperId(WallpaperManager.FLAG_LOCK)==manager.getWallpaperId(WallpaperManager.FLAG_SYSTEM)
+            }
+        }else manager.wallpaperInfo?.packageName?.takeIf {flag==WallpaperManager.FLAG_SYSTEM}
+    }.getOrNull()
 
     private class VisibleWallpaperApi {
         val service=Class.forName("android.view.WindowManagerGlobal").getMethod("getWindowManagerService").invoke(null)
@@ -168,14 +249,10 @@ internal object LockscreenBackdrop {
     }
     private val layerApi by lazy {runCatching {LayerApi()}.getOrNull()}
 
-    private fun captureWallpaperLayer(request:Request,manager:WallpaperManager,flag:Int):Bitmap?=runCatching {
+    private fun captureWallpaperLayer(context:Context,surface:SurfaceControl,height:Int):Bitmap?=runCatching {
         val api=layerApi ?: return@runCatching null
-        val livePackage=if(Build.VERSION.SDK_INT>=34){
-            runCatching {manager.getWallpaperInfo(flag)?.packageName}.getOrNull()
-        }else null
-        val surface=wallpaperSurface(request.context,request.animation,livePackage) ?: return@runCatching null
-        val screen=request.context.resources.displayMetrics
-        val scale=(request.height.toFloat()/screen.heightPixels.coerceAtLeast(1)).coerceIn(.15f,1f)
+        val screen=context.resources.displayMetrics
+        val scale=(height.toFloat()/screen.heightPixels.coerceAtLeast(1)).coerceIn(.15f,1f)
         val crop=Rect(0,0,screen.widthPixels,screen.heightPixels)
         val result=api.layers.invoke(null,surface,crop,scale) ?: return@runCatching null
         val buffer=api.buffer.invoke(result) as? HardwareBuffer ?: return@runCatching null

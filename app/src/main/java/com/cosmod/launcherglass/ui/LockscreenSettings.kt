@@ -37,7 +37,9 @@ internal object LockscreenSettings {
     val WIDGET_TINT_TRANSPARENCY=Surface.WIDGETS.key("tint_transparency")
     data class WidgetTint(val saturation:Int,val transparency:Int)
     data class Profile(val enabled:Boolean,val liquid:Boolean,val blur:Int,val opacity:Int,val corner:Int,
-        val width:Int,val distortion:Int,val dispersion:Int,val widgetTint:WidgetTint?,val saturation:Int=100)
+        val width:Int,val distortion:Int,val dispersion:Int,val widgetTint:WidgetTint?,val saturation:Int=100,
+        val engine:GlassEngineSettings.Optics?=null,val backdropBrightness:Int=100,val blurOpacity:Int=100,
+        val lensHeight:Int=GlassEngineSettings.Parameter.LENS_HEIGHT.default)
 
     private fun defaults(surface:Surface)=mapOf("style" to 1,"blur" to surface.defaultBlur,
         "opacity" to surface.defaultOpacity,"corner" to when(surface){
@@ -93,7 +95,10 @@ internal object LockscreenSettings {
         val tint=if(surface==Surface.WIDGETS && prefs.getBoolean(WIDGET_WALLPAPER_TINT)){
             WidgetTint(value("tint_saturation"),value("tint_transparency"))
         }else null
+        val optics=GlassEngineSettings.optics(prefs,surface.key("new_engine"))
         return Profile(prefs.getBoolean(surface.key("enabled"),false),value("style")==1 && Build.VERSION.SDK_INT>=33,
-            value("blur"),value("opacity"),value("corner"),value("width"),value("distortion"),value("dispersion"),tint,if(surface.adjustableSaturation)value("saturation") else 100)
+            value("blur"),value("opacity"),value("corner"),value("width"),value("distortion"),value("dispersion"),tint,
+            if(surface.adjustableSaturation)value("saturation") else 100,
+            optics.takeIf {prefs.getBoolean(surface.key("new_engine"))},optics.backdropBrightness,optics.blur.opacity,optics.lensHeight)
     }
 }

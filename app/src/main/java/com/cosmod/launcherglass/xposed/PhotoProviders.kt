@@ -7,8 +7,12 @@ internal object PhotoProviders {
     private val pinterestPhotos=setOf("com.pinterest.widget.SingleImageWidget","com.pinterest.widget.GalleryWallWidget")
     private val clockPackages=setOf("com.coloros.alarmclock","com.oplus.alarmclock","com.oneplus.deskclock",
         "com.oneplus.clock","com.google.android.deskclock","com.android.deskclock","com.android.alarmclock")
-    fun isClock(packageName:String?,className:String?):Boolean =
-        packageName in clockPackages || className?.substringAfterLast('.')?.contains("clock",ignoreCase=true)==true
+    fun isClock(packageName:String?,className:String?):Boolean {
+        val name=className.orEmpty().lowercase()
+        val simple=name.substringAfterLast('.')
+        if(".smallweather." in name || "weather" in simple && "clock" !in simple)return false
+        return packageName in clockPackages || "clock" in simple
+    }
 
     fun supports(packageName:String?,className:String?,cardType:Int?,card:Boolean):Boolean {
         if(packageName in galleries){

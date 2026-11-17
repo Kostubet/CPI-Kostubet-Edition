@@ -6,13 +6,17 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.RenderNode
+import android.graphics.RenderEffect
 
 internal class VolumeRim {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private var height = 0f
     private var strength = -1
+    private val node=RenderNode("CPI.glassRim").apply {setClipToBounds(false)}
+    private var key=""
 
-    fun draw(canvas: Canvas, bounds: RectF, radius: Float, stroke: Float, percent: Int) {
+    fun draw(canvas: Canvas, bounds: RectF, radius: Float, stroke: Float, percent: Int,softness:Int=0) {
         if (percent <= 0 || bounds.isEmpty) return
         if (height != bounds.height() || strength != percent) {
             height = bounds.height()
@@ -28,7 +32,17 @@ internal class VolumeRim {
         val corner = (radius - inset).coerceAtLeast(0f)
         val saved = canvas.save()
         canvas.translate(bounds.left, bounds.top)
-        canvas.drawRoundRect(inset, inset, bounds.width() - inset, height - inset, corner, corner, paint)
+        if(softness>0 && canvas.isHardwareAccelerated){
+            val next="${bounds.width()}:$height:$radius:$stroke:$percent:$softness"
+            if(key!=next || !node.hasDisplayList()){
+                node.setPosition(0,0,bounds.width().toInt().coerceAtLeast(1),height.toInt().coerceAtLeast(1))
+                val target=node.beginRecording()
+                try {target.drawRoundRect(inset,inset,bounds.width()-inset,height-inset,corner,corner,paint)}finally {node.endRecording()}
+                val blur=(stroke*softness*.025f).coerceAtLeast(.01f)
+                node.setRenderEffect(RenderEffect.createBlurEffect(blur,blur,Shader.TileMode.CLAMP));key=next
+            }
+            canvas.drawRenderNode(node)
+        }else canvas.drawRoundRect(inset, inset, bounds.width() - inset, height - inset, corner, corner, paint)
         canvas.restoreToCount(saved)
     }
 }

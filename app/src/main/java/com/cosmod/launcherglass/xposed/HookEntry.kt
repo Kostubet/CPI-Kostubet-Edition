@@ -3,6 +3,7 @@ package com.cosmod.launcherglass.xposed
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.view.View
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
@@ -25,6 +26,12 @@ class HookEntry : IXposedHookLoadPackage {
                     "isModuleActive",
                     XC_MethodReplacement.returnConstant(true)
                 )
+                val bridge=de.robv.android.xposed.XposedBridge::class.java
+                val tag=runCatching {bridge.getDeclaredField("TAG").get(null) as? String}.getOrNull()
+                val startup=runCatching {bridge.classLoader?.loadClass("org.matrix.vector.Startup")}.getOrNull()!=null
+                XposedHelpers.findAndHookMethod("com.cosmod.launcherglass.ui.MainActivity",lpparam.classLoader,
+                    "isVectorFramework",XC_MethodReplacement.returnConstant(
+                        com.cosmod.launcherglass.util.FrameworkIdentity.isVector(tag,startup)))
                 GlassLogger.i("HookEntry", "Self-activation check hooked in MainActivity -> ACTIVE")
             } catch (t: Throwable) {
                 GlassLogger.e("HookEntry", "Failed to hook MainActivity self-activation", t)
@@ -59,7 +66,7 @@ class HookEntry : IXposedHookLoadPackage {
                 Oxygen16IconSupport.configure(appCtx)
                 PrefsHelper.init(appCtx)
                 com.cosmod.launcherglass.util.HostControl.install(appCtx,"launcher",{
-                    "enabled=${PrefsHelper.enabled}, photo height=${PrefsHelper.widgets.fadeHeight}, strength=${PrefsHelper.widgets.fade}, alpha=${PrefsHelper.widgets.opacity}\n"+AppWindowTilt.diagnostics()+"\n"+EdgeLight.diagnostics()
+                    "enabled=${PrefsHelper.enabled}, photo height=${PrefsHelper.widgets.fadeHeight}, strength=${PrefsHelper.widgets.fade}, alpha=${PrefsHelper.widgets.opacity}\n"+AppGenieTransition.diagnostics()+"\n"+Ba31kAppTransitions.diagnostics()+"\n"+Ba31kShadeMotion.diagnostics()+"\n"+EdgeLight.diagnostics()
                 })
                 try {
                     val filter = android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED).apply {
@@ -72,6 +79,7 @@ class HookEntry : IXposedHookLoadPackage {
                             if(!PrefsHelper.enabled)return
                             when(i?.action) {
                                 android.content.Intent.ACTION_SCREEN_OFF -> {
+                                    Ba31kShadeMotion.stop()
                                     DockMaterial.stopUnlockBlur()
                                     com.cosmod.launcherglass.util.LauncherWallpaperCapture.onScreenOff()
                                     com.cosmod.launcherglass.util.LiveBlurEngine.onActivityPaused()
@@ -157,11 +165,21 @@ class HookEntry : IXposedHookLoadPackage {
                         "onResume",
                         object : XC_MethodHook() {
                             override fun beforeHookedMethod(param: MethodHookParam) {
-                                (param.thisObject as? Activity)?.window?.decorView?.let {
-                                    com.cosmod.launcherglass.util.LauncherWallpaperCapture.setWindow(it)
+                                (param.thisObject as? Activity)?.let { launcher ->
+                                    launcher.window?.decorView?.let {
+                                        com.cosmod.launcherglass.util.LauncherWallpaperCapture.setWindow(it)
+                                    }
                                 }
                                 com.cosmod.launcherglass.util.LiveBlurEngine.onActivityResumed()
                                 com.cosmod.launcherglass.util.WallpaperHelper.onLauncherWindowReady()
+                            }
+                            override fun afterHookedMethod(param: MethodHookParam) {
+                                if (!param.hasThrowable()) {
+                                    (param.thisObject as? Activity)?.let { launcher ->
+                                        Ba31kShadeMotion.bind(launcher)
+                                        Ba31kAppTransitions.launcherResumed(launcher.classLoader)
+                                    }
+                                }
                             }
                         }
                     )
@@ -171,6 +189,7 @@ class HookEntry : IXposedHookLoadPackage {
                         "onPause",
                         object : XC_MethodHook() {
                             override fun afterHookedMethod(param: MethodHookParam) {
+                                (param.thisObject as? Activity)?.let(Ba31kShadeMotion::unbind)
                                 com.cosmod.launcherglass.util.LiveBlurEngine.onActivityPaused()
                             }
                         }
@@ -280,6 +299,8 @@ class HookEntry : IXposedHookLoadPackage {
                         override fun afterHookedMethod(param: MethodHookParam) {
                             if (param.result == false || param.hasThrowable()) {
                                 com.cosmod.launcherglass.util.LiveBlurEngine.onHomeReturnStarted()
+                            } else {
+                                PhotoWidgetMaterial.onAppLaunched(param.args.firstOrNull() as? View)
                             }
                         }
                     })

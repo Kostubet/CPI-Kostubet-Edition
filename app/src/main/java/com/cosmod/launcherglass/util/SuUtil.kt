@@ -4,9 +4,18 @@ object SuUtil {
 
     fun execute(command: String): Boolean {
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-            val exitCode = process.waitFor()
-            exitCode == 0
+            val process=ProcessBuilder("su","-c",command).redirectErrorStream(true).start()
+            val drain=Thread({runCatching {process.inputStream.use {input->
+                val buffer=ByteArray(4096);while(input.read(buffer)>=0)Unit
+            }}},"CPIRootOutput").apply {isDaemon=true;start()}
+            try {
+                if(!process.waitFor(12,java.util.concurrent.TimeUnit.SECONDS)){
+                    process.destroyForcibly();false
+                }else process.exitValue()==0
+            }finally {
+                drain.join(200)
+                if(!drain.isAlive)runCatching {process.inputStream.close()}
+            }
         } catch (_: Exception) {
             false
         }

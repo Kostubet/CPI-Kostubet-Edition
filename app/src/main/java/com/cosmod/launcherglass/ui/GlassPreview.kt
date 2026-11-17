@@ -2,9 +2,6 @@ package com.cosmod.launcherglass.ui
 
 import android.app.WallpaperManager
 import android.content.Context
-import android.content.Intent
-import android.content.pm.ApplicationInfo
-import android.graphics.drawable.Drawable
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
@@ -21,35 +18,81 @@ import android.view.View
 import androidx.annotation.RequiresApi
 import androidx.core.graphics.ColorUtils
 import com.cosmod.launcherglass.util.BackdropVibrancy
-import com.cosmod.launcherglass.util.FastBlur
 import com.cosmod.launcherglass.util.VolumeRim
+import com.cosmod.launcherglass.util.PreviewIcons
+import com.cosmod.launcherglass.util.IconPalette
+import com.cosmod.launcherglass.util.FolderPreviewKind
+import com.cosmod.launcherglass.xposed.GlassGeometry
 import com.cosmod.launcherglass.xposed.GlassStyle
 import com.cosmod.launcherglass.xposed.LiquidGlassShader
 
 /** A small sample scene rendered with the same lens shader as the launcher. */
-internal class GlassPreview(context: Context, private val dark: Boolean) : View(context) {
+internal class GlassPreview(context: Context, private val dark: Boolean, useDeviceWallpaperColor:Boolean=true) : View(context) {
     data class Material(val enabled: Boolean, val liquid: Boolean, val blur: Int, val opacity: Int,
         val width: Int, val distortion: Int, val dispersion: Int, val corner: Int,
         val saturation: Int = 100, val vibrancy: Int = 0, val brightness: Int = 50,
-        val tiles: Int = 1, val vertical: Boolean = false, val rimStrength: Int = 100)
+        val tiles: Int = 1, val vertical: Boolean = false, val rimStrength: Int = 100,
+        val iconPalette: IconPalette? = null, val plateColor: Int? = null, val backgroundFilter:ColorMatrixColorFilter? = null,
+        val contentOpacity:Int=100,val fade:Int=0,val fadeHeight:Int=0,val fadeSmoothness:Int=90,
+        val shade:Int=0,val banner:Boolean=false,val plateTint:Int=Color.TRANSPARENT,val plateFade:Int=0,
+        val topDarkness:Int=0,val shadowStrength:Int=0,val shadowSize:Int=0,val elementFilter:android.graphics.ColorFilter?=null,
+        val iconScale:Int=100,val rimWidth:Int=25,val rimSoftness:Int=65,val elementsFollowBackground:Boolean=false,
+        val volumeHeight:Int=100)
 
     private var material: Material? = null
     private val density = resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val target = RectF()
     private val volumeRim = VolumeRim()
+    private val shadowNode=android.graphics.RenderNode("CPI.previewShadow").apply {setClipToBounds(false)}
+    private val shadowOutline=android.graphics.Outline()
+    private var shadowKey=""
     private val crop = RectF()
     private val source = RectF()
     private val bitmapMatrix = Matrix()
-    private var icons: List<Drawable> = emptyList()
+    private var icons: List<PreviewIcons.Icon> = emptyList()
+    private var contentScene:NativePreviewScenes.Scene?=null
+    private var folderScenes = emptyMap<FolderPreviewKind, NativePreviewScenes.Scene>()
+    private var largeFolderMaterial: Material? = null
+    private var widgetScene=false
+    private var edgeScope=-1
+    private var newEngine=false
+    private var engineOptics=GlassEngineSettings.Optics()
+    private var largeFolderEngine=false
+    private var largeFolderOptics=GlassEngineSettings.Optics()
+    private var shape:Bitmap?=null
+    private var shapeKey=""
+    private val bounds=android.graphics.Rect()
+    fun setContentScene(scene:NativePreviewScenes.Scene?,widget:Boolean){contentScene=scene;widgetScene=widget;invalidate()}
+    fun setFolderScenes(scenes: Map<FolderPreviewKind, NativePreviewScenes.Scene>) {
+        if (folderScenes == scenes) return
+        folderScenes = scenes
+        invalidate()
+    }
+
+    fun setLargeFolderMaterial(profile: Material?) {
+        if (largeFolderMaterial == profile) return
+        largeFolderMaterial = profile
+        invalidate()
+    }
+    fun configure(bundle:android.os.Bundle,scope:Int){
+        edgeScope=scope
+        newEngine=com.cosmod.launcherglass.xposed.KyantGlassEngine.enabled(scope,bundle)
+        engineOptics=com.cosmod.launcherglass.xposed.KyantGlassEngine.optics(scope,bundle)
+        largeFolderEngine=bundle.getBoolean(GlassEngineSettings.LARGE_FOLDERS,false)
+        largeFolderOptics=GlassEngineSettings.optics(bundle,GlassEngineSettings.LARGE_FOLDERS)
+        com.cosmod.launcherglass.xposed.EdgeLight.update(bundle)
+        invalidate()
+    }
     private var wallpaper: Bitmap? = null
     private val clip = android.graphics.Path()
-    private val wallpaperColor = runCatching {
+    private val wallpaperColor = (if(useDeviceWallpaperColor)runCatching {
         WallpaperManager.getInstance(context).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)?.primaryColor?.toArgb()
-    }.getOrNull() ?: 0xff3e4687.toInt()
+    }.getOrNull() else null) ?: if(useDeviceWallpaperColor)0xff3e4687.toInt()
+        else if(dark)0xff333942.toInt() else 0xffbcc4d0.toInt()
     private var backdrop: Bitmap? = null
-    private var sample: Bitmap? = null
-    private var sampleKey = -1
+    private data class BlurSample(val radius:Int,val vibrancy:Int,val brightness:Int,val opacity:Int)
+    private val samples=android.util.LruCache<BlurSample,Bitmap>(3)
     private val optics by lazy { if (Build.VERSION.SDK_INT >= 33) Optics() else null }
 
     fun show(next: Material) {
@@ -58,12 +101,17 @@ internal class GlassPreview(context: Context, private val dark: Boolean) : View(
         invalidate()
     }
 
-    fun setScene(wallpaper: Bitmap?, icons: List<Drawable>) {
-        if (this.wallpaper !== wallpaper) {
-            this.wallpaper = wallpaper
-            rebuildBackdrop()
-        }
+    fun setScene(wallpaper: Bitmap?, icons: List<PreviewIcons.Icon>) {
+        setWallpaper(wallpaper)
+        if(this.icons===icons)return
         this.icons = icons
+        invalidate()
+    }
+
+    fun setWallpaper(wallpaper: Bitmap?) {
+        if (this.wallpaper === wallpaper) return
+        this.wallpaper = wallpaper
+        rebuildBackdrop()
         invalidate()
     }
 
@@ -91,31 +139,7 @@ internal class GlassPreview(context: Context, private val dark: Boolean) : View(
                 canvas.drawColor(ColorUtils.blendARGB(wallpaperColor, 0xff101828.toInt(), .4f))
             }
         }
-        sample = null
-        sampleKey = -1
-    }
-
-    companion object {
-        fun systemIcons(context: Context): List<Drawable> {
-            val packages = context.packageManager
-            val launchers = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-            return packages.queryIntentActivities(launchers, 0).asSequence()
-                .filter { it.activityInfo.applicationInfo.flags and (ApplicationInfo.FLAG_SYSTEM or
-                    ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0 }
-                .distinctBy { it.activityInfo.packageName }
-                .sortedBy {
-                    val name = it.activityInfo.packageName
-                    when {
-                        name == "com.android.settings" -> 0
-                        "camera" in name -> 1
-                        "contacts" in name || "dialer" in name -> 2
-                        else -> 3
-                    }
-                }
-                .mapNotNull { runCatching { it.loadIcon(packages).mutate() }.getOrNull() }
-                .take(3)
-                .toList()
-        }
+        samples.evictAll()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -126,49 +150,183 @@ internal class GlassPreview(context: Context, private val dark: Boolean) : View(
         canvas.clipPath(clip)
         paint.color = Color.WHITE
         canvas.drawBitmap(base, null, target, paint)
-        val radius = (current.blur / if (current.liquid) 5 else 3).coerceIn(0, 18)
-        val key = radius * 201 + current.vibrancy
-        if (sampleKey != key) {
-            val vivid = BackdropVibrancy.applyCpu(base, current.vibrancy)
-            sample = if (radius == 0) vivid else FastBlur.blur(vivid, radius)
-            sampleKey = key
+        if (folderScenes.isNotEmpty()) {
+            drawFolders(canvas, base, current)
+            canvas.restoreToCount(saved)
+            return
         }
-        val input = sample ?: base
-        val color = ColorMatrix().apply { setSaturation(current.saturation * .01f) }
-        val filter = ColorMatrixColorFilter(color)
-        val itemW = when {
-            current.vertical -> 38 * density
-            current.tiles > 1 -> minOf(52 * density, width * .21f)
-            else -> width * .72f
-        }
-        val itemH = if (current.vertical) height * .80f else minOf(height * .60f, itemW)
-        val gap = 12 * density
-        val total = itemW * current.tiles + gap * (current.tiles - 1)
-        val top = (height - itemH) * .5f
-        for (index in 0 until current.tiles) {
-            val left = (width - total) * .5f + index * (itemW + gap)
-            crop.set(left, top, left + itemW, top + itemH)
-            source.set(crop.left * input.width / width, crop.top * input.height / height,
-                crop.right * input.width / width, crop.bottom * input.height / height)
-            drawPlate(canvas, current, input, filter)
-            if (current.tiles > 1 && icons.isNotEmpty()) icons[index % icons.size].let { icon ->
-                val size = (itemW * .45f).toInt()
-                val x = (crop.centerX() - size / 2).toInt()
-                val y = (crop.centerY() - size / 2).toInt()
-                icon.setBounds(x, y, x + size, y + size)
-                icon.draw(canvas)
-            }
+        val input = blurred(base, current)
+        val filter = current.backgroundFilter
+        val iconScene=current.tiles>1 && icons.isNotEmpty()
+        val tiles=if(iconScene)minOf(3,icons.size)else current.tiles
+        val slotWidth=if(iconScene)(width-24*density)/tiles else width*.72f
+        val gap=12*density
+        val ratios=if(iconScene)List(tiles){i->icons.getOrNull(i)?.source?.let {it.width.toFloat()/it.height}?.coerceIn(.33f,3f) ?: 1f}else emptyList()
+        val baseHeight=if(ratios.isEmpty())0f else minOf(52*density,height*.68f,(width-24*density-gap*(tiles-1))/(ratios.sum()*1.3f))
+        val iconHeight=baseHeight*current.iconScale/100f
+        var iconLeft=(width-iconHeight*ratios.sum()-gap*(tiles-1))*.5f
+        for(index in 0 until tiles){
+            val icon=if(iconScene)icons.getOrNull(index)else null
+            val ratio=(icon?.source ?: contentScene?.content)?.let {it.width.toFloat()/it.height}?.coerceIn(.08f,10f) ?: 1f
+            val maxHeight=if(current.vertical)height*.52f*current.volumeHeight/100f else minOf(height*.60f,52*density)
+            val sceneWidth = if (current.banner) width * .94f else width * .91f
+            val itemW=if(iconScene)iconHeight*ratio else if(current.vertical)minOf(30*density,width*.55f)
+                else if(contentScene!=null)minOf(sceneWidth,height*.84f*ratio) else slotWidth
+            val itemH=if(iconScene)iconHeight else if(current.vertical)maxHeight
+                else if(contentScene!=null)itemW/ratio else minOf(maxHeight,itemW)
+            val centerX=if(iconScene)iconLeft+itemW*.5f else width*.5f
+            iconLeft+=itemW+gap
+            val top=(height-itemH)*.5f
+            crop.set(centerX-itemW*.5f,top,centerX+itemW*.5f,top+itemH)
+            source.set(crop.left*input.width/width,crop.top*input.height/height,crop.right*input.width/width,crop.bottom*input.height/height)
+            if(icon==null){
+                val scene = contentScene
+                if (scene?.shape != null) {
+                    drawNativeSurface(canvas, current, input, scene, scene.shape)
+                    continue
+                }
+                if(current.shadowStrength>0 && current.shadowSize>0){
+                    val radius=minOf(crop.width(),crop.height())*current.corner*.01f
+                    if(canvas.isHardwareAccelerated){
+                        val key="${crop.width()}:${crop.height()}:$radius:${current.shadowStrength}:${current.shadowSize}"
+                        if(key!=shadowKey || !shadowNode.hasDisplayList()){
+                            shadowNode.setPosition(crop.left.toInt(),crop.top.toInt(),crop.right.toInt(),crop.bottom.toInt())
+                            shadowOutline.setRoundRect(0,0,shadowNode.width,shadowNode.height,radius);shadowOutline.alpha=1f;shadowNode.setOutline(shadowOutline)
+                            shadowNode.elevation=current.shadowSize*density
+                            val color=Color.argb(current.shadowStrength*255/100,0,0,0)
+                            shadowNode.ambientShadowColor=color;shadowNode.spotShadowColor=color
+                            shadowNode.beginRecording();shadowNode.endRecording();shadowKey=key
+                        }
+                        canvas.enableZ()
+                        try {canvas.drawRenderNode(shadowNode)}finally {canvas.disableZ()}
+                    }
+                }
+                drawPlate(canvas,current,input,filter)
+                contentScene?.let {drawContent(canvas,current,it,filter)}
+                drawEdges(canvas,current,null)
+                if(widgetScene && !current.elementsFollowBackground)contentScene?.let {scene->
+                    paint.color=Color.WHITE;paint.colorFilter=current.elementFilter
+                    scene.text?.let {canvas.drawBitmap(it,null,crop,paint)}
+                    scene.logos?.let {canvas.drawBitmap(it,null,crop,paint)}
+                    paint.colorFilter=null
+                }
+            }else drawIcon(canvas,current,input,filter,icon)
         }
         canvas.restoreToCount(saved)
     }
 
-    private fun drawPlate(canvas: Canvas, current: Material, input: Bitmap, filter: ColorMatrixColorFilter) {
-        val rounding = minOf(crop.width(), crop.height()) * current.corner * .01f
-        val tint = if (dark) Color.BLACK else Color.WHITE
+    private fun blurred(base: Bitmap, current: Material): Bitmap {
+        val radius = if (current.banner) {
+            (current.blur * base.width / resources.displayMetrics.widthPixels.toFloat()).toInt().coerceIn(0, 40)
+        } else {
+            (current.blur / if (current.liquid) 5 else 3).coerceIn(0, 18)
+        }
+        val optics=if(current===largeFolderMaterial)largeFolderOptics else engineOptics
+        val opacity=optics.blur.opacity
+        if ((radius == 0 || opacity == 0) && current.vibrancy == 0 && current.brightness == 50) return base
+        val key=BlurSample(radius,current.vibrancy,current.brightness,opacity)
+        samples.get(key)?.let {return it}
+        val vivid=BackdropVibrancy.applyCpu(base,current.vibrancy)
+        var blurred=vivid
+        var prepared:Bitmap?=null
+        try {
+            if(radius>0 && opacity>0)blurred=com.cosmod.launcherglass.util.GlassBlur.bitmap(vivid,radius.toFloat(),opacity)
+            return com.cosmod.launcherglass.util.ShadowTone.applyCpu(blurred,current.brightness).also {
+                prepared=it
+                samples.put(key,it)
+            }
+        } finally {
+            if(blurred!==base && blurred!==vivid && blurred!==prepared)blurred.recycle()
+            if(vivid!==base && vivid!==prepared)vivid.recycle()
+        }
+    }
+
+    private fun drawFolders(canvas: Canvas, base: Bitmap, current: Material) {
+        val gap = 10 * density
+        val totalWidth = folderScenes.values.sumOf { it.content.width }
+        val maxHeight = folderScenes.values.maxOf { it.content.height }
+        val available = (width - gap * (folderScenes.size + 1)).coerceAtLeast(1f)
+        val scale = minOf(available / totalWidth, height * .8f / maxHeight)
+        var left = (width - (totalWidth * scale + gap * (folderScenes.size - 1))) / 2f
+        for (kind in FolderPreviewKind.entries) {
+            val scene = folderScenes[kind] ?: continue
+            val shape = scene.shape ?: continue
+            val profile = if (kind == FolderPreviewKind.LARGE) largeFolderMaterial ?: current else current
+            val itemWidth = scene.content.width * scale
+            val itemHeight = scene.content.height * scale
+            val top = (height - itemHeight) / 2f
+            crop.set(left, top, left + itemWidth, top + itemHeight)
+            val input = blurred(base, profile)
+            source.set(crop.left * input.width / width, crop.top * input.height / height,
+                crop.right * input.width / width, crop.bottom * input.height / height)
+            drawNativeSurface(canvas, profile, input, scene, shape)
+            left += itemWidth + gap
+        }
+    }
+
+    private fun drawNativeSurface(
+        canvas: Canvas, current: Material, input: Bitmap, scene: NativePreviewScenes.Scene, mask: Bitmap,
+    ) {
+        val plate = canvas.saveLayer(crop, null)
+        try {
+            drawPlate(canvas, current, input, current.backgroundFilter, mask)
+            paint.color = Color.WHITE
+            paint.colorFilter = null
+            canvas.drawBitmap(scene.content, null, crop, paint)
+            paint.blendMode = android.graphics.BlendMode.DST_IN
+            canvas.drawBitmap(mask, null, crop, paint)
+        } finally {
+            paint.blendMode = null
+            canvas.restoreToCount(plate)
+        }
+        drawEdges(canvas, current, mask)
+    }
+
+    private fun drawIcon(canvas: Canvas, current: Material, input: Bitmap,
+                         filter: ColorMatrixColorFilter?, icon: PreviewIcons.Icon) {
+        val palette = current.iconPalette
+        paint.color = Color.WHITE
+        if (!current.enabled && palette?.custom != true && palette?.whiteGlyph != true) {
+            canvas.drawBitmap(icon.source, null, crop, paint)
+            return
+        }
+        val mask=if(current.enabled && current.liquid)GlassGeometry.refinedMask(icon.layers.plateMaskBitmap)
+            else icon.layers.plateMaskBitmap
+        val saved = canvas.saveLayer(crop, null)
+        try {
+            if (current.enabled) drawPlate(canvas, current, input, filter, mask)
+            else {
+                paint.color = palette?.background ?: icon.layers.bgColor
+                canvas.drawRect(crop, paint)
+            }
+            paint.color = Color.WHITE
+            paint.blendMode = android.graphics.BlendMode.DST_IN
+            canvas.drawBitmap(mask, null, crop, paint)
+            paint.blendMode = null
+        } finally {
+            paint.blendMode = null
+            canvas.restoreToCount(saved)
+        }
+        paint.colorFilter = if (palette?.custom == true || palette?.whiteGlyph == true) palette.filter else null
+        canvas.drawBitmap(icon.layers.glyphBitmap, null, crop, paint)
+        paint.colorFilter = null
+        drawEdges(canvas,current,mask)
+    }
+
+    private fun drawPlate(canvas: Canvas, current: Material, input: Bitmap, filter: ColorMatrixColorFilter?,
+                          nativeMask: Bitmap? = null) {
+        val rounding = minOf(crop.width(), crop.height()) *
+            (nativeMask?.let(GlassGeometry::rounding) ?: (current.corner * .01f))
+        val tint = current.plateColor ?: current.iconPalette?.takeIf { it.custom }?.background ?: if (dark) Color.BLACK else Color.WHITE
         paint.color = Color.WHITE
         if (current.enabled) {
-            val lens = if (current.liquid && Build.VERSION.SDK_INT >= 33 && canvas.isHardwareAccelerated) optics else null
-            val shader = lens?.shader(input, source, crop.width().toInt(), crop.height().toInt(), rounding, filter, current)
+            val large=current===largeFolderMaterial
+            val selectedOptics=if(large)largeFolderOptics else engineOptics
+            val backdropFilter=com.cosmod.launcherglass.xposed.BackdropBrightness.filter(filter,selectedOptics.backdropBrightness)
+            val shader = if (current.liquid && Build.VERSION.SDK_INT >= 33 && canvas.isHardwareAccelerated) {
+                optics?.shader(input,source,crop.width().toInt(),crop.height().toInt(),rounding,backdropFilter,current,nativeMask,
+                    if(large)largeFolderEngine else newEngine,selectedOptics)
+            } else null
             if (shader != null) {
                 val save = canvas.save()
                 canvas.translate(crop.left, crop.top)
@@ -176,35 +334,83 @@ internal class GlassPreview(context: Context, private val dark: Boolean) : View(
                 canvas.drawRect(0f, 0f, crop.width(), crop.height(), paint)
                 canvas.restoreToCount(save)
             } else {
-                paint.shader = BitmapShader(input, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                paint.shader = GlassGeometry.wallpaperShader(input).apply {
                     bitmapMatrix.setRectToRect(source, crop, Matrix.ScaleToFit.FILL)
                     setLocalMatrix(bitmapMatrix)
                 }
-                paint.colorFilter = filter
-                canvas.drawRoundRect(crop, rounding, rounding, paint)
+                paint.colorFilter = backdropFilter
+                if (nativeMask == null) canvas.drawRoundRect(crop, rounding, rounding, paint)
+                else canvas.drawRect(crop, paint)
             }
             paint.shader = null
             paint.colorFilter = null
             paint.color = ColorUtils.setAlphaComponent(tint, current.opacity * 255 / 100)
-            canvas.drawRoundRect(crop, rounding, rounding, paint)
-            val light = current.brightness - 50
-            if (light != 0) {
-                paint.color = ColorUtils.setAlphaComponent(if (light > 0) Color.WHITE else Color.BLACK, kotlin.math.abs(light))
-                canvas.drawRoundRect(crop, rounding, rounding, paint)
+            if (nativeMask == null) canvas.drawRoundRect(crop, rounding, rounding, paint) else canvas.drawRect(crop, paint)
+
+            if(current.banner){
+                val alpha=Color.alpha(current.plateTint);val rgb=current.plateTint and 0x00ffffff
+                if(alpha>0){
+                    paint.alpha=255
+                    paint.shader=android.graphics.LinearGradient(0f,crop.top,0f,crop.bottom,
+                        intArrayOf(current.plateTint,current.plateTint,rgb or ((alpha*(200-current.plateFade)/200) shl 24),rgb or ((alpha*(100-current.plateFade)/100) shl 24)),
+                        floatArrayOf(0f,.45f,.725f,1f),Shader.TileMode.CLAMP)
+                    canvas.drawRoundRect(crop,rounding,rounding,paint);paint.shader=null
+                }
+                if(current.topDarkness>0){
+                    paint.shader=android.graphics.LinearGradient(0f,crop.top,0f,crop.top+crop.height()*.64f,
+                        Color.argb(current.topDarkness*255/100,0,0,0),Color.TRANSPARENT,Shader.TileMode.CLAMP)
+                    canvas.drawRoundRect(crop,rounding,rounding,paint);paint.shader=null
+                }
+                paint.color=if(current.plateColor==0xff121214.toInt())0x38000000 else 0x20ffffff
+                canvas.drawRoundRect(crop,rounding,rounding,paint)
+                volumeRim.draw(canvas,crop,rounding,density*(.35f+current.rimWidth*.018f),current.rimStrength,current.rimSoftness)
             }
+
         } else {
-            paint.color = 0x9631333d.toInt()
+            paint.color = if(dark)0xff333333.toInt() else 0xfff0f0f0.toInt()
             canvas.drawRoundRect(crop, rounding, rounding, paint)
         }
         if (current.vertical && current.enabled) {
             volumeRim.draw(canvas, crop, rounding, (density * .55f).coerceAtLeast(1f), current.rimStrength)
             return
         }
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = density * .65f
-        paint.color = 0x55ffffff
-        canvas.drawRoundRect(crop, rounding, rounding, paint)
-        paint.style = Paint.Style.FILL
+    }
+
+    private fun drawContent(canvas:Canvas,current:Material,scene:NativePreviewScenes.Scene,filter:ColorMatrixColorFilter?){
+        val save=canvas.saveLayer(crop,null)
+        try {
+            val clipping=android.graphics.Path().apply {val r=minOf(crop.width(),crop.height())*current.corner*.01f;addRoundRect(crop,r,r,android.graphics.Path.Direction.CW)}
+            canvas.clipPath(clipping)
+            paint.color=Color.WHITE;paint.colorFilter=if(widgetScene)filter else null
+            canvas.drawBitmap(scene.content,null,crop,paint);paint.colorFilter=null
+            if(widgetScene && !current.elementsFollowBackground){
+                paint.blendMode=android.graphics.BlendMode.DST_OUT
+                scene.text?.let {canvas.drawBitmap(it,null,crop,paint)}
+                scene.logos?.let {canvas.drawBitmap(it,null,crop,paint)}
+                paint.blendMode=null
+            }
+            if(widgetScene){
+                paint.color=Color.WHITE;paint.alpha=current.contentOpacity*255/100
+                // Text and glyphs are restored above the background-only effects.
+                paint.blendMode=android.graphics.BlendMode.DST_IN;canvas.drawRect(crop,paint);paint.blendMode=null;paint.alpha=255
+                bounds.set(crop.left.toInt(),crop.top.toInt(),crop.right.toInt(),crop.bottom.toInt())
+                com.cosmod.launcherglass.xposed.PhotoFade.apply(canvas,bounds,current.fadeHeight,current.fade,current.fadeSmoothness)
+            }
+        }finally {paint.colorFilter=null;paint.blendMode=null;paint.alpha=255;canvas.restoreToCount(save)}
+    }
+    private fun drawEdges(canvas:Canvas,current:Material,mask:Bitmap?){
+        if(edgeScope<0 || !current.enabled)return
+        val w=crop.width().toInt().coerceAtLeast(1);val h=crop.height().toInt().coerceAtLeast(1)
+        val key="$w:$h:${current.corner}"
+        val image=mask ?: if(shapeKey==key)shape else Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888).also {
+            val p=Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.WHITE};val r=minOf(w,h)*current.corner*.01f
+            Canvas(it).drawRoundRect(0f,0f,w.toFloat(),h.toFloat(),r,r,p);shape=it;shapeKey=key
+        }
+        image ?: return
+        bounds.set(crop.left.toInt(),crop.top.toInt(),crop.right.toInt(),crop.bottom.toInt())
+        if(widgetScene)com.cosmod.launcherglass.xposed.GlassFrame.draw(canvas,bounds,minOf(w,h)*current.corner*.01f,current.shade,0,current.rimStrength)
+        if(edgeScope in 0 until EdgeSettings.count)
+            com.cosmod.launcherglass.xposed.EdgeLight.draw(canvas,bounds,image,null,current.liquid,surface=edgeScope)
     }
 
     @RequiresApi(33)
@@ -221,13 +427,20 @@ internal class GlassPreview(context: Context, private val dark: Boolean) : View(
         """.trimIndent())
 
         fun shader(bitmap: Bitmap, source: RectF, width: Int, height: Int, radius: Float,
-            filter: ColorMatrixColorFilter, material: Material): Shader? {
+            filter: ColorMatrixColorFilter?, material: Material, nativeMask: Bitmap?, newEngine:Boolean,
+            engineOptics:GlassEngineSettings.Optics): Shader? {
             if (width <= 0 || height <= 0) return null
             mask.setFloatUniform("size", width.toFloat(), height.toFloat())
             mask.setFloatUniform("radius", radius)
             val style = GlassStyle(true, material.width, material.distortion, material.blur, material.opacity,
-                filter, extendedLens = true, dispersion = material.dispersion)
-            return lens?.update(bitmap, mask, source, width, height, filter, radius / minOf(width, height), style)
+                filter, extendedLens = true, dispersion = material.dispersion, newEngine = newEngine,engineOptics=engineOptics)
+            val shape = nativeMask?.let { image ->
+                BitmapShader(image, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+                    setFilterMode(BitmapShader.FILTER_MODE_LINEAR)
+                    setLocalMatrix(Matrix().apply { setScale(width.toFloat() / image.width, height.toFloat() / image.height) })
+                }
+            } ?: mask
+            return lens?.update(bitmap, shape, source, width, height, filter, radius / minOf(width, height), style)
         }
     }
 }

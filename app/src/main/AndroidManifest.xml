@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <queries>
+        <intent><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent>
+        <intent><action android:name="android.service.wallpaper.WallpaperService" /></intent>
         <package android:name="com.cosmod.launcherglass" />
         <package android:name="com.android.systemui" />
         <intent>

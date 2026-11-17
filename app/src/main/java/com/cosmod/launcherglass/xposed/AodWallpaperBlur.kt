@@ -26,6 +26,7 @@ internal object AodWallpaperBlur {
     private var animator:ValueAnimator?=null
     private var applied=0
     private var destination=0
+    private var embeddedClock=false
     private val retry=Runnable {refresh()}
     private val finish=Runnable {
         animator?.cancel()
@@ -152,7 +153,8 @@ internal object AodWallpaperBlur {
         }
     }
 
-    fun diagnostics()="aod state="+state+", radius="+radiusDp+", layer="+(layer?.isValid==true)+", applied="+applied
+    fun diagnostics()="aod state="+state+", radius="+radiusDp+", layer="+(layer?.isValid==true)+
+        ", applied="+applied+", embedded clock="+embeddedClock
 
     private fun fullscreen()=state=="PANORAMIC_AOD" || state=="WORKSHOP_AOD"
 
@@ -160,10 +162,18 @@ internal object AodWallpaperBlur {
         val context=context ?: return
         if(radiusDp<=0)return
         if(!fullscreen()){
+            embeddedClock=false
             if(state=="AOD_OFF" || state=="NORMAL_AOD")stop() else animateTo(0)
             return
         }
         val metrics=context.resources.displayMetrics
+        embeddedClock=LockscreenBackdrop.activeLivePackage(context)==LockscreenBackdrop.COLORFUL_ENGINE
+        if(embeddedClock){
+            // In this engine the AOD clock can be part of the wallpaper's
+            // buffer. SurfaceFlinger blur cannot render behind that clock.
+            stop()
+            return
+        }
         if(layer?.isValid!=true){
             stop()
             val wallpaper=runCatching {LockscreenBackdrop.wallpaperSurface(context,null,null)}.getOrNull()

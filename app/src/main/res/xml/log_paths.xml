@@ -3,4 +3,6 @@
     <cache-path name="diagnostics" path="diagnostics/" />
     <cache-path name="shared-settings" path="shared-settings/" />
     <cache-path name="preview-wallpaper" path="preview-wallpaper/" />
+    <cache-path name="preview-icons" path="preview-icons/" />
+    <cache-path name="preview-widgets" path="preview-widgets/" />
 </paths>

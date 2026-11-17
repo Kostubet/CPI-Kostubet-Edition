@@ -6,9 +6,7 @@ import android.graphics.HardwareRenderer
 import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.RectF
-import android.graphics.RenderEffect
 import android.graphics.RenderNode
-import android.graphics.Shader
 import android.hardware.HardwareBuffer
 import android.media.ImageReader
 import android.os.SystemClock
@@ -23,6 +21,7 @@ object GpuWallpaperBlur {
         private val node = RenderNode(name)
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         private var effectRadius = -1f
+        private var effectOpacity = -1
         private var effectTone = Int.MIN_VALUE
         private var effectVibrancy = -1
         private var effectDepthBits = -1
@@ -30,7 +29,7 @@ object GpuWallpaperBlur {
         private var outputWidth = 0
         private var outputHeight = 0
 
-        fun render(source: Bitmap, width: Int, height: Int, radius: Float,level:Int=50,vibrancy:Int=0): Bitmap {
+        fun render(source: Bitmap, width: Int, height: Int, radius: Float,level:Int=50,vibrancy:Int=0,opacity:Int=100): Bitmap {
             // ColorOS UniRender supports this GPU entry point directly, while
             // a standalone ImageReader renderer can submit no output at all.
             if (hardwareBitmapMethod != null) {
@@ -39,7 +38,7 @@ object GpuWallpaperBlur {
                     outputWidth = width
                     outputHeight = height
                 }
-                record(source, width, height, radius,level,vibrancy)
+                record(source, width, height, radius,level,vibrancy,opacity)
                 return hardwareBitmapMethod.invoke(null, node, width, height) as? Bitmap
                     ?: error("GPU $name produced no hardware bitmap")
             }
@@ -56,7 +55,7 @@ object GpuWallpaperBlur {
                 }
                 node.setPosition(0, 0, width, height)
             }
-            record(source, width, height, radius,level,vibrancy)
+            record(source, width, height, radius,level,vibrancy,opacity)
             val result = renderer!!.createRenderRequest().setWaitForPresent(true).syncAndDraw()
             val image = images.acquireLatestImage() ?: error("GPU $name produced no image (sync=$result)")
             image.use {
@@ -74,20 +73,17 @@ object GpuWallpaperBlur {
             }
         }
 
-        private fun record(source: Bitmap, width: Int, height: Int, radius: Float,level:Int,vibrancy:Int) {
+        private fun record(source: Bitmap, width: Int, height: Int, radius: Float,level:Int,vibrancy:Int,opacity:Int) {
             val actualRadius=radius
             val bits=if(material)PrefsHelper.colorDepthBits else 24
             val stage=if(material)PrefsHelper.colorDepthStage else ColorDepthEffect.FINISHED_PLATE
-            if (effectRadius != actualRadius || effectTone != level || effectVibrancy != vibrancy || effectDepthBits!=bits || effectDepthStage!=stage) {
+            if (effectRadius != actualRadius || effectOpacity != opacity || effectTone != level || effectVibrancy != vibrancy || effectDepthBits!=bits || effectDepthStage!=stage) {
                 val vivid=BackdropVibrancy.effect(vibrancy)
                 val color=if(material)ColorDepthEffect.at(vivid,ColorDepthEffect.BEFORE_BLUR)else vivid
-                val blur=if(actualRadius>0f){
-                    if(color!=null)RenderEffect.createBlurEffect(actualRadius,actualRadius,color,Shader.TileMode.CLAMP)
-                    else RenderEffect.createBlurEffect(actualRadius,actualRadius,Shader.TileMode.CLAMP)
-                }else color
+                val blur=GlassBlur.effect(actualRadius,opacity,color)
                 val toned=ShadowTone.effect(blur,level)
                 node.setRenderEffect(if(material)ColorDepthEffect.at(toned,ColorDepthEffect.AFTER_BLUR)else toned)
-                effectRadius = actualRadius;effectTone=level;effectVibrancy=vibrancy;effectDepthBits=bits;effectDepthStage=stage
+                effectRadius = actualRadius;effectOpacity=opacity;effectTone=level;effectVibrancy=vibrancy;effectDepthBits=bits;effectDepthStage=stage
             }
             val canvas = node.beginRecording(width, height)
             try {
@@ -121,7 +117,7 @@ object GpuWallpaperBlur {
 
     fun blur(source: Bitmap, width: Int, height: Int, radius: Float): Bitmap {
         val start = SystemClock.uptimeMillis()
-        val result = blurTarget.render(source, width, height, radius,com.cosmod.launcherglass.xposed.PrefsHelper.blurLightening,com.cosmod.launcherglass.xposed.PrefsHelper.blurVibrancy)
+        val result = blurTarget.render(source, width, height, radius,com.cosmod.launcherglass.xposed.PrefsHelper.blurLightening,PrefsHelper.blurVibrancy,opacity=com.cosmod.launcherglass.xposed.KyantGlassEngine.optics(0).blur.opacity)
         elapsedMs += SystemClock.uptimeMillis() - start
         count++
         if (count == 1 || count % 60 == 0) {
@@ -130,10 +126,10 @@ object GpuWallpaperBlur {
         return result
     }
 
-    fun blurFolder(source:Bitmap,width:Int,height:Int,radius:Float,level:Int,vibrancy:Int)=folderTarget.render(source,width,height,radius,level,vibrancy)
-    fun blurDock(source:Bitmap,width:Int,height:Int,radius:Float)=dockTarget.render(source,width,height,radius)
+    fun blurFolder(source:Bitmap,width:Int,height:Int,radius:Float,level:Int,vibrancy:Int,opacity:Int)=folderTarget.render(source,width,height,radius,level,vibrancy,opacity)
+    fun blurDock(source:Bitmap,width:Int,height:Int,radius:Float,opacity:Int=100)=dockTarget.render(source,width,height,radius,opacity=opacity)
 
-    fun blurPhoto(source:Bitmap,width:Int,height:Int,radius:Float)=photoTarget.render(source,width,height,radius)
+    fun blurPhoto(source:Bitmap,width:Int,height:Int,radius:Float,opacity:Int=100)=photoTarget.render(source,width,height,radius,opacity=opacity)
     fun closePhoto()=photoTarget.close()
 
     fun fingerprint(source: Bitmap): Long {
@@ -154,6 +150,7 @@ object GpuWallpaperBlur {
         blurTarget.close()
         folderTarget.close()
         dockTarget.close()
+        photoTarget.close()
         sampleTarget.close()
     }
 }
