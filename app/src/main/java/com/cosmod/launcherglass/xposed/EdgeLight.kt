@@ -80,7 +80,7 @@ internal object EdgeLight:SensorEventListener {
     private val redrawRoots=LinkedHashSet<View>()
     private var rotationAnchor=WeakReference<View>(null)
     private val visibleBounds=Rect()
-    private data class Key(val contour:Any,val profile:Profile,val insetQuarters:Int)
+    private data class Key(val contour:Any,val profile:Profile,val insetQuarters:Int,val sharp:Boolean)
     private class Optics(val image:Bitmap,val shape:BitmapShader,val paint:Paint,val profile:Profile){val bounds=Rect();var placed=false}
     private val cache=object:LruCache<Key,Optics>(6*1024*1024){override fun sizeOf(key:Key,value:Optics)=value.image.allocationByteCount}
     private data class RimKey(val optics:Optics,val width:Int,val height:Int)
@@ -232,8 +232,8 @@ internal object EdgeLight:SensorEventListener {
             redrawRoots.clear()
         }
     }
-    private fun optics(mask:Bitmap,profile:Profile,insetQuarters:Int):Optics {
-        val key=Key(GlassGeometry.contourKey(mask),profile,insetQuarters);cache[key]?.let {return it}
+    private fun optics(mask:Bitmap,profile:Profile,insetQuarters:Int,sharp:Boolean):Optics {
+        val key=Key(GlassGeometry.contourKey(mask),profile,insetQuarters,sharp);cache[key]?.let {return it}
         val inset=if(insetQuarters>0)insetQuarters*.25f+1f else 0f
         val width=profile.width
         val softness=profile.softness
@@ -243,6 +243,7 @@ internal object EdgeLight:SensorEventListener {
         val feather=.08f+softness*.0018f
         val curve=FloatArray((halo*32).roundToInt().coerceAtLeast(1)){step->
             val depth=step/8f
+            if(sharp)return@FloatArray com.cosmod.launcherglass.util.SpecularRidge.intensity(depth,core,softness)
             val specular=exp(-.5f*(depth/(core*.68f)).pow(2))
             val inner=exp(-.5f*((depth-core*1.95f)/(core*.42f)).pow(2))
             (1f-feather)*specular+feather*exp(-.5f*(depth/halo).pow(2))+.14f*inner
@@ -274,7 +275,7 @@ internal object EdgeLight:SensorEventListener {
                 val sum=horizontal[above+x]+2f*horizontal[i]+horizontal[below+x]
                 val coverage=(f.alpha[i].toInt() and 255)/255f
                 val inside=if(inset>0f)(f.depth[i]-inset).coerceIn(0f,1f) else 1f
-                val coreAlpha=(alpha[i]*.68f+sum/16f*.32f)*inside
+                val coreAlpha=(if(sharp)alpha[i]*.99f+sum/16f*.01f else alpha[i]*.88f+sum/16f*.12f)*inside
                 pixels[i]=Color.argb((minOf(coverage,coreAlpha)*255f).roundToInt().coerceIn(0,255),255,255,255)
             }
         }
@@ -288,7 +289,7 @@ internal object EdgeLight:SensorEventListener {
         return Optics(image,shape,paint,profile).also {cache.put(key,it)}
     }
     @Synchronized fun drawPath(canvas:Canvas,path:Path,bounds:RectF,view:View,strengthScale:Float,surface:Int,highlight:Boolean=true){
-        if(strengthScale<=0 || bounds.isEmpty)return
+        if(strengthScale<=0 || bounds.isEmpty || surface !in profiles.indices)return
         val profile=profiles[surface]
         val contour=darkContours[surface]
         val density=view.resources.displayMetrics.density
@@ -346,13 +347,13 @@ internal object EdgeLight:SensorEventListener {
 
     @Synchronized fun draw(canvas:Canvas,bounds:Rect,mask:Bitmap,view:View?,liquid:Boolean,shareRim:Boolean=false,surface:Int=0,
         displayEdge:Float=minOf(bounds.width(),bounds.height()).toFloat(),density:Float=Resources.getSystem().displayMetrics.density){
-        if(bounds.isEmpty)return
+        if(bounds.isEmpty || surface !in profiles.indices)return
         val profile=profiles[surface]
         val contour=darkContours[surface]
         if(contour.overlap)drawDark(canvas,bounds,mask,contour,displayEdge,density)
         if(profile.enabled && liquid && profile.strength>0){
             val inset=if(contour.opacity>0 && !contour.overlap)maskWidthQuarters(contour,mask,displayEdge,density)else 0
-            drawHighlight(canvas,bounds,optics(mask,profile,inset),view,shareRim)
+            drawHighlight(canvas,bounds,optics(mask,profile,inset,surface==0),view,shareRim)
         }
         if(!contour.overlap)drawDark(canvas,bounds,mask,contour,displayEdge,density)
     }

@@ -62,7 +62,7 @@ internal object AlertGlassLens {
         return renderInternal(canvas,view,prefs,frame.bitmap,frame.area,shape.bounds,shape.radius,opacity,shape,frame.generation)
     }
     fun render(canvas:Canvas,view:View,prefs:Bundle,image:Bitmap,area:Rect,bounds:RectF,corner:Float,opacity:Int):Boolean=
-        renderInternal(canvas,view,prefs,image,area,bounds,corner,opacity,null,image.generationId.toLong())
+        renderInternal(canvas,view,prefs,image,area,bounds,corner,opacity,null,image.generationId.toLong(),scope=GlassSurface.VOLUME)
     fun renderShape(canvas:Canvas,view:View,prefs:Bundle,image:Bitmap,area:Rect,shape:AlertContour.Shape,opacity:Int):Boolean=
         renderInternal(canvas,view,prefs,image,area,shape.bounds,shape.radius,opacity,shape,image.generationId.toLong())
     fun renderBanner(canvas: Canvas, view: View, prefs: Bundle, frame: AlertBackdrop.Frame, bounds: RectF, corner: Float): Boolean =
@@ -75,36 +75,42 @@ internal object AlertGlassLens {
         return edge*(.014f+radius*.001f+feather*.0006f)*(.35f+diffusion*.013f)
     }
 
-    private fun renderInternal(canvas:Canvas,view:View,prefs:Bundle,image:Bitmap,area:Rect,bounds:RectF,corner:Float,opacity:Int,shape:AlertContour.Shape?,generation:Long,transformed:Boolean=false):Boolean{
+    private fun renderInternal(canvas:Canvas,view:View,prefs:Bundle,image:Bitmap,area:Rect,bounds:RectF,corner:Float,opacity:Int,
+        shape:AlertContour.Shape?,generation:Long,transformed:Boolean=false,
+        scope:Int=if(transformed)GlassSurface.BANNERS else GlassSurface.LIVE):Boolean{
         if(!canvas.isHardwareAccelerated || bounds.isEmpty)return false
         val plate=plates.getOrPut(view){Plate()}
         val limit=image.width
-        val scale=minOf(1f,limit/bounds.width())
+        val engine=KyantGlassEngine.optics(scope).blur
+        val resolution=when(engine.taps){0->.68f;1->.86f;else->1f}
+        val scale=minOf(1f,limit/bounds.width())*resolution
         val w=max(1,(bounds.width()*scale).roundToInt());val h=max(1,(bounds.height()*scale).roundToInt())
         val position=plate.position;view.getLocationOnScreen(position)
         val lensWidth=prefs.getInt("island_glass_width",40)
         val distortion=prefs.getInt("island_glass_distortion",80)
         val blur=prefs.getInt("island_glass_blur",12)
-        val hazeStyle=GlassStyle(true,0,0,0,0,null,surfaceScope=if(transformed)GlassSurface.BANNERS else GlassSurface.LIVE)
+        val hazeStyle=GlassStyle(true,0,0,0,0,null,surfaceScope=scope)
         val fogStrength=WallpaperGlow.amount(hazeStyle)
         val economy=com.cosmod.launcherglass.util.PerformancePolicy.economy
         val fogRadius=if(fogStrength>0 && !economy)edgeFogRadius(prefs,min(w,h))else 0f
         val rounding=prefs.getInt("island_glass_corner",30).coerceIn(0,50)/100f
         val edge=min(w,h)
         val density=view.resources.displayMetrics.density
-        val radius=blur.coerceIn(0,50)*scale*density*.6f
+        val requested=blur.coerceIn(0,50)*scale*density*.6f
+        val radius=engine.radius(requested)
         val hue=com.cosmod.launcherglass.ui.GlassDispersionSettings.strength(prefs,com.cosmod.launcherglass.ui.GlassDispersionSettings.ALERTS)
         val warpReach=edge*(if(shape!=null).25f
-            else .22f*distortion.coerceIn(0,300)/50f)
+            else .22f*distortion.coerceIn(0,300)/50f)*maxOf(1f,hazeStyle.engineOptics.heightScale)
         // Blur support is three radii. The lens also needs room to bend the
         // source and sample its sharpness kernel without hitting the node edge.
         val margin=ceil(warpReach+3f*radius+fogRadius+maxOf(4f,3f*scale*density)).toInt()
         val wrapperW=w+margin*2;val wrapperH=h+margin*2
         val key=listOf<Any>(w,h,margin,corner,lensWidth,distortion,blur,rounding,WallpaperGlow.revision,economy,
-            shape?.revision ?: -1,hue)
+            shape?.revision ?: -1,hue,scope,hazeStyle.newEngine,hazeStyle.engineOptics)
         if(plate.key!=key){
             plate.mask.setFloatUniform("size",w.toFloat(),h.toFloat());plate.mask.setFloatUniform("radius",corner*scale)
-            val style=GlassStyle(true,lensWidth,distortion,0,0,null,extendedLens=true,dispersion=hue)
+            val style=GlassStyle(true,lensWidth,distortion,0,0,null,extendedLens=true,dispersion=hue,
+                surfaceScope=scope,newEngine=hazeStyle.newEngine)
             val mask=if(shape==null)plate.mask else {
                 val size=(w.toLong() shl 32) or h.toLong()
                 if(plate.shapeVersion!=shape.revision || plate.shapeSize!=size){
@@ -131,10 +137,10 @@ internal object AlertGlassLens {
                 }
                 plate.shapeMask!!
             }
-            val shader=LiquidGlassShader.lifted()?.updateLifted(mask,w,h,margin.toFloat(),wrapperW,wrapperH,null,rounding,style,
+            val shader=LiquidGlassShader.lifted()?.updateLifted(mask,w,h,margin.toFloat(),wrapperW,wrapperH,style.backdropFilter,rounding,style,
                 contourRadii=plate.cornerRadii.takeIf {shape!=null}) ?: return false
             var effect=RenderEffect.createRuntimeShaderEffect(shader,"backdrop")
-            var sourceEffect=if(radius>0)RenderEffect.createBlurEffect(radius,radius,Shader.TileMode.CLAMP)else null
+            var sourceEffect=com.cosmod.launcherglass.util.GlassBlur.effect(radius,engine.opacity)
             if(fogStrength>0 && !economy){
                 haze.setFloatUniform("spreadRadius",fogRadius)
                 haze.setFloatUniform("strength",fogStrength)
@@ -192,6 +198,8 @@ internal object AlertGlassLens {
         val save=canvas.save()
         try {canvas.translate(bounds.left,bounds.top);canvas.scale(bounds.width()/w,bounds.height()/h);canvas.translate(-margin.toFloat(),-margin.toFloat());canvas.drawRenderNode(plate.node)}
         finally {canvas.restoreToCount(save)}
+        if(shape!=null)SurfaceTints.draw(canvas,shape.path,bounds,prefs.getInt("surface_tint_scope",if(transformed)GlassSurface.BANNERS else GlassSurface.LIVE),opacity/255f)
+        else SurfaceTints.draw(canvas,bounds,corner,prefs.getInt("surface_tint_scope",if(transformed)GlassSurface.BANNERS else GlassSurface.LIVE),opacity/255f)
         return true
     }
 }

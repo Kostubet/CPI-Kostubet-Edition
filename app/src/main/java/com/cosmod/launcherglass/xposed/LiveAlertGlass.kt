@@ -21,6 +21,12 @@ internal object LiveAlertGlass {
     private var hostLoader:ClassLoader?=null
     private val main=Handler(Looper.getMainLooper())
     private val views=WeakHashMap<View,Boolean>()
+    fun previewSource():View? {
+        val background=views.keys.weakSnapshot().firstOrNull {it.width>0 && it.height>0} ?: return null
+        return generateSequence(background){it.parent as? View}.firstOrNull {node->
+            generateSequence(node.javaClass as Class<*>?){it.superclass}.any {it.name==LiveAlertTargets.EXPANDED_CARD}
+        } ?: background.parent as? View ?: background
+    }
     private var uiHooksInstalled=false
     private var allowed=false
     private var guardEvaluated=false
@@ -40,7 +46,7 @@ internal object LiveAlertGlass {
         val method=LiveAlertTargets.drawMethod(cls) ?: return
         XposedBridge.hookMethod(method,object:XC_MethodHook(){
             override fun beforeHookedMethod(p:MethodHookParam){
-                if(!islandActive())return
+                if(!islandActive() && !NativeMaterialPreview.active(SurfacePreviewKind.LIVE))return
                 val view=p.thisObject as View
                 val canvas=p.args[0] as Canvas
                 try {
@@ -72,13 +78,18 @@ internal object LiveAlertGlass {
                     if(!allowed)return
                     // Scale the radius the OEM just computed; never change its alpha.
                     val active=prefs.getBoolean(SettingsProvider.KEY_ENABLED,false) && prefs.getBoolean("island_glass_enabled",false)
-                    NativeAlertMaterial.adjustBlur(p.thisObject as View,if(active)prefs.getInt("island_glass_blur",12)else 12)
+                    NativeAlertMaterial.adjustBlur(p.thisObject as View,if(active)compositorBlur() else 12)
                 }
             })
         }
         hooked.add(cls)
         GlassLogger.i("LiveAlertGlass","Background hook installed: ${cls.name}.${method.name}")
     }
+    private fun compositorBlur():Int {
+        val blur=KyantGlassEngine.optics(GlassSurface.LIVE).blur
+        return (blur.radius(prefs.getInt("island_glass_blur",12).toFloat())*blur.opacity*.01f).toInt()
+    }
+
     private fun hookCard(view:View){
         val type=generateSequence(view.javaClass as Class<*>?) {it.superclass}
             .firstOrNull {it.name==LiveAlertTargets.EXPANDED_CARD} ?: return
@@ -173,8 +184,14 @@ internal object LiveAlertGlass {
         prefs=try {c.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_GET_ALL,null,null) ?: Bundle()}catch(_:Throwable){Bundle()}
         PerformancePolicy.update(c,prefs)
         EdgeLight.update(prefs)
+        KyantGlassEngine.update(prefs)
+        SurfaceTints.update(prefs,com.cosmod.launcherglass.util.IconPalette.wallpaperTone(c))
         WallpaperGlow.update(prefs)
         val master=prefs.getBoolean(SettingsProvider.KEY_ENABLED,false)
+        runCatching { ShadeGlass.configure(c,hostLoader,prefs,master) }.onFailure {
+            GlassLogger.e("ShadeGlass","Could not apply shade preferences",it)
+        }
+        Ba31kShadeTransparency.update(prefs,hostLoader)
         val wantIsland=master && prefs.getBoolean("island_glass_enabled",false)
         val wantBanners=master && prefs.getBoolean("banner_glass_enabled",false)
         val wantLock=master && LockscreenSettings.requested(prefs)
@@ -198,7 +215,12 @@ internal object LiveAlertGlass {
         AodWallpaperBlur.configure(c,hostLoader,if(allowed && wantLock && prefs.getBoolean(LockscreenSettings.AOD_BLUR_ENABLED))
             prefs.getInt(LockscreenSettings.AOD_BLUR_RADIUS,16) else 0)
         VolumeGlass.configure(allowed && wantVolume,prefs,hostLoader)
-        views.keys.weakSnapshot().forEach {it.setWillNotDraw(if(active)false else originalSkip[it] ?: false);NativeAlertMaterial.adjustBlur(it,if(active)prefs.getInt("island_glass_blur",12)else 12,false);it.postInvalidateOnAnimation()}
+        val nativeBlur=compositorBlur()
+        views.keys.weakSnapshot().forEach {
+            it.setWillNotDraw(if(active)false else originalSkip[it] ?: false)
+            NativeAlertMaterial.adjustBlur(it,if(active)nativeBlur else 12,false)
+            it.postInvalidateOnAnimation()
+        }
         if(active)try {installViewHooks()}catch(t:Throwable){disable(t)}
     }
     fun install(loader:ClassLoader){
@@ -215,7 +237,7 @@ internal object LiveAlertGlass {
                     }
                     val store=c.createDeviceProtectedStorageContext().getSharedPreferences("cherrypick_alert_guard_v2",Context.MODE_PRIVATE)
                     guard=store
-                    HostControl.install(c,"systemui",{diagnostics()+"\n"+LockscreenGlass.diagnostics()},retry@{
+                    HostControl.install(c,"systemui",{diagnostics()+"\n"+LockscreenGlass.diagnostics()+"\n"+ShadeGlass.diagnostics()},retry@{
                         AlertBackdrop.configure(false)
                         if(!AlertStartupGuard.clear(store))return@retry
                         guardEvaluated=false

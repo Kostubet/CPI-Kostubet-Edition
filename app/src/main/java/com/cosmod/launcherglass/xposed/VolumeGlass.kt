@@ -3,6 +3,8 @@ package com.cosmod.launcherglass.xposed
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Matrix
+import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Bundle
@@ -20,6 +22,33 @@ import java.util.WeakHashMap
 internal object VolumeGlass {
     private const val TYPE="com.oplus.systemui.volume.OplusVolumeSeekBar"
     private val targets=WeakHashMap<View,Plate>()
+    fun snapshotPreview(): com.cosmod.launcherglass.ui.NativePreviewScenes.Scene? {
+        val candidates = targets.strongSnapshot().filter { (view, plate) ->
+            view.width > 0 && view.height > 0 && !plate.track.isEmpty
+        }
+        val entry = candidates.entries.firstOrNull { it.key.isShown } ?: candidates.entries.firstOrNull() ?: return null
+        val view = entry.key
+        val track = RectF(entry.value.track)
+        val transform = Matrix().apply {
+            setRotate(view.rotation, track.centerX(), track.centerY())
+        }
+        val bounds = RectF(track).apply { transform.mapRect(this) }
+        val radius = (NativeIconAccess.call(view, "getCurBackgroundRadius") as? Number)?.toFloat()
+            ?.coerceIn(0f, minOf(track.width(), track.height()) / 2f) ?: return null
+        val shape = Path().apply {
+            addRoundRect(track, radius, radius, Path.Direction.CW)
+            transform(transform)
+        }
+        val kind = com.cosmod.launcherglass.util.SurfacePreviewKind.VOLUME
+        return NativeMaterialPreview.captureWithoutMaterial(kind) {
+            NativeMaterialPreview.capture(bounds, shape) { canvas ->
+                canvas.concat(transform)
+                // The active track is drawn by COUI. Window blur and the glass
+                // finish belong to the separate background.
+                XposedHelpers.callMethod(view, "onDraw", canvas)
+            }
+        }
+    }
     private class Plate {
         val track=Rect()
         val progress=Rect()
@@ -53,6 +82,7 @@ internal object VolumeGlass {
         liquid=prefs.getInt("volume_glass_style",1)==1 && android.os.Build.VERSION.SDK_INT>=33
         opacity=prefs.getInt("volume_glass_opacity",18).coerceIn(0,100)
         optics=Bundle().apply {
+            putInt("surface_tint_scope",13)
             putInt("island_glass_blur",radiusDp)
             putInt("island_glass_width",prefs.getInt("volume_glass_width",42).coerceIn(0,100))
             putInt("island_glass_distortion",prefs.getInt("volume_glass_distortion",90).coerceIn(0,300))
@@ -126,6 +156,7 @@ internal object VolumeGlass {
                 override fun afterHookedMethod(param:MethodHookParam){
                     val view=param.thisObject as View
                     val canvas=param.args[0] as Canvas
+                    if (NativeMaterialPreview.active(com.cosmod.launcherglass.util.SurfacePreviewKind.VOLUME)) return
                     if(param.hasThrowable() || !view.isShown || !canvas.isHardwareAccelerated)return
                     runCatching {
                         val plate=targets.getOrPut(view){Plate()}
@@ -153,7 +184,8 @@ internal object VolumeGlass {
     }
 
     private fun scaledRadius(view:View,native:Int):Int {
-        val dp=minOf(radiusDp,if(PerformancePolicy.economy)14 else 32)
+        val blur=KyantGlassEngine.optics(GlassSurface.VOLUME).blur
+        val dp=(blur.radius(radiusDp.toFloat())*blur.opacity*.01f).toInt().coerceIn(0,32)
         return (native*dp/14f).toInt().coerceIn(0,(48*view.resources.displayMetrics.density).toInt())
     }
 
@@ -172,7 +204,7 @@ internal object VolumeGlass {
                 val frame=AlertBackdrop.volumeFrame(view)
                 val drawn=if(frame!=null){
                     AlertGlassLens.render(canvas,view,optics,frame.bitmap,frame.area,rect,nativeRadius,255)
-                }else if(!AlertBackdrop.canSample()){
+                }else if(AlertBackdrop.isOnLockscreen()){
                     val wallpaper=LockscreenBackdrop.frame?.images?.entries?.minByOrNull {it.key}?.value
                     if(wallpaper!=null){
                         val metrics=view.resources.displayMetrics
@@ -190,6 +222,7 @@ internal object VolumeGlass {
                     canvas.drawRoundRect(rect,nativeRadius,nativeRadius,plate.tint)
                 }
             }
+            if(!liquid)SurfaceTints.draw(canvas,rect,nativeRadius,13)
             if(brightness!=0){
                 plate.tint.color=if(brightness>0)Color.WHITE else Color.BLACK
                 plate.tint.alpha=kotlin.math.round(kotlin.math.abs(brightness)*2.55f).toInt().coerceIn(0,255)

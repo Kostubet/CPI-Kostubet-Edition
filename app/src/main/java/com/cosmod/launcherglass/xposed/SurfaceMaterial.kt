@@ -141,7 +141,7 @@ internal object SurfaceMaterial {
             style.surfaceScope==GlassSurface.WIDGETS->WallpaperHelper.getWidgetWallpaper(view.context)
             style.surfaceScope==GlassSurface.PAGE_INDICATOR->PageIndicatorGlass.wallpaper(view)
             style.neutral->WallpaperHelper.getNeutralWallpaper(view.context)
-            style.folder->WallpaperHelper.getFolderWallpaper(view.context)
+            style.folder->WallpaperHelper.getFolderWallpaper(view.context,large=style.largeFolderBackdrop)
             else->WallpaperHelper.getBlurredWallpaper(view.context)
         } ?: return false
         // Native drag preview Picture: leave the footprint empty; the DragView

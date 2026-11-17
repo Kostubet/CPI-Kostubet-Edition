@@ -17,5 +17,8 @@ dependencyResolutionManagement {
 rootProject.name = "ColorOSLauncherGlass"
 include(":app")
 
-include(":coui-controls")
-project(":coui-controls").projectDir = file("third_party/coui-controls")
+listOf("core", "shader", "squircle", "ui", "preference").forEach { component ->
+    val module = "coui-$component"
+    include(":$module")
+    project(":$module").projectDir = file("third_party/coui/$module")
+}

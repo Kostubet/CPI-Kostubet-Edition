@@ -9,7 +9,8 @@ import kotlin.math.roundToInt
 
 /** One retained material per visible target. Stock content stays above the plate. */
 internal class LockscreenMaterial {
-    private data class Sample(val image:Bitmap,val source:RectF,val width:Int,val height:Int,val corner:Float,val profile:Profile,val glyphs:Boolean,val neutral:Boolean)
+    private data class Sample(val image:Bitmap,val source:RectF,val width:Int,val height:Int,val corner:Float,val profile:Profile,
+        val glyphs:Boolean,val neutral:Boolean,val clipped:Boolean,val newEngine:Boolean)
     private val node=RenderNode("CPI.lockscreenGlass")
     private var current:Sample?=null
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
@@ -47,7 +48,9 @@ internal class LockscreenMaterial {
         native:android.graphics.drawable.Drawable?=null,glyphs:Boolean=false,bounds:RectF?=null,amount:Float=1f,
         nativeRadius:Float?=null,replaceBackground:Boolean=false,useNativeMask:Boolean=true,drawRim:Boolean=true,
         exactPath:Path?=null,maskOnly:Boolean=false){
-        val image=frame?.images?.get(profile.sourceRadius(surface)) ?: return
+        val input=frame?.images?.get(profile.sourceRadius(surface)) ?: return
+        val image=current?.takeIf {profile.liquid && profile.engine?.blur?.live==false && it.profile==profile &&
+            it.image.width==input.width && it.image.height==input.height && !it.image.isRecycled}?.image ?: input
         val w=view.width.toFloat()
         val h=view.height.toFloat()
         if(w<=0f || h<=0f || !canvas.isHardwareAccelerated)return
@@ -88,7 +91,7 @@ internal class LockscreenMaterial {
                 else->.96f
             }
             if(exactPath!=null)canvas.clipPath(path)
-            drawBackdrop(canvas,view,image,profile,corner,backdropAlpha*amount,glyphs,neutral)
+            drawBackdrop(canvas,view,image,profile,corner,backdropAlpha*amount,glyphs,neutral,exactPath!=null)
             val base=frame.color
             val dark=androidx.core.graphics.ColorUtils.calculateLuminance(base)<.40
             val tone=if(neutral){
@@ -109,6 +112,7 @@ internal class LockscreenMaterial {
             tint.alpha=(opacity*2.55f*amount).roundToInt().coerceIn(0,255)
             canvas.drawPath(path,tint)
             tint.shader=null
+            SurfaceTints.draw(canvas,path,local,surface.edgeSurface,amount)
             if(!glyphs){
                 if(corner>0f && !maskToNative && drawRim && surface!=Surface.CAPSULE){
                     rim.strokeWidth=(view.resources.displayMetrics.density*.68f).coerceAtLeast(1f)
@@ -125,7 +129,7 @@ internal class LockscreenMaterial {
         }finally {canvas.restoreToCount(mixed)}
     }
 
-    private fun drawBackdrop(canvas:Canvas,view:View,image:Bitmap,profile:Profile,corner:Float,alpha:Float,glyphs:Boolean,neutral:Boolean){
+    private fun drawBackdrop(canvas:Canvas,view:View,image:Bitmap,profile:Profile,corner:Float,alpha:Float,glyphs:Boolean,neutral:Boolean,clipped:Boolean){
         screenMatrix.reset()
         view.transformMatrixToGlobal(screenMatrix)
         mapped.set(local)
@@ -141,8 +145,9 @@ internal class LockscreenMaterial {
         source.set(x+mapped.left/factor,y+mapped.top/factor,x+mapped.right/factor,y+mapped.bottom/factor)
         val width=local.width().roundToInt().coerceAtLeast(1)
         val height=local.height().roundToInt().coerceAtLeast(1)
-        val filter=if(glyphs)glyphColors else if(neutral)saturationFilter else null
-        if(!profile.liquid || Build.VERSION.SDK_INT<33 || !lens(image,profile,corner,width,height,glyphs,neutral,filter)){
+        val filter=BackdropBrightness.filter(if(glyphs)glyphColors else if(neutral)saturationFilter else null,
+            profile.backdropBrightness)
+        if(!profile.liquid || Build.VERSION.SDK_INT<33 || !lens(image,profile,corner,width,height,glyphs,neutral,filter,clipped)){
             val shader=GlassGeometry.wallpaperShader(image)
             shader.setLocalMatrix(Matrix().apply {setRectToRect(source,local,Matrix.ScaleToFit.FILL)})
             paint.shader=shader
@@ -162,9 +167,11 @@ internal class LockscreenMaterial {
     }
 
     @androidx.annotation.RequiresApi(33)
-    private fun lens(image:Bitmap,profile:Profile,corner:Float,width:Int,height:Int,glyphs:Boolean,neutral:Boolean,filter:ColorMatrixColorFilter?):Boolean {
+    private fun lens(image:Bitmap,profile:Profile,corner:Float,width:Int,height:Int,glyphs:Boolean,neutral:Boolean,filter:ColorMatrixColorFilter?,clipped:Boolean):Boolean {
+        val newEngine=profile.engine!=null
         if(current?.let {it.image===image && it.source==source && it.width==width && it.height==height &&
-                it.corner==corner && it.profile==profile && it.glyphs==glyphs && it.neutral==neutral}==true && node.hasDisplayList())return true
+                it.corner==corner && it.profile==profile && it.glyphs==glyphs && it.neutral==neutral &&
+                it.clipped==clipped && it.newEngine==newEngine}==true && node.hasDisplayList())return true
         val lens=LiquidGlassShader.shared() ?: return false
         val mask=masked ?: RuntimeShader("""
             uniform float2 size;
@@ -175,17 +182,22 @@ internal class LockscreenMaterial {
                 return half4(1.0-smoothstep(-.85,.45,d));
             }
         """).also {masked=it}
-        if(maskWidth!=width || maskHeight!=height || maskCorner!=corner){
+        // Exact paths already clip the lens output. Keep the native radius
+        // for refraction, but leave the inner mask rectangular.
+        val maskRadius=if(clipped)0f else corner
+        if(maskWidth!=width || maskHeight!=height || maskCorner!=maskRadius){
             mask.setFloatUniform("size",width.toFloat(),height.toFloat())
-            mask.setFloatUniform("radius",corner)
+            mask.setFloatUniform("radius",maskRadius)
             maskWidth=width
             maskHeight=height
-            maskCorner=corner
+            maskCorner=maskRadius
         }
         // A thin digit cannot use the displacement of a plate the size of its bounding box.
         val strength=if(glyphs)(profile.distortion*.30f).roundToInt() else profile.distortion
         val dispersion=if(glyphs)(profile.dispersion*.12f).roundToInt() else profile.dispersion
-        val style=GlassStyle(true,profile.width,strength,profile.blur,0,null,extendedLens=!glyphs,dispersion=dispersion)
+        val style=GlassStyle(true,profile.width,strength,profile.blur,0,null,extendedLens=!glyphs,dispersion=dispersion,
+            surfaceScope=GlassSurface.LOCKSCREEN,newEngine=newEngine,
+            engineOptics=profile.engine ?: com.cosmod.launcherglass.ui.GlassEngineSettings.Optics(lensHeight=profile.lensHeight))
         val shader=lens.update(image,mask,source,width,height,filter,
             corner/minOf(width,height),style)
         node.setRenderEffect(RenderEffect.createShaderEffect(shader))
@@ -194,16 +206,15 @@ internal class LockscreenMaterial {
             val recording=node.beginRecording()
             try {recording.drawColor(Color.BLACK)}finally {node.endRecording()}
         }
-        current=Sample(image,RectF(source),width,height,corner,profile,glyphs,neutral)
+        current=Sample(image,RectF(source),width,height,corner,profile,glyphs,neutral,clipped,newEngine)
         return true
     }
 }
 
 internal fun Profile.sourceRadius(surface:Surface):Int {
+    if(blurOpacity==0)return 0
     val radius=(blur*(if(liquid).40f else 1f)).roundToInt()
-    return when(surface){
-        Surface.CLOCK->blur
-        Surface.WIDGETS->if(liquid)radius.coerceAtLeast(2) else radius
-        else->radius
-    }
+    val effective=if(surface==Surface.CLOCK)blur else radius
+    // The worker shares one bitmap per radius and opacity pair.
+    return if(effective>0 && blurOpacity<100)effective+blurOpacity*100 else effective
 }

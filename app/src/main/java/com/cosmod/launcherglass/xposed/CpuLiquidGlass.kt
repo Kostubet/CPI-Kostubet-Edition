@@ -7,7 +7,7 @@ import kotlin.math.*
 
 /** Software counterpart of LiquidGlassShader: the same lens, native mask and linear sampling. */
 internal object CpuLiquidGlass {
-    private data class Key(val width:Int,val height:Int,val rounding:Float,val edge:Int,val strength:Int,val extend:Boolean)
+    private data class Key(val width:Int,val height:Int,val rounding:Float,val edge:Int,val strength:Int,val lensHeight:Float,val extend:Boolean)
     private data class Coordinates(val x:FloatArray,val y:FloatArray)
     private data class Pixels(val generation:Int,val pixels:IntArray)
     private var lastImage=WeakReference<Bitmap>(null)
@@ -53,7 +53,7 @@ internal object CpuLiquidGlass {
             val k=1f-eta*eta*(1f-dot*dot)
             val factor=eta*dot+sqrt(max(k,0f))
             val rx=-factor*nx;val ry=-factor*ny;val rz=-eta-factor*nz
-            val amount=edge*.22f*(key.strength/50f)/max(-rz,.25f)
+            val amount=key.lensHeight*edge*.22f*(key.strength/50f)/max(-rz,.25f)
             result.x[index]=(px+rx*amount)/w
             result.y[index]=(py+ry*amount)/h
         }
@@ -67,7 +67,7 @@ internal object CpuLiquidGlass {
             if(readable!==wallpaper)readable.recycle()
             lastImage=WeakReference(wallpaper);lastPixels=Pixels(wallpaper.generationId,data);data
         }
-        val map=coordinates(Key(width,height,rounding,style.width,style.distortion,style.folder || style.extendedLens))
+        val map=coordinates(Key(width,height,rounding,style.width,style.distortion,style.engineOptics.heightScale,style.folder || style.extendedLens))
         val alpha=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
         Canvas(alpha).drawBitmap(mask,null,Rect(0,0,width,height),Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
         val output=IntArray(width*height);alpha.getPixels(output,0,width,0,0,width,height)

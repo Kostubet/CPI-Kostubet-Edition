@@ -5,6 +5,8 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.lang.reflect.Member
 import java.lang.reflect.Method
+import java.lang.reflect.Modifier
+import com.cosmod.launcherglass.util.GlassLogger
 
 /** Settings/bootstrap observers stay installed; rendering/animation hooks exist only while enabled. */
 internal object ModuleHooks {
@@ -17,8 +19,9 @@ internal object ModuleHooks {
         private set
     fun hookMethod(method:Method,callback:XC_MethodHook)=hookMember(method,callback)
     @Synchronized fun hookMember(method:Member,callback:XC_MethodHook){
+        if(method is Method && Modifier.isAbstract(method.modifiers))return
         val entry=Entry(method,callback)
-        if(active)entry.handle=XposedBridge.hookMethod(method,callback)
+        if(active)install(entry)
         entries.add(entry)
     }
     fun hookAllConstructors(type:Class<*>,callback:XC_MethodHook){
@@ -42,8 +45,12 @@ internal object ModuleHooks {
         active=enabled
         if(enabled)epoch++
         for(entry in entries){
-            if(enabled)entry.handle=XposedBridge.hookMethod(entry.method,entry.callback)
+            if(enabled)install(entry)
             else {entry.handle?.unhook();entry.handle=null}
         }
+    }
+    private fun install(entry:Entry){
+        try {entry.handle=XposedBridge.hookMethod(entry.method,entry.callback)}
+        catch(error:Throwable){GlassLogger.limited("ModuleHooks",entry.method.toString()){"Optional hook skipped: ${entry.method}: $error"}}
     }
 }

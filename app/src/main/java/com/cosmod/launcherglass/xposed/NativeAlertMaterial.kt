@@ -61,6 +61,11 @@ internal object NativeAlertMaterial {
     }
 
     fun draw(canvas:Canvas,view:View,prefs:Bundle,replacing:Boolean=false):Boolean {
+        if(NativeMaterialPreview.active(com.cosmod.launcherglass.util.SurfacePreviewKind.LIVE)){
+            val shape=AlertContour.resolve(view,material(view))
+            NativeMaterialPreview.background(com.cosmod.launcherglass.util.SurfacePreviewKind.LIVE,canvas,shape.bounds,shape.path)
+            return true
+        }
         if(view.width<1 || view.height<1 || !view.isShown)return false
         if(replacing && (view.isLayoutRequested || prefs.getInt("island_glass_mix",100)<100))return false
         val native=material(view)

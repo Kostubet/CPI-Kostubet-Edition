@@ -6,7 +6,14 @@ import android.graphics.drawable.Drawable
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -16,24 +23,30 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
+import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.CardDefaults
+import io.github.suqi8.coui.kmp.basic.DropdownEntry
+import io.github.suqi8.coui.kmp.basic.DropdownItem
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.IconButton
 import io.github.suqi8.coui.kmp.basic.TextField
 import io.github.suqi8.coui.kmp.basic.TextFieldMode
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,15 +62,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.ButtonColors
-import io.github.suqi8.coui.kmp.basic.DropdownImpl
-import io.github.suqi8.coui.kmp.basic.DropdownItem
-import io.github.suqi8.coui.kmp.basic.Slider
-import io.github.suqi8.coui.kmp.basic.SliderDefaults
-import io.github.suqi8.coui.kmp.basic.Switch
+import com.cosmod.launcherglass.ui.onextbox.ColorOs17SettingsSlider
+import com.cosmod.launcherglass.ui.onextbox.ColorOs17AppTheme
+import com.cosmod.launcherglass.ui.onextbox.ColorOsEmbeddedPopup
+import com.cosmod.launcherglass.ui.onextbox.ColorOsDropdownMenuContent
+import com.cosmod.launcherglass.ui.onextbox.ColorOsSettingsSliderRow
+import com.cosmod.launcherglass.ui.onextbox.SettingsExpandArrow
+import com.cosmod.launcherglass.ui.onextbox.SettingsPopupArrow
+import com.cosmod.launcherglass.ui.onextbox.SettingsSwitchPreference
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.theme.darkColorScheme
 import io.github.suqi8.coui.kmp.theme.lightColorScheme
+import com.cosmod.launcherglass.R
 import kotlin.math.roundToInt
 
 /** Hosts the vendored COUI controls in CPI's existing View-based pages. */
@@ -65,7 +82,10 @@ internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int
     private val colors = if (dark) darkColorScheme(primary = Color(accent)) else lightColorScheme(primary = Color(accent))
     protected var controlEnabled by mutableStateOf(true)
         private set
-    protected val composition = ComposeView(context).apply { id = View.generateViewId() }
+    protected val composition = ComposeView(context).apply {
+        id = View.generateViewId()
+        setViewCompositionStrategy(androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+    }
 
     init {
         clipChildren = false
@@ -74,7 +94,7 @@ internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int
     }
 
     protected fun content(draw: @Composable () -> Unit) {
-        composition.setContent { COUITheme(colors, content = draw) }
+        composition.setContent { ColorOs17AppTheme(nativeAccent = true, monetColors = colors, content = draw) }
     }
 
     override fun setEnabled(enabled: Boolean) {
@@ -133,51 +153,60 @@ internal class CouiButton(context: Context, dark: Boolean, accent: Int, foregrou
     }
 }
 
-internal class CouiToggle(context: Context, dark: Boolean, accent: Int) : CouiControl(context, dark, accent) {
-    var isChecked by mutableStateOf(false)
-    var onPressChanged: ((Boolean) -> Unit)? = null
-    var onChange: ((Boolean) -> Unit)? = null
-    var label by mutableStateOf("")
+internal class CouiSwitchRow(
+    context: Context,
+    dark: Boolean,
+    accent: Int,
+    title: String,
+    summary: String?,
+    initial: Boolean,
+    initiallyExpanded: Boolean,
+    private val onExpand: ((Boolean) -> Unit)?,
+    private val onChange: (Boolean) -> Unit,
+) : CouiControl(context, dark, accent) {
+    var checked by mutableStateOf(initial)
+    private var expanded by mutableStateOf(initiallyExpanded)
 
     init {
-        minimumWidth = (48 * resources.displayMetrics.density).roundToInt()
-        minimumHeight = minimumWidth
         content {
-            Box(Modifier.width(48.dp).height(48.dp), contentAlignment = Alignment.Center) {
-                Switch(
-                    checked = isChecked,
-                    onCheckedChange = ::change,
-                    modifier = Modifier.semantics { contentDescription = label },
-                    enabled = controlEnabled,
-                )
-            }
+            val expansion = if (onExpand != null) ::toggleExpansion else null
+            SettingsSwitchPreference(
+                checked = checked, onCheckedChange = ::change, title = title, summary = summary,
+                enabled = controlEnabled, onRowClick = expansion ?: { change(!checked); haptic() },
+                endActions = {
+                if (expansion != null) {
+                    val description = context.getString(if (expanded) R.string.ui_collapse else R.string.ui_expand)
+                    Box(
+                        modifier = Modifier.size(42.dp, 48.dp)
+                            .clickable(enabled = controlEnabled, role = Role.Button, onClick = expansion)
+                            .semantics { contentDescription = description },
+                        contentAlignment = Alignment.Center,
+                    ) { SettingsExpandArrow(expanded) }
+                }
+            })
         }
     }
 
-    private fun change(checked: Boolean) {
-        if (!isEnabled || isChecked == checked) return
-        isChecked = checked
-        onChange?.invoke(checked)
+    private fun change(value: Boolean) {
+        if (!isEnabled || checked == value) return
+        checked = value
+        onChange(value)
     }
 
-    override fun performClick(): Boolean {
-        if (!isEnabled) return false
-        change(!isChecked)
+    private fun toggleExpansion() {
+        if (!isEnabled) return
+        haptic()
+        expanded = !expanded
+        onExpand?.invoke(expanded)
+    }
+
+    private fun haptic() {
         if (!performHapticFeedback(302)) performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
-        return true
-    }
-
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> onPressChanged?.invoke(true)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> onPressChanged?.invoke(false)
-        }
-        return super.dispatchTouchEvent(event)
     }
 }
 
 internal class CouiSlider(context: Context, dark: Boolean, accent: Int, private val label: String,
-    private val range: Int, initial: Int) : CouiControl(context, dark, accent) {
+    private val range: Int, initial: Int, hint: String?, format: (Int) -> String) : CouiControl(context, dark, accent) {
     var progress by mutableStateOf(initial)
     var adjusting = false
         private set
@@ -190,29 +219,30 @@ internal class CouiSlider(context: Context, dark: Boolean, accent: Int, private 
     init {
         content {
             val spectrum = palette
-            Box(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
-                Slider(
-                    value = progress.toFloat(),
-                    onValueChange = { value ->
-                        val next = value.roundToInt().coerceIn(0, range)
-                        if (progress != next) {
-                            progress = next
-                            onChange?.invoke(next)
-                            if (!adjusting) onTouchFinished?.invoke(next)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
-                    enabled = controlEnabled,
-                    valueRange = 0f..range.coerceAtLeast(1).toFloat(),
-                    height = 20.dp,
-                    stretchTrack = true,
-                    trackBrush = spectrum?.let { Brush.horizontalGradient(it.map(::Color)) },
-                    colors = if (spectrum == null) SliderDefaults.sliderColors() else SliderDefaults.sliderColors(
-                        foregroundColor = Color.Transparent, backgroundColor = Color.Transparent,
-                        disabledForegroundColor = Color.Transparent, disabledBackgroundColor = Color.Transparent,
-                    ),
-                    onValueChangeFinished = { if (!cancelled) onTouchFinished?.invoke(progress) },
-                )
+            val track = remember(spectrum) { spectrum?.let { Brush.horizontalGradient(it.map(::Color)) } }
+            ColorOsSettingsSliderRow(title = label, enabled = controlEnabled,
+                hasDividerAbove = false, hasDividerBelow = false,
+                titleAction = { Text(format(progress), style = COUITheme.textStyles.body2,
+                    color = COUITheme.colorScheme.onSurfaceVariantActions) }) {
+                if(hint!=null)Text(hint,style=COUITheme.textStyles.body2,color=COUITheme.colorScheme.onSurfaceVariantSummary)
+                Box(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                    ColorOs17SettingsSlider(
+                        value = progress.toFloat(),
+                        onValueChange = { value ->
+                            val next = value.roundToInt().coerceIn(0, range)
+                            if (progress != next) {
+                                progress = next
+                                onChange?.invoke(next)
+                                if (!adjusting) onTouchFinished?.invoke(next)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
+                        enabled = controlEnabled,
+                        valueRange = 0f..range.coerceAtLeast(1).toFloat(),
+                        trackBrush = track,
+                        onValueChangeFinished = { if (!cancelled) onTouchFinished?.invoke(progress) },
+                    )
+                }
             }
         }
     }
@@ -238,36 +268,86 @@ internal class CouiSlider(context: Context, dark: Boolean, accent: Int, private 
     }
 }
 
-internal class CouiChoiceLabel(context: Context, dark: Boolean, accent: Int, title: String,
-    selected: Boolean, position: Int, count: Int) : CouiControl(context, dark, accent) {
+internal class CouiSelection(
+    context: Context, dark: Boolean, accent: Int, title: String, initial: String,
+) : CouiControl(context, dark, accent) {
+    var value by mutableStateOf(initial)
+
     init {
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         content {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                DropdownImpl(
-                    item = DropdownItem(text = title),
-                    optionSize = count,
-                    isSelected = selected,
-                    index = position,
-                    isFirst = false,
-                    isLast = false,
-                    onSelectedIndexChange = {},
-                )
-            }
+            BasicComponent(
+                modifier = Modifier.heightIn(min = 54.dp),
+                title = title,
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                enabled = controlEnabled,
+                onClick = { performClick() },
+                endActions = {
+                    Text(value, Modifier.padding(end = 5.dp), style = COUITheme.textStyles.body2,
+                        color = COUITheme.colorScheme.onSurfaceVariantActions, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    SettingsPopupArrow()
+                },
+            )
         }
     }
-
-    // The existing popup owns tap, swipe-to-select and dismiss gestures.
-    override fun dispatchTouchEvent(event: MotionEvent) = false
 }
 
+internal class CouiInformation(
+    context: Context, dark: Boolean, accent: Int, title: String, summary: String,
+) : CouiControl(context, dark, accent) {
+    init {
+        content {
+            BasicComponent(
+                modifier = Modifier.heightIn(min = 56.dp),
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                title = title,
+                summary = summary,
+                enabled = controlEnabled,
+            )
+        }
+    }
+}
 
-/** Adapts stateless COUI components to the settings activity's existing layout slots. */
 internal class CouiSlot(context: Context, dark: Boolean, accent: Int, fill: Boolean = false,
     draw: @Composable () -> Unit) : CouiControl(context, dark, accent) {
     init {
         if (fill) composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content(draw)
+    }
+}
+
+internal class CouiPreviewActions(context: Context, dark: Boolean, accent: Int,
+    open: () -> Unit, close: () -> Unit) : CouiControl(context, dark, accent) {
+    private var reveal by mutableFloatStateOf(0f)
+    private var revealScale by mutableFloatStateOf(.92f)
+
+    fun renderReveal(progress:Float,scale:Float=.92f+.08f*progress){
+        reveal=progress
+        revealScale=scale
+        visibility=if(progress>.008f)View.VISIBLE else View.INVISIBLE
+    }
+
+    init {
+        renderReveal(0f)
+        content {
+            val openLabel=stringResource(R.string.ui_feature_peek_open)
+            val closeLabel=stringResource(R.string.ui_floating_close)
+            val entry=remember(openLabel,closeLabel){
+                DropdownEntry(items=listOf(
+                    DropdownItem(text=openLabel,onClick=open),
+                    DropdownItem(text=closeLabel,onClick=close),
+                ))
+            }
+            ColorOsEmbeddedPopup(reveal,revealScale) {
+                ColorOsDropdownMenuContent(reveal>.55f,entry,selectionMenu=false,
+                    leadingIcon={index,tint->
+                        Icon(painterResource(if(index==0)R.drawable.ic_catalog_next else R.drawable.ic_close),
+                            null,Modifier.size(19.dp),tint=tint)
+                    }){
+                    entry.items[it].onClick?.invoke()
+                }
+            }
+        }
     }
 }
 
@@ -285,18 +365,60 @@ internal class CouiSurface(context: Context, dark: Boolean, accent: Int, fill: I
 }
 
 internal class CouiPreference(context: Context, dark: Boolean, accent: Int, title: String,
-    summary: String?, icon: Int?, iconTint: Int, action: (View) -> Unit) : CouiControl(context, dark, accent) {
+    summary: String?, icon: Int?, iconTint: Int, catalog:Boolean=false, onPreview:((View)->Unit)?=null,
+    longPressLabel:Int=R.string.ui_feature_peek_title,
+    action: (View) -> Unit) : CouiControl(context, dark, accent) {
+    private var liftingForDialog = false
+
+    fun resetPreviewLift() {
+        liftingForDialog = false
+        animate().cancel()
+        scaleX = 1f
+        scaleY = 1f
+    }
+
     init {
         setOnClickListener(action)
         content {
+            val interactions = remember { MutableInteractionSource() }
+            if (onPreview != null) LaunchedEffect(interactions) {
+                interactions.interactions.collect { interaction ->
+                    if (!liftingForDialog && android.animation.ValueAnimator.areAnimatorsEnabled()) {
+                        val pressed = interaction is PressInteraction.Press
+                        if (pressed || interaction is PressInteraction.Release || interaction is PressInteraction.Cancel) {
+                            val scale = if (pressed) 1.033f else 1f
+                            animate().scaleX(scale).scaleY(scale).setDuration(if (pressed) 390L else 160L)
+                                .setInterpolator(android.view.animation.PathInterpolator(.28f, .03f, .50f, 1f)).start()
+                        }
+                    }
+                }
+            }
+            val gesture=if(onPreview==null)Modifier else Modifier.combinedClickable(
+                enabled=controlEnabled,
+                onLongClickLabel=context.getString(longPressLabel),
+                interactionSource=interactions,
+                indication=null,
+                onLongClick={
+                    liftingForDialog=true
+                    animate().cancel()
+                    onPreview(this@CouiPreference)
+                },
+                onClick={
+                    if(!catalog){liftingForDialog=true;animate().cancel()}
+                    performClick()
+                },
+            )
             ArrowPreference(
+                modifier=Modifier.clip(RoundedCornerShape(22.dp)).then(gesture),
                 title = title,
                 summary = summary,
-                insideMargin = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                insideMargin = PaddingValues(horizontal = 16.dp, vertical = if(catalog)10.dp else 12.dp),
                 startAction = icon?.let { resource ->
-                    { Icon(painterResource(resource), null, Modifier.size(22.dp), tint = Color(iconTint)) }
+                    { if(catalog)Box(Modifier.size(32.dp),contentAlignment=Alignment.Center){
+                        Icon(painterResource(resource),null,Modifier.size(28.dp),tint=Color(iconTint))
+                    }else Icon(painterResource(resource), null, Modifier.size(22.dp), tint = Color(iconTint)) }
                 },
-                onClick = { performClick() },
+                onClick = if(onPreview==null) {{performClick()}} else null,
                 enabled = controlEnabled,
             )
         }
@@ -305,58 +427,20 @@ internal class CouiPreference(context: Context, dark: Boolean, accent: Int, titl
 
 internal class CouiIconButton(context: Context, dark: Boolean, accent: Int, foreground: Int, surface: Int,
     private val icon: Int, private val label: String, effects: Boolean) : CouiControl(context, dark, accent) {
-    private val motion = if (effects) OnextButtonMotion(this, true) else null
-    private var filled by mutableStateOf(true)
-    private var initialized = false
-
     init {
-        initialized = true
         composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
-            IconButton(onClick = { performClick() }, modifier = Modifier.fillMaxSize(),
-                backgroundColor = if (filled) Color(surface) else Color.Transparent, cornerRadius = 24.dp,
-                minWidth = 0.dp, minHeight = 0.dp, enabled = controlEnabled) {
-                Icon(painterResource(icon), label, Modifier.size(22.dp), tint = Color(foreground))
+            com.cosmod.launcherglass.ui.onextbox.ColorOsTopBarButton(
+                onClick={if(controlEnabled)performClick()},modifier=Modifier.fillMaxSize(),nativeBlurEnabled=effects){
+                Icon(painterResource(icon),label,Modifier.size(22.dp),tint=Color(foreground))
             }
         }
     }
-
-    override fun setBackgroundDrawable(background: Drawable?) {
-        super.setBackgroundDrawable(background)
-        if (initialized) filled = false
-    }
-
-    fun shareGlass(onMove: () -> Unit) { motion?.shareGlass(onMove) }
-
-    fun followMaterial(material: View, onMove: () -> Unit) {
-        motion?.material = material
-        motion?.onMaterialMoved = onMove
-    }
-
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (motion?.listen(event) != true) return super.dispatchTouchEvent(event)
-        val cancel = MotionEvent.obtain(event)
-        cancel.action = MotionEvent.ACTION_CANCEL
-        super.dispatchTouchEvent(cancel)
-        cancel.recycle()
-        return true
-    }
-
-    override fun draw(canvas: Canvas) {
-        val spring = motion ?: return super.draw(canvas)
-        val saved = spring.beginDraw(canvas)
-        super.draw(canvas)
-        spring.endDraw(canvas, saved)
-    }
-
-    override fun onDetachedFromWindow() {
-        motion?.dispose()
-        super.onDetachedFromWindow()
-    }
+    fun shareGlass(onMove:()->Unit) { /* The upstream component moves its material and glyph together. */ }
 }
 
 internal class CouiField(context: Context, dark: Boolean, accent: Int, label: String, initial: String,
-    foreground: Int, maxLength: Int) : CouiControl(context, dark, accent) {
+    foreground: Int, maxLength: Int, autofocus:Boolean=true, multiline:Boolean=false) : CouiControl(context, dark, accent) {
     private var field by mutableStateOf(TextFieldValue(initial, TextRange(initial.length)))
     var error by mutableStateOf<String?>(null)
     val value get() = field.text
@@ -379,15 +463,16 @@ internal class CouiField(context: Context, dark: Boolean, accent: Int, label: St
                 cornerRadius = 16.dp,
                 textStyle = COUITheme.textStyles.body1.copy(color = Color(foreground), fontSize = 15.sp),
                 label = error ?: label,
-                singleLine = true,
+                singleLine = !multiline,
+                maxLines = if(multiline)4 else 1,
                 isError = error != null,
                 enabled = controlEnabled,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardOptions = KeyboardOptions(imeAction = if(multiline)ImeAction.Default else ImeAction.Done),
                 keyboardActions = KeyboardActions(
                     onDone = { onSubmit?.invoke() },
                 ),
             )
-            LaunchedEffect(Unit) {
+            if(autofocus)LaunchedEffect(Unit) {
                 requester.requestFocus()
                 keyboard?.show()
             }

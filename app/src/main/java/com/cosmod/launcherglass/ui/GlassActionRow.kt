@@ -107,15 +107,7 @@ internal class GlassPairMaterial(context: Context, private val tint: Int, privat
         outlines.op(bridge, Path.Op.UNION)
     }
 
-    fun draw(canvas: Canvas, first: RectF, second: RectF, height: Int, backdrop: ((Canvas) -> Unit)?) {
-        if (height > 0 && lastHeight != height) {
-            lastHeight = height
-            val vertical = LinearGradient(0f, 0f, 0f, height.toFloat(),
-                intArrayOf(if (dark) 0x55ffffff else 0x82ffffff.toInt(),
-                    if (dark) 0x19ffffff else 0x150e2540,if (dark) 0x63ffffff else 0x55ffffff),
-                floatArrayOf(0f,.55f,1f),Shader.TileMode.CLAMP)
-            edge.shader=android.graphics.ComposeShader(vertical,sideFade,android.graphics.PorterDuff.Mode.DST_IN)
-        }
+    fun shape(first:RectF,second:RectF):Path {
         outlines.rewind()
         for (i in 0..1) {
             val rect = if (i == 0) first else second
@@ -130,6 +122,19 @@ internal class GlassPairMaterial(context: Context, private val tint: Int, privat
         if (!first.isEmpty && !second.isEmpty) {
             if (first.centerX() <= second.centerX()) connect(first, second) else connect(second, first)
         }
+        return outlines
+    }
+
+    fun draw(canvas: Canvas, first: RectF, second: RectF, height: Int, backdrop: ((Canvas) -> Unit)?) {
+        if (height > 0 && lastHeight != height) {
+            lastHeight = height
+            val vertical = LinearGradient(0f, 0f, 0f, height.toFloat(),
+                intArrayOf(if (dark) 0x55ffffff else 0x82ffffff.toInt(),
+                    if (dark) 0x19ffffff else 0x150e2540,if (dark) 0x63ffffff else 0x55ffffff),
+                floatArrayOf(0f,.55f,1f),Shader.TileMode.CLAMP)
+            edge.shader=android.graphics.ComposeShader(vertical,sideFade,android.graphics.PorterDuff.Mode.DST_IN)
+        }
+        shape(first,second)
         if (!outlines.isEmpty) {
             val sample = backdrop
             if (sample != null && canvas.isHardwareAccelerated) {

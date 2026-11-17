@@ -10,26 +10,45 @@ internal object SettingsTransfer {
     private const val FORMAT = "cherrypick-icons-settings"
     private const val VERSION = 1
     private const val MAX_BYTES = 64 * 1024
-    private val defaults get() = SettingsDefaults.portable()
+    const val TITLE_LIMIT=80
+    const val DESCRIPTION_LIMIT=600
+    const val AUTHOR_LIMIT=80
+    private val defaults by lazy { SettingsDefaults.portable() }
+    private val sortedDefaults by lazy { defaults.toSortedMap() }
+    private val optionalFolderKeys by lazy {
+        (FolderSettingsKeys.integers + FolderSettingsKeys.booleans).mapTo(hashSetOf(), FolderSettingsKeys::key)
+    }
+    private val previewDefaults by lazy { defaults.filterKeys { !optionalFolder(it) } }
 
-    private fun optionalFolder(key: String) = key != FolderSettingsKeys.OWN &&
-        (key in FolderSettingsKeys.integers.map(FolderSettingsKeys::key) ||
-            key in FolderSettingsKeys.booleans.map(FolderSettingsKeys::key))
+    data class Metadata(val title:String="",val description:String="",val author:String="")
+    data class Document(val metadata:Metadata,val values:Map<String,Any>)
+
+    private fun optionalFolder(key: String) = key != FolderSettingsKeys.OWN && key in optionalFolderKeys
 
     fun export(prefs: SharedPreferences, keys: Set<String> = defaults.keys): String {
         val values = JSONObject()
         val saved = prefs.all
-        for ((key, default) in defaults.toSortedMap()) {
+        for ((key, default) in sortedDefaults) {
             if (key !in keys) continue
             // Absence means inherit the icon value, and must survive a round trip.
             if (optionalFolder(key) && !saved.containsKey(key)) continue
-            values.put(key, saved[key] ?: default)
+            val value=saved[key] ?: default
+            values.put(key,if(value is Int)legacyNumber(key,value.toLong()) else value)
         }
         return JSONObject().put("format", FORMAT).put("version", VERSION)
             .put("moduleVersion", BuildConfig.VERSION_NAME).put("settings", values).toString(2) + "\n"
     }
 
-    fun read(input: InputStream): Map<String, Any> {
+    fun withMetadata(json:String,metadata:Metadata):String {
+        val fields=JSONObject().put("title",metadata.title).put("description",metadata.description)
+            .put("author",metadata.author)
+        return JSONObject(json).put("metadata",fields).toString(2)+"\n"
+    }
+
+    fun previewValues(document:Document):Map<String,Any> =
+        previewDefaults + document.values
+
+    fun readDocument(input: InputStream): Document {
         val bytes = java.io.ByteArrayOutputStream()
         val buffer = ByteArray(4096)
         while (true) {
@@ -38,10 +57,12 @@ internal object SettingsTransfer {
             require(bytes.size() + count <= MAX_BYTES) { "Preset exceeds 64 KB" }
             bytes.write(buffer, 0, count)
         }
-        return parse(bytes.toString("UTF-8"))
+        return parseDocument(bytes.toString("UTF-8"))
     }
 
-    fun parse(text: String): Map<String, Any> {
+    fun parse(text: String): Map<String, Any> = parseDocument(text).values
+
+    fun parseDocument(text: String): Document {
         require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Preset exceeds 64 KB" }
         val document = JSONObject(text.removePrefix("\uFEFF"))
         require(document.opt("format") == FORMAT) { "Not a CherryPick preset" }
@@ -50,7 +71,8 @@ internal object SettingsTransfer {
         val schema = defaults
         val values = linkedMapOf<String, Any>()
         val saved=source.keys().asSequence().associateWith {source.get(it)}
-        val normalized=saved+LockscreenSettings.sharedShortcutValues(saved)
+        val migrated=saved+LockscreenSettings.sharedShortcutValues(saved)+GlassEngineSettings.inheritLegacy(saved)
+        val normalized=migrated+GlassEngineSettings.legacyRadii(migrated)
         for ((key,value) in normalized) {
             val default = schema[key] ?: continue // New optional settings may be ignored by older modules.
             when (default) {
@@ -58,8 +80,9 @@ internal object SettingsTransfer {
                 is Int -> {
                     require(value is Int || value is Long) { "Invalid $key" }
                     val number = (value as Number).toLong()
-                    require(number in range(key)) { "Out of range: $key" }
-                    values[key] = number.toInt()
+                    val portable=legacyNumber(key,number)
+                    require(portable in range(key)) { "Out of range: $key" }
+                    values[key]=portable.toInt()
                 }
             }
         }
@@ -82,10 +105,24 @@ internal object SettingsTransfer {
             if(width is Int && width in 1..8)values[key]=width*4
         }
         require(values.isNotEmpty()) { "Empty preset" }
-        return values
+        val metadata=document.optJSONObject("metadata")
+        fun field(name:String,limit:Int)=((metadata?.opt(name) as? String) ?: "").trim().take(limit)
+        return Document(Metadata(field("title",TITLE_LIMIT),field("description",DESCRIPTION_LIMIT),
+            field("author",AUTHOR_LIMIT)),values)
     }
 
-    private fun range(key: String): LongRange {
+    // Older settings can contain other mode IDs. The icon renderer uses system colors
+    // for every ID except 1, which enables detailed coloring.
+    internal fun portableColorMode(value:Long)=if(value==1L)1 else 0
+
+    internal fun legacyNumber(key:String,value:Long):Long=when {
+        key==SettingsProvider.KEY_COLOR_MODE->portableColorMode(value).toLong()
+        // The old dock migration copied the icon radius, whose maximum is 50.
+        key==SettingsProvider.KEY_DOCK_BLUR && value in 41L..50L->40L
+        else->value
+    }
+
+    internal fun range(key: String): LongRange {
         if(key in OpticalSettings.integers)return OpticalSettings.minimum(key).toLong()..OpticalSettings.maximum(key).toLong()
         val base = if (key.startsWith("folder_")) key.removePrefix("folder_") else key
         if(base in OpticalSettings.integers)return OpticalSettings.minimum(base).toLong()..OpticalSettings.maximum(base).toLong()
@@ -114,13 +151,24 @@ internal object SettingsTransfer {
             SettingsProvider.KEY_COLOR_DEPTH_BITS -> 8L..24L
             SettingsProvider.KEY_COLOR_DEPTH_STAGE -> 0L..3L
             SettingsProvider.KEY_BLUR_MODE, SettingsProvider.KEY_BLUR_STYLE,
-            SettingsProvider.KEY_ICON_APPEARANCE, SettingsProvider.KEY_COLOR_MODE -> 0L..1L
+            SettingsProvider.KEY_ICON_APPEARANCE -> 0L..1L
             else -> 0L..100L
         }
     }
 
     fun apply(prefs: SharedPreferences, values: Map<String, Any>) {
         check(write(prefs.edit(),values,defaults.keys).commit()) { "Could not save preset" }
+    }
+
+    fun matches(prefs:SharedPreferences,values:Map<String,Any>,keys:Set<String>):Boolean {
+        val saved=prefs.all
+        val schema=defaults
+        return keys.all {key->
+            val fallback=schema[key].takeUnless {optionalFolder(key)}
+            val current=saved[key] ?: fallback
+            val normalized=if(current is Int)legacyNumber(key,current.toLong()).toInt() else current
+            normalized==(values[key] ?: fallback)
+        }
     }
 
     fun write(editor: SharedPreferences.Editor,values: Map<String,Any>,keys: Set<String>): SharedPreferences.Editor {

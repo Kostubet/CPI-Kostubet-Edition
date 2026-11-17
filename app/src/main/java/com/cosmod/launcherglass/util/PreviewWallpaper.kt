@@ -18,11 +18,27 @@ internal object PreviewWallpaper {
     fun read(context: Context): Bitmap? {
         val manager = WallpaperManager.getInstance(context)
         return if (runCatching { manager.wallpaperInfo != null }.getOrDefault(false)) {
-            readFromLauncher(context) ?: readStatic(manager)
+            readLive(context) ?: runCatching {
+                val thumbnail = manager.wallpaperInfo?.loadThumbnail(context.packageManager) ?: return@runCatching null
+                val width = thumbnail.intrinsicWidth.coerceAtLeast(1)
+                val height = thumbnail.intrinsicHeight.coerceAtLeast(1)
+                val scale = minOf(1f, MAX_SIDE.toFloat() / maxOf(width, height))
+                Bitmap.createBitmap((width * scale).roundToInt().coerceAtLeast(1),
+                    (height * scale).roundToInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888).also {
+                    thumbnail.setBounds(0, 0, it.width, it.height)
+                    thumbnail.draw(android.graphics.Canvas(it))
+                }
+            }.getOrNull()
         } else {
             readStatic(manager) ?: readFromLauncher(context)
         }
     }
+
+    fun isLive(context: Context): Boolean = runCatching {
+        WallpaperManager.getInstance(context).wallpaperInfo != null
+    }.getOrDefault(false)
+
+    fun readLive(context: Context): Bitmap? = readFromLauncher(context, live = true)
 
     // Wallpaper access depends on the injected host. Callers fall back to the launcher snapshot.
     @android.annotation.SuppressLint("MissingPermission")
@@ -40,7 +56,7 @@ internal object PreviewWallpaper {
         }
     }.getOrNull()
 
-    private fun readFromLauncher(context: Context): Bitmap? = runCatching {
+    private fun readFromLauncher(context: Context, live: Boolean = false): Bitmap? = runCatching {
         val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val launcher = context.packageManager.resolveActivity(home, 0)?.activityInfo?.packageName ?: return null
         val directory = File(context.cacheDir, "preview-wallpaper").apply { mkdirs() }
@@ -52,6 +68,7 @@ internal object PreviewWallpaper {
             try {
                 val request = Intent(HostControl.PREVIEW_WALLPAPER).setPackage(launcher)
                     .putExtra(HostControl.PREVIEW_URI, uri.toString())
+                    .putExtra(HostControl.PREVIEW_WALLPAPER_LIVE, live)
                 if (HostControl.request(context, request, 3200).first == SystemUiControl.ACCEPTED) {
                     BitmapFactory.decodeFile(file.path)
                 } else null
@@ -63,14 +80,21 @@ internal object PreviewWallpaper {
         }
     }.getOrNull()
 
-    fun writeFromLauncher(context: Context, uri: Uri): Boolean = runCatching {
-        val bitmap = WallpaperHelper.readSystemSnapshot(context)
-            ?: readStatic(WallpaperManager.getInstance(context))
-            ?: return false
-        val preview = bounded(bitmap)
-        context.contentResolver.openOutputStream(uri)?.use {
-            preview.compress(Bitmap.CompressFormat.JPEG, 91, it)
-        } ?: false
+    fun writeFromLauncher(context: Context, uri: Uri, live: Boolean): Boolean = runCatching {
+        val frame = WallpaperHelper.readSystemSnapshot(context, fresh = live, maxSide = MAX_SIDE)
+            ?: if (live) null else readStatic(WallpaperManager.getInstance(context))
+        if (frame == null) return false
+        val software = if (frame.config == Bitmap.Config.HARDWARE) frame.copy(Bitmap.Config.ARGB_8888, false) else frame
+        val preview = bounded(software)
+        try {
+            context.contentResolver.openOutputStream(uri)?.use {
+                preview.compress(Bitmap.CompressFormat.JPEG, 88, it)
+            } ?: false
+        } finally {
+            if (preview !== software) preview.recycle()
+            if (software !== frame) software.recycle()
+            frame.recycle()
+        }
     }.getOrDefault(false)
 
     private fun bounded(bitmap: Bitmap): Bitmap {

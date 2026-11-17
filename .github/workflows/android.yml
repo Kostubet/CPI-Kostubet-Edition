@@ -27,23 +27,23 @@ jobs:
       - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
       - name: Set up Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
-          cmdline-tools-version: '12266719'
+          cmdline-tools-version: '16111833'
           log-accepted-android-sdk-licenses: 'false'
-          packages: 'platforms;android-35 build-tools;34.0.0'
+          packages: 'platforms;android-37.0 build-tools;36.0.0'
       - name: Run Gradle checks
-        run: ./gradlew --no-daemon --console=plain :app:assembleRelease :app:lintRelease :app:testReleaseUnitTest
+        run: ./gradlew --no-daemon --console=plain :app:assembleRelease :app:lintRelease :app:testDebugUnitTest
       - name: Upload test and lint reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-checks
           path: |
-            app/build/reports/tests/testReleaseUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
             app/build/reports/lint-results-release.*
           retention-days: 7
       - name: Upload APK and build metadata
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - name: Set up Android SDK
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:

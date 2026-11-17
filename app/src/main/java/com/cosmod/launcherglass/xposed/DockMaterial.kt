@@ -51,6 +51,7 @@ internal object DockMaterial {
         val identity=ColorDrawable(Color.TRANSPARENT)
         val bounds=Rect()
         var dirty=true
+        var unlockHosted=false
         var drawing=false
         var style:GlassStyle?=null
 
@@ -85,12 +86,28 @@ internal object DockMaterial {
 
     private val surfaces=WeakHashMap<View,Surface>()
     private val hosted=WeakHashMap<View,Surface>()
+    private var dragLayer:Class<*>?=null
     private data class UnlockTuning(val speed:Float=1f,val softness:Float=0f,val travel:Float=1f,
         val impulse:Float=0f,val blurDp:Int=0)
     @Volatile private var unlock=UnlockTuning()
     private var unlockBlur:android.animation.ValueAnimator?=null
     private val nativeAlpha=WeakHashMap<View,Float>()
     private val nativeTranslation=WeakHashMap<View,Float>()
+    private val settleUnlockPlacement=Runnable {
+        for((view,state) in surfaces.strongSnapshot()){
+            state.dirty=true
+            if(view is ViewGroup && enabled())safely {refreshGeometry(view,state)}
+            view.invalidate()
+            state.hostView()?.invalidate()
+        }
+    }
+    private val unlockPlacementHandler=android.os.Handler(android.os.Looper.getMainLooper())
+    fun onUnlockMotionStarted(){
+        if(!enabled())return
+        unlockPlacementHandler.removeCallbacks(settleUnlockPlacement)
+        settleUnlockPlacement.run()
+        unlockPlacementHandler.postDelayed(settleUnlockPlacement,860L)
+    }
     private val renderNodeField by lazy {
         runCatching {View::class.java.getDeclaredField("mRenderNode").apply {isAccessible=true}}.getOrNull()
     }
@@ -239,6 +256,13 @@ internal object DockMaterial {
     private val resourceNames=HashMap<Int,String>()
     private val dockIds=setOf("hotseat","hotseat_layout","dockbar","dock_bar")
     fun onSettingsChanged(){surfaces.values.toList().forEach(Surface::refresh)}
+    fun onBackdropChanged(){
+        for((view,state) in surfaces.strongSnapshot()){
+            if(!view.isShown)continue
+            val target=state.hostView() ?: view
+            target.postInvalidateOnAnimation()
+        }
+    }
     private val dockClasses=WeakHashMap<Class<*>,Boolean>()
     private fun candidate(view:View):Boolean {
         if(dockClasses.getOrPut(view.javaClass) {
@@ -300,24 +324,36 @@ internal object DockMaterial {
         }else collect(view,0)
         if(union.isEmpty)return
         val density=view.resources.displayMetrics.density
-        val availableWidth=view.width-(16*density).toInt()
-        if(availableWidth<1 || view.height<1){union.setEmpty();return}
-        val baseWidth=union.width()+((12+2*PrefsHelper.dockInset)*density).toInt()
-        val baseHeight=union.height()+(20*density).toInt()
-        val width=(baseWidth*PrefsHelper.dockWidth/100).coerceIn(1,availableWidth)
-        val baseline=baseHeight.coerceIn(1,view.height)
-        val height=(baseline*PrefsHelper.dockHeight/100).coerceAtLeast(1)
-        val margin=(8*density).toInt()
-        val left=(union.centerX()-width/2).coerceIn(margin,view.width-margin-width)
-        val baselineTop=(union.centerY()-baseline/2).coerceIn(0,view.height-baseline)
-        val top=baselineTop+(baseline-height)/2
-        union.set(left,top,left+width,top+height)
+        val bounds=com.cosmod.launcherglass.util.DockGeometry.calculate(union.left,union.top,union.right,union.bottom,
+            view.width,view.height,density,PrefsHelper.dockInset,PrefsHelper.dockWidth,PrefsHelper.dockHeight)
+        if(bounds==null)union.setEmpty()else union.set(bounds.left,bounds.top,bounds.right,bounds.bottom)
     }
 
     private fun refreshGeometry(view:ViewGroup,state:Surface){
-        if(!state.dirty)return
-        footprint(view,state.bounds)
+        val unlocking=com.cosmod.launcherglass.util.LiveBlurEngine.isUnlockMotion
+        if(!state.dirty && state.unlockHosted==unlocking)return
+        if(unlocking && !state.bounds.isEmpty){
+            val previous=Rect(state.bounds)
+            footprint(view,state.bounds)
+            if(state.bounds.isEmpty)state.bounds.set(previous)
+        }else footprint(view,state.bounds)
         state.dirty=false
+        state.unlockHosted=unlocking
+        if(unlocking){
+            // Draw above the moving hotseat's clipping ancestors; retain the
+            // native spring's alpha and translation via the hosted draw path.
+            var branch:View=view
+            var parent=branch.parent as? ViewGroup
+            while(parent!=null){
+                if(dragLayer?.isInstance(parent)==true){
+                    state.restoreClip()
+                    state.placeIn(parent,branch)
+                    return
+                }
+                branch=parent
+                parent=parent.parent as? ViewGroup
+            }
+        }
         if(state.bounds.top<0 || state.bounds.bottom>view.height){
             // Keep the plate in the native RenderNode so RenderThread alpha
             // and translation are identical to the hotseat during folder transitions.
@@ -349,14 +385,31 @@ internal object DockMaterial {
         state.placeIn(null,null)
     }
 
-    private fun enabled()=PrefsHelper.enabled && PrefsHelper.blurEnabled && PrefsHelper.dockStyle!=0
+    private fun enabled()=PrefsHelper.dockGlassEnabled
+    fun snapshotPreview(): com.cosmod.launcherglass.ui.NativePreviewScenes.Scene? {
+        val dock = surfaces.keys.weakSnapshot().filterIsInstance<ViewGroup>()
+            .firstOrNull { it.isAttachedToWindow && it.width > 0 && !it.isInLayout } ?: return null
+        val icons = iconContainer(dock) ?: return null
+        val bounds = Rect().also { footprint(dock, it) }
+        if (bounds.isEmpty) return null
+        val area = RectF(bounds)
+        val radius = minOf(area.width(), area.height()) * PrefsHelper.dockCorner / 100f
+        val path = Path().apply { addRoundRect(area, radius, radius, Path.Direction.CW) }
+        val transform = Matrix()
+        icons.transformMatrixToGlobal(transform)
+        dock.transformMatrixToLocal(transform)
+        return NativeMaterialPreview.capture(area, path) { canvas ->
+            canvas.concat(transform)
+            icons.draw(canvas)
+        }
+    }
 
     private fun draw(canvas:Canvas,view:ViewGroup,state:Surface,alpha:Int=255){
         val bounds=state.bounds
         if(bounds.isEmpty || alpha<=0)return
         val radius=minOf(bounds.width(),bounds.height())*PrefsHelper.dockCorner/100f
         val style=state.style ?: GlassStyle(PrefsHelper.dockStyle==2,PrefsHelper.dockLiquidWidth,
-            PrefsHelper.dockLiquidDistortion,PrefsHelper.dockBlur,0,null,
+            PrefsHelper.dockLiquidDistortion,PrefsHelper.dockBlur,PrefsHelper.dockOpacity,PrefsHelper.dockColorFilter,
             plateColor=Color.WHITE,extendedLens=true,neutral=true,rimOpacity=0,volumeOpacity=0,
             surfaceScope=GlassSurface.DOCK,dispersion=PrefsHelper.dockDispersion).also {state.style=it}
         SurfaceMaterial.draw(canvas,bounds,view,state.identity,radius,decorate=true,style=style,alpha=alpha)
@@ -369,6 +422,8 @@ internal object DockMaterial {
     }
 
     fun install(loader:ClassLoader){
+        dragLayer=XposedHelpers.findClassIfExists("com.android.launcher3.views.BaseDragLayer",loader)
+            ?: XposedHelpers.findClassIfExists("com.android.launcher3.dragndrop.DragLayer",loader)
         val methods=HashSet<java.lang.reflect.Method>()
         val hook=object:XC_MethodHook(){
             override fun beforeHookedMethod(param:MethodHookParam){

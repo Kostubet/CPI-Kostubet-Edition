@@ -3,11 +3,14 @@ package com.cosmod.launcherglass.xposed
 import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.Drawable
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.ImageView
 import com.cosmod.launcherglass.util.GlassLogger
+import com.cosmod.launcherglass.util.FolderPreviewKind
+import com.cosmod.launcherglass.ui.NativePreviewScenes.Scene
 import de.robv.android.xposed.*
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
@@ -15,9 +18,80 @@ import java.util.function.BiConsumer
 
 /** Replace the folder material producer, not just the pixels above OEM blur. */
 internal object FolderMaterialHook {
+    private val previewBackground = ThreadLocal<View>()
+    fun snapshotPreview(kind: FolderPreviewKind): Scene? {
+        check(Looper.myLooper()==Looper.getMainLooper())
+        val views = backgrounds.values.weakSnapshot().mapNotNull { it.view.get() }.distinct()
+        val visible = Rect()
+        for (view in views.sortedByDescending { it.getGlobalVisibleRect(visible) }) {
+            if (!view.isAttachedToWindow || view.width <= 0 || view.height <= 0) continue
+            val info = NativeIconAccess.call(view, "getFolderInfo") ?: view.tag
+            val spanX = (info?.let { NativeIconAccess.call(it, "getSpanX") } as? Number)?.toInt() ?: 1
+            val spanY = (info?.let { NativeIconAccess.call(it, "getSpanY") } as? Number)?.toInt() ?: 1
+            if (FolderPreviewKind.classify(view.javaClass.name, spanX, spanY) != kind) continue
+            val background = NativeIconAccess.call(view, "getItemIconPreview") as? View ?: continue
+            val local = Rect(0, 0, background.width, background.height)
+            if (local.isEmpty) continue
+            val transform = Matrix()
+            background.transformMatrixToGlobal(transform)
+            view.transformMatrixToLocal(transform)
+            val bounds = RectF(local).apply { transform.mapRect(this) }
+            val radius = (NativeIconAccess.call(view, "getItemRadius") as? Number)?.toFloat()?.takeIf {it>0f}
+                ?: kind.corner*minOf(local.width(),local.height())/minOf(kind.previewWidth,kind.previewHeight)
+            val path = nativePath(view, local, radius, info, spanX, spanY)?.path ?: Path().apply {
+                val bounds=RectF(local)
+                @Suppress("UNCHECKED_CAST")
+                val clip=field(view,"mSmoothClipPathFunction") as? BiConsumer<Path,RectF>
+                runCatching {clip?.accept(this,bounds)}
+                if(isEmpty)com.cosmod.launcherglass.ui.onextbox.addOplusSmoothRoundRect(this,bounds,radius,3f)
+                if(isEmpty)addRoundRect(bounds,radius,radius,Path.Direction.CW)
+            }
+            path.transform(transform)
+            val scene = runCatching {
+                previewBackground.set(background)
+                background.invalidate()
+                try {
+                    NativeMaterialPreview.capture(bounds, path, foreground = view::draw)
+                } finally {
+                    previewBackground.remove()
+                    background.invalidate()
+                    view.invalidate()
+                }
+            }.onFailure { error ->
+                GlassLogger.limited("FolderPreview", kind.name) { "Folder capture unavailable: $error" }
+            }.getOrNull()
+            if (scene != null) return scene
+        }
+        return null
+    }
     private data class State(val context:WeakReference<Context>,val view:WeakReference<View>,val activity:WeakReference<Any>)
     private val backgrounds=WeakHashMap<Any,State>()
     private val panels=WeakHashMap<ImageView,Drawable?>()
+    private val openPanels=WeakHashMap<View,List<WeakReference<ImageView>>>()
+    private val panelNodes=WeakHashMap<View,RenderNode>()
+    private val panelTransform=Matrix()
+
+    fun backdrop(icon:View,crop:RectF):RenderNode? {
+        var ancestor=icon.parent as? View
+        while(ancestor!=null){
+            val registered=openPanels[ancestor]
+            if(registered!=null){
+                for(reference in registered){
+                    val panel=reference.get() ?: continue
+                    val node=panelNodes[panel] ?: continue
+                    if(!panel.isShown || panel.alpha<=.01f || !node.hasDisplayList())continue
+                    panelTransform.reset()
+                    icon.transformMatrixToGlobal(panelTransform)
+                    panel.transformMatrixToLocal(panelTransform)
+                    panelTransform.mapRect(crop)
+                    return node
+                }
+                return null
+            }
+            ancestor=ancestor.parent as? View
+        }
+        return null
+    }
     private val main=Handler(Looper.getMainLooper())
     private val converted=WeakHashMap<Any,Boolean>()
     private val nativeShapes=android.util.LruCache<String,Path>(24)
@@ -113,8 +187,27 @@ internal object FolderMaterialHook {
             cachedBounds.set(bounds);cachedRadius=radius;cachedInfo=info;cachedSpanX=sx;cachedSpanY=sy;cachedRevision=geometryRevision
             }
             if(!logged){logged=true;GlassLogger.i("FolderMaterial","Native shape: radius=$radius, path=${!path.isEmpty}, bounds=$bounds, callback=${callback?.javaClass?.simpleName}")}
-            if(!SurfaceMaterial.draw(canvas,bounds,view,this,radius,path.takeUnless {it.isEmpty},alpha=opacity,style=style(source.get() ?: view,native!=null && sx>1 && sy>1),nativeShape=if(path.isEmpty)fallback else null,pathFingerprint=pathFingerprint,fallback=fallback)){
-                fallback?.bounds=bounds;fallback?.draw(canvas)
+            fun drawPanel(target:Canvas){
+                if(!SurfaceMaterial.draw(target,bounds,view,this,radius,path.takeUnless {it.isEmpty},alpha=opacity,style=style(source.get() ?: view,native!=null && sx>1 && sy>1),nativeShape=if(path.isEmpty)fallback else null,pathFingerprint=pathFingerprint,fallback=fallback)){
+                    fallback?.bounds=bounds;fallback?.draw(target)
+                }
+            }
+            if(Build.VERSION.SDK_INT>=33 && owner==null && panels.containsKey(view) && PrefsHelper.folderIconsBlurEnabled &&
+                canvas.isHardwareAccelerated && view.width>0 && view.height>0){
+                val node=panelNodes.getOrPut(view){RenderNode("CherryPick.openFolderBackdrop")}
+                node.setPosition(0,0,view.width,view.height)
+                try {
+                    val target=node.beginRecording()
+                    try {drawPanel(target)}finally{node.endRecording()}
+                    canvas.drawRenderNode(node)
+                }catch(error:RuntimeException){
+                    panelNodes.remove(view)
+                    GlassLogger.limited("FolderMaterial","openBackdrop") {"Folder backdrop unavailable: $error"}
+                    drawPanel(canvas)
+                }
+            }else{
+                panelNodes.remove(view)
+                drawPanel(canvas)
             }
         }
         override fun setAlpha(alpha:Int){if(opacity!=alpha){opacity=alpha;invalidateSelf()}}
@@ -175,6 +268,10 @@ internal object FolderMaterialHook {
             ModuleHooks.hookAllMethods(image,"onDraw",object:XC_MethodHook(){
                 override fun beforeHookedMethod(param:MethodHookParam){
                     val view=param.thisObject as? ImageView ?: return
+                    if (previewBackground.get() === view) {
+                        param.result = null
+                        return
+                    }
                     val material=view.drawable as? Material ?: return
                     val canvas=param.args.firstOrNull() as? Canvas ?: return
                     if(!enabled(material.source.get()))return
@@ -199,6 +296,11 @@ internal object FolderMaterialHook {
         ModuleHooks.hookAllMethods(type,"drawBackground",object:XC_MethodHook(){
             override fun beforeHookedMethod(param:MethodHookParam){
                 if(param.args.size<2)return
+                val preview = previewBackground.get()
+                if (preview != null && field(param.thisObject, "mBgView") === preview) {
+                    param.result = null
+                    return
+                }
                 val material=field(param.thisObject,"mBgDrawable") as? Material ?: return
                 if(!enabled(material.source.get()))return
                 val canvas=param.args.firstOrNull() as? Canvas ?: return
@@ -254,11 +356,15 @@ internal object FolderMaterialHook {
         val folder=XposedHelpers.findClassIfExists("com.android.launcher3.folder.OplusFolder",loader)
         if(folder!=null)ModuleHooks.hookAllMethods(folder,"onFinishInflate",object:XC_MethodHook(){
             override fun afterHookedMethod(param:MethodHookParam){
+                val container=param.thisObject as? View ?: return
+                val installed=ArrayList<WeakReference<ImageView>>(2)
                 for(name in listOf("mContentBackground","mContentAnimationBackground")){
                     val view=field(param.thisObject,name) as? ImageView ?: continue
                     panels[view]=view.background
+                    installed.add(WeakReference(view))
                     if(enabled())view.background=Material(WeakReference(view),null,view.background)
                 }
+                if(installed.isNotEmpty())openPanels[container]=installed
             }
         })
         // Full-workspace blur belongs to the launcher transition controller.

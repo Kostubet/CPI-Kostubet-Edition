@@ -83,6 +83,8 @@ object IconMaterialRenderer {
         val clock=SampleFrameClock()
         var finishKey=-1
         var lift:Lift?=null
+        var folderPanel:RenderNode?=null
+        var folderCrop:RectF?=null
         // Frame serials (see beginFrame) of creation and of the latest own draw.
         var created=0L
         var bound=0L
@@ -176,6 +178,7 @@ object IconMaterialRenderer {
     }
     private fun ensureContents(sampler:Sampler):Boolean {
         if(sampler.node.hasDisplayList())return false
+        sampler.folderPanel=null
         val canvas=sampler.node.beginRecording(sampler.node.width,sampler.node.height)
         canvas.drawColor(Color.BLACK)
         sampler.node.endRecording()
@@ -254,9 +257,69 @@ object IconMaterialRenderer {
         return false
     }
     private fun opticalKey()=31*MaterialFinish.key()+WallpaperGlow.revision
+    private fun sampleFolderPanel(sampler:Sampler,view:View,style:GlassStyle):Boolean {
+        if(style.folderBackdrop && android.os.Build.VERSION.SDK_INT>=33){
+            try {
+                if(recordFolderSample(sampler,view,style))return true
+            }catch(error:RuntimeException){
+                GlassLogger.limited("IconMaterial","folderBackdrop") {"Cannot sample open folder backdrop: $error"}
+            }
+        }
+        if(sampler.folderPanel!=null){
+            sampler.folderPanel=null
+            sampler.folderCrop=null
+            sampler.source=null
+            sampler.wallpaper=null
+            sampler.node.discardDisplayList()
+            ensureContents(sampler)
+        }
+        return false
+    }
+
+    @androidx.annotation.RequiresApi(33)
+    private fun recordFolderSample(sampler:Sampler,view:View,style:GlassStyle):Boolean {
+        val crop=RectF(sampler.local)
+        val panel=FolderMaterialHook.backdrop(view,crop)
+        if(panel!=null && !crop.isEmpty && crop.centerX() in 0f..panel.width.toFloat() &&
+            crop.centerY() in 0f..panel.height.toFloat()){
+            val finish=opticalKey()
+            if(sampler.folderPanel===panel && sampler.folderCrop==crop && sampler.appliedStyle==style &&
+                sampler.finishKey==finish && sampler.node.hasDisplayList())return true
+            val width=sampler.node.width
+            val height=sampler.node.height
+            val mask=sampler.material.mask ?: return false
+            val transform=Matrix().apply {
+                setRectToRect(crop,RectF(0f,0f,width.toFloat(),height.toFloat()),Matrix.ScaleToFit.FILL)
+            }
+            val lens=if(style.liquid)LiquidGlassShader.lifted()?.updateLifted(mask,width,height,0f,width,
+                height,style.backdropFilter,sampler.material.rounding,style)else null
+            val effect=if(lens!=null)RenderEffect.createRuntimeShaderEffect(lens,"backdrop")else {
+                val content=style.backdropFilter?.let {RenderEffect.createColorFilterEffect(it)} ?: RenderEffect.createOffsetEffect(0f,0f)
+                RenderEffect.createBlendModeEffect(content,RenderEffect.createShaderEffect(mask),BlendMode.DST_IN)
+            }
+            val blur=style.engineOptics.blur
+            val radius=blur.radius(style.radius.toFloat())
+            val background=com.cosmod.launcherglass.util.GlassBlur.effect(radius,blur.opacity)
+            val backdrop=background?.let {RenderEffect.createChainEffect(effect,it)} ?: effect
+            val canvas=sampler.node.beginRecording()
+            try {
+                canvas.concat(transform)
+                canvas.drawRenderNode(panel)
+            }finally{sampler.node.endRecording()}
+            sampler.node.setRenderEffect(MaterialFinish.effect(backdrop))
+            sampler.folderPanel=panel
+            sampler.folderCrop=crop
+            sampler.finishKey=finish
+            sampler.appliedStyle=style
+            sampler.source=null
+            return true
+        }
+        return false
+    }
+
     private fun samplerEffect(sampler:Sampler,wallpaper:Bitmap,source:RectF,nowNs:Long=System.nanoTime(),view:View?=null):Boolean {
         val style=sampler.style
-        val filter=style.filter
+        val filter=style.backdropFilter
         val finishKey=opticalKey()
         if(sampler.wallpaper===wallpaper && sampler.filter===filter && sampler.appliedStyle==style && sampler.finishKey==finishKey){
             val previous=sampler.source
@@ -318,11 +381,16 @@ object IconMaterialRenderer {
         var folderImage:Bitmap?=null
         for(sampler in entries.values){
             restored=restoreSample(sampler) || restored
-            val image=if(sampler.style.surfaceScope==GlassSurface.PAGE_INDICATOR){
+            if(sampleFolderPanel(sampler,view,sampler.style))continue
+            val image=if(sampler.style.folderBackdrop) {
+                folderImage ?: com.cosmod.launcherglass.util.WallpaperHelper.getFolderWallpaper(view.context).also {folderImage=it}
+            } else if(sampler.style.surfaceScope==GlassSurface.PAGE_INDICATOR){
                 PageIndicatorGlass.wallpaper(view) ?: continue
             }else if(sampler.style.surfaceScope==GlassSurface.WIDGETS){
                 com.cosmod.launcherglass.util.WallpaperHelper.getWidgetWallpaper(view.context) ?: continue
-            }else if(sampler.style.neutral){com.cosmod.launcherglass.util.WallpaperHelper.getNeutralWallpaper(view.context) ?: wallpaper}else if(sampler.style.folder){
+            }else if(sampler.style.neutral){com.cosmod.launcherglass.util.WallpaperHelper.getNeutralWallpaper(view.context) ?: wallpaper}else if(sampler.style.largeFolderBackdrop){
+                com.cosmod.launcherglass.util.WallpaperHelper.getFolderWallpaper(view.context,large=true) ?: wallpaper
+            }else if(sampler.style.folder){
                 folderImage ?: (com.cosmod.launcherglass.util.WallpaperHelper.getFolderWallpaper(view.context) ?: wallpaper).also {folderImage=it}
             }else wallpaper
             if(image==null)continue
@@ -358,7 +426,9 @@ object IconMaterialRenderer {
         val height = bounds.height()
         if (width <= 0 || height <= 0) return
         val blurred = wallpaper != null && source != null
-        val key = Key(mask, glyph, width, height, color, tintAlpha, hideGlyph, blurred,
+        val surfaceTint=SurfaceTints.get(style.surfaceScope)
+        val key = Key(mask, glyph, width, height, surfaceTint?.color ?: color,
+            surfaceTint?.let {it.opacity*255/100} ?: tintAlpha, hideGlyph, blurred,
             if(volume)style.volumeOpacity ?: PrefsHelper.gradientOpacity else 0,
             style.rimOpacity ?: if (!hideGlyph && PrefsHelper.iconStroke) PrefsHelper.strokeOpacity else 0,
             if (PrefsHelper.glyphShadow) PrefsHelper.shadowOpacity else 0,
@@ -481,7 +551,8 @@ object IconMaterialRenderer {
                     val hold=motion.holdHomeGlassGeometry &&
                         !IconGlassHook.isDrawerIcon(binding.view) && sampler.worldValid && sampler.lift==null &&
                         sampler.wallpaper===wallpaper && sampler.appliedStyle==style
-                    if(!hold && (sampler.source==null || ((binding.dragPreview || !motion.deferWorkspaceSampling) &&
+                    if(!sampleFolderPanel(sampler,binding.view,style) &&
+                        !hold && (sampler.source==null || ((binding.dragPreview || !motion.deferWorkspaceSampling) &&
                             !freezeEdge(binding.view,world))) &&
                         samplerEffect(sampler,wallpaper,WallpaperFootprint.source(wallpaper,binding.screenW,binding.screenH,rect),view=binding.view)){
                         sampler.world.set(world);sampler.worldValid=true
@@ -503,11 +574,11 @@ object IconMaterialRenderer {
                         CpuLiquidGlass.shader(wallpaper,mask,width,height,source,material.rounding,style)
                     }else if(android.os.Build.VERSION.SDK_INT>=33 && style.liquid && canvas.isHardwareAccelerated){
                         val lens=material.liquid ?: LiquidGlassShader.create().also {material.liquid=it}
-                        lens?.update(wallpaper,material.mask!!,source,width,height,style.filter,material.rounding,style)
+                        lens?.update(wallpaper,material.mask!!,source,width,height,style.backdropFilter,material.rounding,style)
                     }else null
                     if(refracted!=null){
                         material.paint.shader=refracted
-                        material.paint.colorFilter=if(canvas.isHardwareAccelerated)null else style.filter
+                        material.paint.colorFilter=if(canvas.isHardwareAccelerated)null else style.backdropFilter
                     }else{
                         if (material.wallpaperShaderImage !== wallpaper) {
                             material.wallpaperShaderImage = wallpaper
@@ -517,7 +588,7 @@ object IconMaterialRenderer {
                         material.wallpaperShader!!.setLocalMatrix(material.matrix)
                         material.wallpaperComposite = ComposeShader(material.wallpaperShader!!, material.mask!!, PorterDuff.Mode.DST_IN)
                     material.paint.shader=material.wallpaperComposite
-                    material.paint.colorFilter = style.filter
+                    material.paint.colorFilter = style.backdropFilter
                     }
                     if(hardware && android.os.Build.VERSION.SDK_INT>=33 && WallpaperGlow.active(style)){
                         val optics=material.glow ?: WallpaperGlow.Optics().also {material.glow=it}
@@ -753,7 +824,7 @@ object IconMaterialRenderer {
         val radius=kotlin.math.round(screenRadius*scale*4f)/4f
         val edge=minOf(w,h).toFloat()
         val liquid=style.liquid && material.mask!=null
-        val lens=if(liquid)minOf(edge*.15f*maxOf(style.distortion/50f,.2f),edge*.5f)else 0f
+        val lens=if(liquid)minOf(edge*.15f*maxOf(style.distortion/50f,.2f),edge*.5f)*style.engineOptics.heightScale else 0f
         val margin=kotlin.math.round(1.5f*radius+lens+2f).toInt().coerceIn(4,256)
         val wrapperW=w+2*margin
         val wrapperH=h+2*margin
@@ -833,7 +904,7 @@ object IconMaterialRenderer {
         val effectKey=listOf<Any?>(material,w,h,margin,style,liquid)
         if(lift.effectKey!=effectKey){
             val lensEffect=if(liquid)LiquidGlassShader.lifted()?.let {
-                RenderEffect.createRuntimeShaderEffect(it.updateLifted(material.mask!!,w,h,margin.toFloat(),wrapperW,wrapperH,style.filter,material.rounding,style),"backdrop")
+                RenderEffect.createRuntimeShaderEffect(it.updateLifted(material.mask!!,w,h,margin.toFloat(),wrapperW,wrapperH,style.backdropFilter,material.rounding,style),"backdrop")
             } else null
             val effect=lensEffect ?: run {
                 val image=material.maskImage
@@ -844,7 +915,7 @@ object IconMaterialRenderer {
                         postTranslate(margin.toFloat(),margin.toFloat())
                     })
                 }
-                val content=style.filter?.let {RenderEffect.createColorFilterEffect(it)} ?: RenderEffect.createOffsetEffect(0f,0f)
+                val content=style.backdropFilter?.let {RenderEffect.createColorFilterEffect(it)} ?: RenderEffect.createOffsetEffect(0f,0f)
                 RenderEffect.createBlendModeEffect(content,RenderEffect.createShaderEffect(mask),BlendMode.DST_IN)
             }
             lift.wrapper.setRenderEffect(effect)

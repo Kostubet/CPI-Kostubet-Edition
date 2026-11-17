@@ -167,7 +167,10 @@ object LauncherWallpaperCapture {
             window?.get()?.viewTreeObserver?.takeIf {it.isAlive}?.let {old -> focusListener?.let {old.removeOnWindowFocusChangeListener(it)} }
             val weak=WeakReference(view)
             focusListener=android.view.ViewTreeObserver.OnWindowFocusChangeListener { focused ->
-                if(focused && weak.get()!=null)LiveBlurEngine.onActivityResumed()
+                if(focused && weak.get()!=null){
+                    LiveBlurEngine.onActivityResumed()
+                    com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onLauncherFocused()
+                }
             }.also {view.viewTreeObserver.addOnWindowFocusChangeListener(it)}
         }
         window = WeakReference(view)
@@ -258,7 +261,7 @@ object LauncherWallpaperCapture {
                         val time = SystemClock.uptimeMillis()
                         if (epoch == motionEpoch && frame != null && !frame.isRecycled &&
                             frameBusy.compareAndSet(false, true)) {
-                            if (!pacing.ready(System.nanoTime(),PrefsHelper.liveFps,PerformancePolicy.captureRefreshHz)) {
+                            if (!pacing.ready(System.nanoTime(),PerformancePolicy.captureFps(),PerformancePolicy.capturePacingHz)) {
                                 frameBusy.set(false)
                                 return@newProxyInstance null
                             }
@@ -269,9 +272,9 @@ object LauncherWallpaperCapture {
                                 if (copy == null) frameBusy.set(false)
                                 else WallpaperHelper.processLiveFrame(copy,{epoch==motionEpoch}) { signature ->
                                     frameBusy.set(false)
-                                    main.post {
+                                    if(signature!=null)main.post {
                                         if (epoch == motionEpoch && motionFactory != null) {
-                                            if (signature != null) motionState.observe(signature, SystemClock.uptimeMillis())
+                                            motionState.observe(signature, SystemClock.uptimeMillis())
                                             if ((PrefsHelper.idlePause || PerformancePolicy.economy) && motionState.isSettled(SystemClock.uptimeMillis())) {
                                                 stopMotionWatch()
                                             }
@@ -303,7 +306,8 @@ object LauncherWallpaperCapture {
         val root = window?.get() ?: return null
         val api=api(context) ?: return null
         val finished = AtomicBoolean(false)
-        val bitmap = AtomicReference<Bitmap?>()
+        val resultLock = Any()
+        var bitmap:Bitmap? = null
         val factory = AtomicReference<Any?>()
         val ready = CountDownLatch(1)
         main.post {
@@ -326,11 +330,14 @@ object LauncherWallpaperCapture {
                         "equals" -> proxy === args?.firstOrNull()
                         "toString" -> "CosmodWallpaperCapture"
                         api.frameMethod -> {
-                            if (!finished.get() && bitmap.get() == null) {
+                            if (!finished.get() && synchronized(resultLock){bitmap==null}) {
                                 val source = args?.firstOrNull { it is Bitmap } as? Bitmap
                                 if (source != null && !source.isRecycled) {
                                     val copy = source.copy(Bitmap.Config.HARDWARE, false)
-                                    if (copy != null && !bitmap.compareAndSet(null, copy)) copy.recycle()
+                                    if(copy!=null)synchronized(resultLock){
+                                        if(finished.get() || bitmap!=null)copy.recycle()
+                                        else bitmap=copy
+                                    }
                                     ready.countDown()
                                 }
                             }
@@ -350,13 +357,13 @@ object LauncherWallpaperCapture {
         try {
             ready.await(1200L, TimeUnit.MILLISECONDS)
         } finally {
-            finished.set(true)
+            synchronized(resultLock){finished.set(true)}
             main.post {
                 factory.get()?.let {
                     try { api.stop.invoke(it,true) } catch (_: Throwable) {}
                 }
             }
         }
-        return bitmap.get()
+        return synchronized(resultLock){bitmap}
     }
 }

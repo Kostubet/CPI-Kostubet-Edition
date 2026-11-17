@@ -10,7 +10,11 @@ import android.graphics.PorterDuffColorFilter
 
 /** Immutable snapshot shared by all icon render paths. Constructed on preference changes only. */
 data class IconPalette(val custom: Boolean, val background: Int, val foreground: Int, val clear: Boolean = false,
-    val tintHue: Int = 0, val tintSaturation: Int = 0, val whiteGlyph: Boolean = false) {
+    val tintHue: Int = 0, val tintSaturation: Int = 0, val whiteGlyph: Boolean = false,
+    val tintBrightness:Int=100) {
+    fun withLogo(enabled:Boolean,hue:Int,saturation:Int,brightness:Int):IconPalette = if(!enabled)this else copy(
+        foreground=Color.HSVToColor(floatArrayOf(hue.coerceIn(0,360).toFloat(),saturation.coerceIn(0,100)/100f,brightness.coerceIn(0,100)/100f)),
+        whiteGlyph=true)
     val filter = PorterDuffColorFilter(foreground, PorterDuff.Mode.SRC_IN)
     data class WallpaperTone(val hue:Int,val saturation:Int) {
         fun saturationAt(amount:Int)=(saturation*amount/50f).roundToInt().coerceIn(0,100)
@@ -64,7 +68,8 @@ data class IconPalette(val custom: Boolean, val background: Int, val foreground:
             }
             // Do not counteract these user-controlled tones with automatic
             // contrast correction: it made dark logos bright and light ones dark.
-            return IconPalette(mode == 1, background, foreground, false, h.toInt(), saturation.coerceIn(0,100), !dark)
+            return IconPalette(mode == 1, background, foreground, false, h.toInt(), saturation.coerceIn(0,100), !dark,
+                brightness.coerceIn(0,100))
         }
     }
 }

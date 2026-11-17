@@ -9,8 +9,7 @@ import androidx.core.content.ContextCompat
 
 /** Limits background sampling, leaving native geometry/touch animations at display rate. */
 object PerformancePolicy {
-    private data class Settings(val profile:Int=0,val resolution:Int=100,val alertRate:Int=0,
-        val lightDrawer:Boolean=false,val transitionGlass:Boolean=false,val adaptiveAlerts:Boolean=true,
+    private data class Settings(val profile:Int=0,val lightDrawer:Boolean=false,val transitionGlass:Boolean=false,
         val highRefreshPacing:Boolean=false)
     @Volatile private var settings=Settings()
     @Volatile private var saver=false
@@ -20,7 +19,7 @@ object PerformancePolicy {
     private var displayManager:DisplayManager?=null
     private var watchingDisplay=false
     @Volatile private var displayHz=0f
-    val captureRefreshHz get()=displayHz
+    val capturePacingHz get()=if(settings.highRefreshPacing)displayHz else 0f
     private val displayListener=object:DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId:Int){if(displayId==Display.DEFAULT_DISPLAY)readRefreshRate()}
         override fun onDisplayRemoved(displayId:Int){if(displayId==Display.DEFAULT_DISPLAY)displayHz=0f}
@@ -29,59 +28,44 @@ object PerformancePolicy {
 
     private fun readRefreshRate(){
         val rate=displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.refreshRate ?: 0f
-        displayHz=rate.takeIf {it in 59f..240f} ?: 0f
+        displayHz=rate.takeIf {it in 1f..240f} ?: 0f
     }
 
-    private fun updateDisplayTracking(context:Context,liveFps:Int){
-        val track=settings.highRefreshPacing || settings.alertRate==4 || liveFps>60
-        if(watchingDisplay==track)return
-        if(track){
-            val manager=context.getSystemService(DisplayManager::class.java) ?: return
-            displayManager=manager
-            manager.registerDisplayListener(displayListener,Handler(Looper.getMainLooper()))
-            watchingDisplay=true
-            readRefreshRate()
-        }else{
-            displayManager?.unregisterDisplayListener(displayListener)
-            displayManager=null
-            watchingDisplay=false
-            displayHz=0f
-        }
+    private fun updateDisplayTracking(context:Context){
+        if(watchingDisplay)return
+
+        val manager=context.getSystemService(DisplayManager::class.java) ?: return
+        displayManager=manager
+        manager.registerDisplayListener(displayListener,Handler(Looper.getMainLooper()))
+        watchingDisplay=true
+        readRefreshRate()
     }
-    private data class CaptureBudget(val economy:Boolean,val source:Int,val dock:Int,val alert:Int,val drawer:Boolean)
-    private fun budget()=CaptureBudget(economy,sourceHeight,dockHeight,alertWidth,lightDrawer)
+    private data class CaptureBudget(val economy:Boolean,val source:Int,val alert:Int,val drawer:Boolean)
+    private fun budget()=CaptureBudget(economy,sourceHeight,alertWidth,lightDrawer)
     val economy get()=settings.profile==2 || saver || thermal>=PowerManager.THERMAL_STATUS_SEVERE || (settings.profile==0 && small)
     private val balanced get()=settings.profile==3 || (settings.profile==0 && thermal>=PowerManager.THERMAL_STATUS_MODERATE)
     private val quality get()=settings.profile==1 && !economy
     val lightDrawer get()=settings.lightDrawer || economy
     val transitionGlass get()=settings.transitionGlass && !economy && thermal<PowerManager.THERMAL_STATUS_MODERATE
-    val adaptiveAlerts get()=settings.adaptiveAlerts
-    val sourceHeight get()=(when { economy->720; balanced->1000; quality->1800; else->1080 })*settings.resolution/100
-    val dockHeight get()=(when { economy->480; balanced->600; quality->960; else->720 })*settings.resolution/100
-    val alertWidth get()=(when { economy->384; balanced->448; quality->640; else->480 })*settings.resolution/100
-    val alertFps:Int get() {
-        val limit=when {
-            economy->30
-            balanced->45
-            quality || settings.alertRate==4->120
-            settings.alertRate==3->60
-            else->45
-        }
-        return minOf(limit,when(settings.alertRate){1->30;2->45;3->60;else->120},refreshLimit())
-    }
+    val sourceHeight get()=(when { economy->720; balanced->1000; quality->1800; else->1440 })
+    val alertWidth get()=(when { economy->384; balanced->640; quality->1080; else->840 })
+    val alertFps:Int get()=captureFps()
     val sensorMicros get()=if(economy)40000 else 20000
     private fun refreshLimit()=if(displayHz>0f)kotlin.math.round(displayHz).toInt().coerceAtLeast(1) else 120
     fun fps(requested:Int)=minOf(requested,when {economy->30;balanced->45;else->120},refreshLimit()).coerceAtLeast(1)
+    fun glassFps()=minOf(120,refreshLimit())
+    fun captureFps()=minOf(glassFps(),when {
+        thermal>=PowerManager.THERMAL_STATUS_SEVERE->30
+        saver || settings.profile==2->45
+        else->120
+    })
     fun describe()="profile=${settings.profile}, economy=$economy, saver=$saver, thermal=$thermal, sourceHeight=$sourceHeight, alert=${alertWidth}px/$alertFps FPS, lightDrawer=$lightDrawer"
     fun update(context:Context,values:Bundle):Boolean {
         val previous=budget()
         settings=Settings(values.getInt("performance_profile",0).coerceIn(0,3),
-            values.getInt("performance_resolution",100).coerceIn(50,100),
-            values.getInt("performance_alert_rate",0).coerceIn(0,4),
             values.getBoolean("performance_light_drawer",false),values.getBoolean("performance_live_transition_glass",false),
-            values.getBoolean("performance_adaptive_alerts",true),
             values.getBoolean("performance_high_refresh_pacing",false))
-        updateDisplayTracking(context,values.getInt(com.cosmod.launcherglass.ui.SettingsProvider.KEY_LIVE_FPS,60))
+        updateDisplayTracking(context)
         if(!bound){
             bound=true
             val c=context.applicationContext ?: context

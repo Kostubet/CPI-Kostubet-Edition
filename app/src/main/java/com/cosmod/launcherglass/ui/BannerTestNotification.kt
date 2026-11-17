@@ -15,7 +15,8 @@ import com.cosmod.launcherglass.R
 
 internal object BannerTestNotification {
     private const val CHANNEL = "cpi_banner_test"
-    private const val ID = 42001
+    internal const val ID = 42001
+    internal const val PREVIEW_STYLE = "cpi_preview_banner_style"
 
     fun hasPermission(activity: Activity): Boolean = Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -54,10 +55,9 @@ internal object BannerTestNotification {
             val open = PendingIntent.getActivity(activity, ID,
                 Intent(activity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
                 PendingIntent.FLAG_IMMUTABLE)
-            manager.notify(ID, Notification.Builder(activity, CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(activity.getString(R.string.banner_test_channel))
-                .setContentText(activity.getString(R.string.banner_test_text))
+            val style=activity.getSharedPreferences(SettingsProvider.PREFS_NAME,Activity.MODE_PRIVATE).getInt("ui_preview_banner_style",0).coerceIn(0,2)
+            manager.notify(ID, NativePreviewScenes.notificationBuilder(activity,style,CHANNEL)
+                .addExtras(android.os.Bundle().apply { putInt(PREVIEW_STYLE, style) })
                 .setContentIntent(open)
                 .setAutoCancel(true)
                 .setTimeoutAfter(5500L)

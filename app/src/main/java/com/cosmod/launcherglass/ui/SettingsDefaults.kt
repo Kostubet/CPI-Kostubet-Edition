@@ -20,13 +20,21 @@ object SettingsDefaults {
         if(!prefs.getBoolean("icon_dock_revision_1",false))prefs.edit()
             .putInt(SettingsProvider.KEY_DOCK_LIQUID_DISTORTION,prefs.getInt(SettingsProvider.KEY_LIQUID_DISTORTION,50))
             .putInt(SettingsProvider.KEY_DOCK_LIQUID_WIDTH,prefs.getInt(SettingsProvider.KEY_LIQUID_WIDTH,40))
-            .putInt(SettingsProvider.KEY_DOCK_BLUR,prefs.getInt(SettingsProvider.KEY_BLUR_RADIUS,10))
+            .putInt(SettingsProvider.KEY_DOCK_BLUR,prefs.getInt(SettingsProvider.KEY_BLUR_RADIUS,10).coerceIn(0,40))
             .putBoolean("icon_dock_revision_1",true).apply()
         initializePhoto(prefs)
         GlassDispersionSettings.migrate(prefs)
         EdgeSettings.migrate(prefs)
         LockscreenSettings.migrateShortcuts(prefs)
+        if(!prefs.getBoolean("glass_engine_type_revision",false))prefs.edit().apply {
+            GlassEngineSettings.inheritLegacy(prefs.all).forEach { (key,value)->putBoolean(key,value) }
+            putBoolean("glass_engine_type_revision",true)
+        }.apply()
         WidgetSettings.migrate(prefs)
+        if(!prefs.getBoolean("glass_blur_controls_revision",false))prefs.edit().apply {
+            GlassEngineSettings.legacyRadii(prefs.all).forEach { (key,value)->putInt(key,value) }
+            putBoolean("glass_blur_controls_revision",true)
+        }.apply()
         if (prefs.getInt("defaults_revision", 0) >= 38) { initializeColors(prefs); initializeTone(prefs); return }
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         val upgrade = info.firstInstallTime != info.lastUpdateTime || hadSavedValues
@@ -186,9 +194,15 @@ object SettingsDefaults {
         SettingsProvider.KEY_GRADIENT_OPACITY to 50
     )
     /** Only portable module preferences. Device reports, language and migration keys stay local. */
-    fun portable(): Map<String, Any> = (booleans - SettingsProvider.KEY_BOOT_RESTART - SettingsProvider.KEY_BOOT_RESTART_TOAST - SettingsProvider.KEY_MD3_UI) + integers + mapOf(FolderSettingsKeys.OWN to false) +
+    fun portable(): Map<String, Any> = ((booleans - SettingsProvider.KEY_BOOT_RESTART - SettingsProvider.KEY_BOOT_RESTART_TOAST - SettingsProvider.KEY_MD3_UI) + integers + mapOf(FolderSettingsKeys.OWN to false) +
         FolderSettingsKeys.booleans.associate { FolderSettingsKeys.key(it) to boolean(it) } +
-        FolderSettingsKeys.integers.associate { FolderSettingsKeys.key(it) to integer(it) }
+        FolderSettingsKeys.integers.associate { FolderSettingsKeys.key(it) to integer(it) }) - retiredBlurKeys
+
+    private val retiredBlurKeys = setOf(SettingsProvider.KEY_BLUR_RADIUS_ENABLED, SettingsProvider.KEY_BLUR_MODE,
+        SettingsProvider.KEY_BLUR_QUALITY, SettingsProvider.KEY_LIVE_FPS, SettingsProvider.KEY_IDLE_PAUSE,
+        FolderSettingsKeys.key(SettingsProvider.KEY_BLUR_RADIUS_ENABLED), FolderSettingsKeys.key(SettingsProvider.KEY_BLUR_QUALITY),
+        "performance_resolution", "performance_alert_rate", "performance_adaptive_alerts", "performance_glass_120fps",
+        ShadeGlassSettings.CONTROL_NATIVE_BLUR)
     fun boolean(key: String): Boolean = if(key==FolderSettingsKeys.OWN)false else booleans[key] ?: if(key.startsWith("folder_"))boolean(key.removePrefix("folder_"))else booleans.getValue(key)
     fun integer(key: String): Int = integers[key] ?: if(key.startsWith("folder_"))integer(key.removePrefix("folder_"))else integers.getValue(key)
     fun value(key: String): Any = if(key==FolderSettingsKeys.OWN)false else booleans[key] ?: integers[key] ?: if(key.startsWith("folder_"))value(key.removePrefix("folder_"))else integers.getValue(key)

@@ -35,6 +35,10 @@ import android.graphics.Matrix
 import android.graphics.Shader
 
 import com.cosmod.launcherglass.xposed.PrefsHelper
+import com.cosmod.launcherglass.xposed.FolderSettings
+import com.cosmod.launcherglass.xposed.GlassSurface
+import com.cosmod.launcherglass.xposed.KyantGlassEngine
+import com.cosmod.launcherglass.xposed.NeutralBackdrop
 import com.cosmod.launcherglass.xposed.PhotoWidgetMaterial
 import com.cosmod.launcherglass.xposed.WidgetMaterialSettings
 import com.cosmod.launcherglass.xposed.ColorDepthEffect
@@ -60,10 +64,17 @@ object WallpaperHelper {
     @Volatile private var folderWallpaper:Bitmap?=null
     @Volatile private var widgetWallpaper:Bitmap?=null
     private data class PhotoSource(val raw:WeakReference<Bitmap>,val generation:Int,val height:Int,
-                                   val radius:Float,val gpu:Boolean,val image:Bitmap)
+                                   val radius:Float,val opacity:Int,val gpu:Boolean,val image:Bitmap)
     private var widgetSource:PhotoSource?=null
-    private data class Backdrops(val icons:Bitmap?,val folder:Bitmap?,val widgets:Bitmap?){
-        fun discard(){icons?.recycle();folder?.recycle()}
+    @Volatile private var largeFolderWallpaper:Bitmap?=null
+    private data class Backdrops(val icons:Bitmap?,val folder:Bitmap?,val widgets:Bitmap?,val largeFolder:Bitmap?,
+        val neutral:NeutralBackdrop.Images){
+        fun discard(){
+            icons?.recycle()
+            folder?.recycle()
+            if(largeFolder!==folder)largeFolder?.recycle()
+            neutral.discard()
+        }
     }
 
     fun getWidgetWallpaper(context:Context):Bitmap? {
@@ -71,37 +82,41 @@ object WallpaperHelper {
         return widgetWallpaper?.takeUnless {it.isRecycled} ?: shared
     }
 
-    private fun widgetBackdrop(raw:Bitmap,settings:WidgetMaterialSettings):Bitmap? {
+    private fun widgetBackdrop(raw:Bitmap,settings:WidgetMaterialSettings,heightLimit:Int):Bitmap? {
         if(!settings.enabled)return null
-        val h=minOf(raw.height,PerformancePolicy.sourceHeight,800)
+        val h=minOf(raw.height,PerformancePolicy.sourceHeight,1080,heightLimit)
         val w=(raw.width.toFloat()*h/raw.height).roundToInt().coerceAtLeast(1)
         val radius=settings.radius*(h/800f)*(if(settings.liquid).28f else 1f)
+        val opacity=KyantGlassEngine.optics(GlassSurface.WIDGETS).blur.opacity
         val gpu=PrefsHelper.gpuEffects
         val generation=raw.generationId
         widgetSource?.takeIf {it.raw.get()===raw && it.generation==generation && it.height==h &&
-            it.radius==radius && it.gpu==gpu && !it.image.isRecycled}?.let {return it.image}
-        val accelerated=if(gpu)runCatching {GpuWallpaperBlur.blurPhoto(raw,w,h,radius)}.getOrNull()else null
+            it.radius==radius && it.opacity==opacity && it.gpu==gpu && !it.image.isRecycled}?.let {return it.image}
+        val accelerated=if(gpu)runCatching {GpuWallpaperBlur.blurPhoto(raw,w,h,radius,opacity)}.getOrNull()else null
         val image=accelerated ?: run {
             val scaled=Bitmap.createScaledBitmap(raw,w,h,true)
             val input=if(scaled.config==Bitmap.Config.HARDWARE)scaled.copy(Bitmap.Config.ARGB_8888,false)else scaled
             try {
                 if(input==null)return null
-                if(radius>=1f)FastBlur.blur(input,radius.roundToInt())else input.copy(Bitmap.Config.ARGB_8888,false)
+                GlassBlur.bitmap(input,radius,opacity)
             }finally{
                 if(input!=null && input!==raw && input!==scaled)input.recycle()
                 if(scaled!==raw)scaled.recycle()
             }
         }
-        widgetSource=PhotoSource(WeakReference(raw),generation,h,radius,gpu,image)
+        widgetSource=PhotoSource(WeakReference(raw),generation,h,radius,opacity,gpu,image)
         return image
     }
-    fun getFolderWallpaper(context:Context?=null):Bitmap? {
+    fun getFolderWallpaper(context:Context?=null,large:Boolean=false):Bitmap? {
         val shared=getBlurredWallpaper(context)
-        return if(com.cosmod.launcherglass.xposed.FolderSettings.own)folderWallpaper?.takeUnless {it.isRecycled} ?: shared else shared
+        if(large)largeFolderWallpaper?.takeUnless {it.isRecycled}?.let {return it}
+        return if(FolderSettings.own)folderWallpaper?.takeUnless {it.isRecycled} ?: shared else shared
     }
     private fun publishBackdrops(candidate:Backdrops){
+        largeFolderWallpaper=candidate.largeFolder
         blurredWallpaper=candidate.icons
         folderWallpaper=candidate.folder
+        NeutralBackdrop.publish(candidate.neutral)
         if(candidate.widgets!==widgetWallpaper){
             widgetWallpaper=candidate.widgets
             mainHandler.post {PhotoWidgetMaterial.onBackdropChanged()}
@@ -109,23 +124,21 @@ object WallpaperHelper {
     }
     fun getNeutralWallpaper(context:Context?=null):Bitmap? {
         getBlurredWallpaper(context)
-        return com.cosmod.launcherglass.xposed.NeutralBackdrop.image
+        return NeutralBackdrop.image
     }
     fun getIndicatorWallpaper(context:Context):Bitmap? {
         getBlurredWallpaper(context)
-        return com.cosmod.launcherglass.xposed.NeutralBackdrop.indicatorImage?.takeUnless {it.isRecycled}
+        return NeutralBackdrop.indicatorImage?.takeUnless {it.isRecycled}
     }
 
-    private fun folderBackdrop(raw:Bitmap):Bitmap? {
-        val settings=com.cosmod.launcherglass.xposed.FolderSettings
-        if(!settings.own || !PrefsHelper.folderBlurEnabled || !PrefsHelper.enabled)return null
-        val options=settings.processing
-        val h=minOf(600+options.quality*12,raw.height,PerformancePolicy.sourceHeight)
+    private fun folderBackdrop(raw:Bitmap,heightLimit:Int,options:FolderSettings.Processing,opacity:Int):Bitmap? {
+        val baseHeight=if(PerformancePolicy.economy)720 else 1080
+        val h=minOf(baseHeight+options.quality*12,raw.height,PerformancePolicy.sourceHeight,heightLimit)
         val w=(raw.width.toFloat()*h/raw.height).roundToInt().coerceAtLeast(1)
         val radius=options.radius*(h/800f)*(if(options.liquid).28f else 1f)
         val gpuImage=if(PrefsHelper.gpuEffects)try {
             val input=if(android.os.Build.VERSION.SDK_INT<33)BackdropVibrancy.applyCpu(raw,options.vibrancy)else raw
-            val gpu=try {GpuWallpaperBlur.blurFolder(input,w,h,radius,options.lightening,options.vibrancy)}finally{if(input!==raw)input.recycle()}
+            val gpu=try {GpuWallpaperBlur.blurFolder(input,w,h,radius,options.lightening,options.vibrancy,opacity)}finally{if(input!==raw)input.recycle()}
             if(ShadowTone.gpuSupported)gpu else ShadowTone.applyCpu(gpu,options.lightening).also {if(it!==gpu)gpu.recycle()}
         }catch(t:Throwable){
             GlassLogger.e("FolderMaterial","Folder GPU processing unavailable; using CPU",t)
@@ -137,7 +150,7 @@ object WallpaperHelper {
             val vivid=BackdropVibrancy.applyCpu(software,options.vibrancy)
             val input=ColorDepthEffect.atCpu(vivid,ColorDepthEffect.BEFORE_BLUR)
             val actualRadius=radius
-            val blurred=if(actualRadius>0f)FastBlur.blur(input,actualRadius.roundToInt().coerceAtLeast(1))else input.copy(Bitmap.Config.ARGB_8888,false)
+            val blurred=GlassBlur.bitmap(input,actualRadius,opacity)
             val toned=ShadowTone.applyCpu(blurred,options.lightening)
             val output=ColorDepthEffect.atCpu(toned,ColorDepthEffect.AFTER_BLUR)
             if(toned!==blurred && output!==toned)toned.recycle()
@@ -217,9 +230,11 @@ object WallpaperHelper {
                 val now = SystemClock.uptimeMillis()
                 // The thumbnail reads GPU pixels back to the CPU. Only motion
                 // detection needs that readback; rendering uses the current frame.
-                if (now - lastLiveFingerprint >= 90L) {
-                    signature = GpuWallpaperBlur.fingerprint(frame)
+                if (now - lastLiveFingerprint >= 180L) {
                     lastLiveFingerprint = now
+                    signature = runCatching {GpuWallpaperBlur.fingerprint(frame)}.onFailure {
+                        GlassLogger.limited("WallpaperHelper","live-fingerprint") {"Live wallpaper motion probe unavailable"}
+                    }.getOrNull()
                 }
 
                 val radius = PrefsHelper.blurRadius.coerceIn(0, 50)
@@ -325,7 +340,20 @@ object WallpaperHelper {
             }
         }
         photoProcessingActive=photoActive
-        if(processingActive && !active)loader.execute { GpuWallpaperBlur.close() }
+        if(processingActive && !active){
+            synchronized(this){
+                sourceRevision++
+                cachedRevision=-1
+                blurredWallpaper=null
+                folderWallpaper=null
+                largeFolderWallpaper=null
+                widgetWallpaper=null
+                systemSnapshot=null
+                snapshotTimeMs=0L
+            }
+            synchronized(softwareSnapshots){softwareSnapshots.clear()}
+            loader.execute { GpuWallpaperBlur.close() }
+        }
         processingActive=active
 
     }
@@ -384,7 +412,7 @@ object WallpaperHelper {
 
     // launcher surfaces nor captures icons, unlike a full-screen screenshot.
 
-    fun readSystemSnapshot(context: Context): Bitmap? {
+    fun readSystemSnapshot(context: Context, fresh: Boolean = false, maxSide: Int = 0): Bitmap? {
 
         val cached = systemSnapshot?.takeUnless { it.isRecycled }
 
@@ -394,7 +422,7 @@ object WallpaperHelper {
 
         }
 
-        if (cached != null && SystemClock.uptimeMillis() - snapshotTimeMs < 500L) {
+        if (!fresh && cached != null && SystemClock.uptimeMillis() - snapshotTimeMs < 500L) {
 
             return cached.copy(Bitmap.Config.ARGB_8888, false)
 
@@ -416,7 +444,15 @@ object WallpaperHelper {
 
             descriptor?.use {
 
-                BitmapFactory.decodeFileDescriptor(it.fileDescriptor)?.takeUnless { bitmap -> bitmap.isRecycled }
+                val options = BitmapFactory.Options()
+                if (maxSide > 0) {
+                    options.inJustDecodeBounds = true
+                    BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
+                    options.inSampleSize = Integer.highestOneBit((maxOf(options.outWidth, options.outHeight) / maxSide).coerceAtLeast(1))
+                    options.inJustDecodeBounds = false
+                }
+                BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
+                    ?.takeUnless { bitmap -> bitmap.isRecycled }
 
             } ?: LauncherWallpaperCapture.capture(context)
 
@@ -452,7 +488,7 @@ object WallpaperHelper {
 
     fun onLauncherWindowReady() {
 
-        if (blurredWallpaper == null || cachedRevision != sourceRevision ||
+        if (!hasBackdropForActiveEffects() || cachedRevision != sourceRevision ||
 
             cachedBlurRadius != PrefsHelper.blurRadius.coerceIn(0, 50)) {
 
@@ -492,12 +528,7 @@ object WallpaperHelper {
 
         if (isReloading || SystemClock.uptimeMillis() < retryAfterMs ||
 
-            (cachedRevision == sourceRevision && cachedBlurRadius == radius &&
-
-                (!PrefsHelper.blurEnabled || blurredWallpaper?.isRecycled==false) &&
-                (!PrefsHelper.widgetGlassEnabled || widgetWallpaper?.isRecycled==false) &&
-                (com.cosmod.launcherglass.xposed.PageIndicatorGlass.profile.mode==0 ||
-                    com.cosmod.launcherglass.xposed.NeutralBackdrop.indicatorImage?.isRecycled==false))) return
+            (cachedRevision == sourceRevision && cachedBlurRadius == radius && hasBackdropForActiveEffects())) return
 
         isReloading = true
 
@@ -517,11 +548,13 @@ object WallpaperHelper {
 
                 isReloading = false
 
-                if (revision == sourceRevision && radius == PrefsHelper.blurRadius.coerceIn(0, 50) && liveSerial==livePublishSerial) {
+                if (PrefsHelper.enabled && PrefsHelper.wallpaperEffectsEnabled && revision == sourceRevision &&
+                    radius == PrefsHelper.blurRadius.coerceIn(0, 50) && liveSerial==livePublishSerial) {
 
                     if (candidate != null) {
 
                         publishBackdrops(candidate)
+                        retryAfterMs=if(hasBackdropForActiveEffects())0L else SystemClock.uptimeMillis()+2000L
 
                         cachedBlurRadius = radius
 
@@ -559,6 +592,12 @@ object WallpaperHelper {
 
     }
 
+    private fun hasBackdropForActiveEffects()=
+        (!PrefsHelper.blurEnabled || blurredWallpaper?.isRecycled==false) &&
+            (!PrefsHelper.widgetGlassEnabled || widgetWallpaper?.isRecycled==false) &&
+            (!PrefsHelper.dockGlassEnabled || NeutralBackdrop.image?.isRecycled==false) &&
+            (com.cosmod.launcherglass.xposed.PageIndicatorGlass.profile.mode==0 ||
+                NeutralBackdrop.indicatorImage?.isRecycled==false)
 
 
     fun getRawScaledWallpaper(context: Context): Bitmap? {
@@ -625,17 +664,41 @@ object WallpaperHelper {
 
 
 
-            val widgets=runCatching {widgetBackdrop(rawBitmap,PrefsHelper.widgets)}.onFailure {
+            val heightLimit=when {
+                frame==null->Int.MAX_VALUE
+                PerformancePolicy.economy->(PerformancePolicy.sourceHeight*.70f).roundToInt().coerceAtLeast(360)
+                else->PerformancePolicy.sourceHeight
+            }
+            val widgets=runCatching {widgetBackdrop(rawBitmap,PrefsHelper.widgets,heightLimit)}.onFailure {
                 GlassLogger.limited("PhotoWidget","backdrop") {"Widget wallpaper processing failed: $it"}
             }.getOrNull()
-            com.cosmod.launcherglass.xposed.NeutralBackdrop.process(rawBitmap)
-            if(!PrefsHelper.blurEnabled)return Backdrops(null,null,widgets).takeIf {
-                widgets!=null || com.cosmod.launcherglass.xposed.NeutralBackdrop.indicatorImage!=null
+            val neutral=NeutralBackdrop.prepare(rawBitmap,heightLimit)
+            if(!PrefsHelper.blurEnabled)return Backdrops(null,null,widgets,null,neutral).takeIf {
+                widgets!=null || neutral.indicator!=null || neutral.dock!=null
+            }
+
+            fun withFolders(icons:Bitmap):Backdrops {
+                if(!PrefsHelper.folderBlurEnabled || !PrefsHelper.enabled)return Backdrops(icons,null,widgets,null,neutral)
+                val folder=FolderSettings.processing
+                val opacity=KyantGlassEngine.optics(GlassSurface.FOLDERS).blur.opacity
+                fun render(settings:FolderSettings.Processing,alpha:Int)=runCatching {
+                    folderBackdrop(rawBitmap,heightLimit,settings,alpha)
+                }.onFailure {
+                    GlassLogger.limited("FolderMaterial","wallpaper-processing"){"Folder backdrop unavailable: $it"}
+                }.getOrNull()
+                val normal=if(FolderSettings.own)render(folder,opacity) else null
+                val large=FolderSettings.largeBackdrop()?.let { settings ->
+                    val largeOpacity=KyantGlassEngine.largeFolderOptics().blur.opacity
+                    if(normal!=null && settings==folder && largeOpacity==opacity)normal
+                    else render(settings,largeOpacity)
+                }
+                return Backdrops(icons,normal,widgets,large,neutral)
             }
 
             // Never upscale the already downsampled live capture just to blur it.
 
-            val targetH = minOf(600+PrefsHelper.blurQuality*12, rawBitmap.height,PerformancePolicy.sourceHeight)
+            val baseHeight=if(PerformancePolicy.economy)720 else 1080
+            val targetH = minOf(baseHeight+PrefsHelper.blurQuality*12,rawBitmap.height,PerformancePolicy.sourceHeight,heightLimit)
 
             val targetW = ((rawBitmap.width.toFloat() / rawBitmap.height.toFloat()) * targetH).roundToInt().coerceAtLeast(1)
 
@@ -650,7 +713,7 @@ object WallpaperHelper {
 
                     if(it !== gpu)gpu.recycle()
 
-                }).let {Backdrops(it,folderBackdrop(rawBitmap),widgets)}
+                }).let(::withFolders)
 
             } catch (t: Throwable) {
 
@@ -680,11 +743,7 @@ object WallpaperHelper {
 
             var blurred = try {
 
-                if (actualRadius <= 0f) input.copy(Bitmap.Config.ARGB_8888, false)
-
-                    ?: error("Cannot retain unblurred wallpaper")
-
-                else FastBlur.blur(input, actualRadius.roundToInt().coerceAtLeast(1))
+                GlassBlur.bitmap(input,actualRadius,KyantGlassEngine.optics(0).blur.opacity)
 
             } finally {
 
@@ -710,7 +769,7 @@ object WallpaperHelper {
             val processed=ColorDepthEffect.atCpu(toned,ColorDepthEffect.AFTER_BLUR)
             if(toned!==blurred && processed!==toned)toned.recycle()
             if(processed!==blurred)blurred.recycle()
-            return Backdrops(processed,folderBackdrop(rawBitmap),widgets)
+            return withFolders(processed)
 
         } catch (t: Throwable) {
 
@@ -751,11 +810,15 @@ object WallpaperHelper {
             if(full!=null)return full
         }
 
+        val captureRevision=synchronized(this){sourceRevision}
         readSystemSnapshot(context)?.let {
 
-            systemSnapshot = it
-
-            snapshotTimeMs = SystemClock.uptimeMillis()
+            synchronized(this){
+                if(captureRevision==sourceRevision){
+                    systemSnapshot=it
+                    snapshotTimeMs=SystemClock.uptimeMillis()
+                }
+            }
 
             GlassLogger.i("WallpaperHelper", "Loaded wallpaper-only system screenshot (${it.width}x${it.height})")
 

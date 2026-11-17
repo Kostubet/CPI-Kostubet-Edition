@@ -40,8 +40,11 @@ object LiveBlurEngine {
     private var computedWallpaperAt=0L
     val wallpaperScrollRatio:Float get() {
         val native=nativeWallpaperOffset
-        return if(native!=null && computedWallpaperAt-nativeWallpaperAt<=48L)native
-            else computedWallpaperOffset ?: native ?: workspaceOffset
+        val computed=computedWallpaperOffset
+        // During a swipe the launcher publishes its new position before the system callback.
+        if(computed!=null && isWorkspaceScrolling && SystemClock.uptimeMillis()-computedWallpaperAt<=24L)return computed
+        return if(native!=null && nativeWallpaperAt>=computedWallpaperAt)native
+            else computed ?: native ?: workspaceOffset
     }
 
     fun onLauncherWallpaperOffset(offset:Float){
@@ -98,6 +101,7 @@ object LiveBlurEngine {
         if(!PrefsHelper.enabled || !PrefsHelper.wallpaperEffectsEnabled)return@onMainThread
         unlockMotionUntil=SystemClock.uptimeMillis()+850L
         holdHomeGeometryUntil=0L
+        com.cosmod.launcherglass.xposed.DockMaterial.onUnlockMotionStarted()
         IconGlassHook.requestLiveFrame(immediate=true)
     }
     private var consecutiveTransitions=0
@@ -131,7 +135,7 @@ object LiveBlurEngine {
     fun onWallpaperFrameReady() = onMainThread {
         if (!PrefsHelper.enabled || !PrefsHelper.wallpaperEffectsEnabled || !isResumed || isAppLaunchInProgress || deferWorkspaceSampling) return@onMainThread
         if (PrefsHelper.blurMode == SettingsProvider.BLUR_MODE_LIVE) {
-            IconGlassHook.requestLiveFrame(immediate=isUnlockMotion)
+            IconGlassHook.requestLiveFrame(immediate=true)
             if (!isTickerRunning.get()) {
                 lastMotionTimeMs = SystemClock.uptimeMillis()
                 startTickerIfNeeded()
@@ -252,7 +256,7 @@ object LiveBlurEngine {
         transitionRefreshUntilMs = maxOf(transitionRefreshUntilMs, lastMotionTimeMs + 600L)
         if(wasSuspended){
             IconGlassHook.invalidateActiveIcons(onlyChangedDrawerSamples=true)
-            if(!isUnlockMotion)com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onHomeReturn()
+            if(!isUnlockMotion)com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onHomeReturned()
             else com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onBackdropChanged()
         }
         startTickerIfNeeded()
@@ -444,7 +448,7 @@ object LiveBlurEngine {
     fun onActivityResumed() = onMainThread {
         if(!isResumed || isAppLaunchInProgress){
             holdHomeGeometryUntil=SystemClock.uptimeMillis()+270L
-            if(!isUnlockMotion)com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onHomeReturn()
+            if(!isUnlockMotion)com.cosmod.launcherglass.xposed.PhotoWidgetMaterial.onHomeReturned()
         }
         isAppLaunchInProgress = false
         isResumed = true

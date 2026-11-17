@@ -30,7 +30,7 @@ object NativeSurfaceLive {
     private val pending=AtomicBoolean(false)
     private data class Pose(val xx:Float=1f,val xy:Float=0f,val yx:Float=0f,val yy:Float=1f,
         val x:Float=0f,val y:Float=0f,val positioned:Boolean=false,val transformed:Boolean=false,val version:Long=0L)
-    private data class Lease(val provider: Any, val control: SurfaceControl,
+    private data class Lease(val control: SurfaceControl,
         val pose:AtomicReference<Pose> = AtomicReference(Pose()))
     private val controls=ConcurrentHashMap<SurfaceControl,Lease>()
     private data class Sample(val capture:Capture,val draw:Draw,val pose:Pose?)
@@ -40,7 +40,7 @@ object NativeSurfaceLive {
         val lease: Lease?, val recordId: Int?, val token: Any, val draws: MutableList<Draw> = ArrayList(),
         var canvasWidth:Int=1,var canvasHeight:Int=1,var materialWidth:Int=210,var materialHeight:Int=210)
     private data class Frame(val capture: Capture, val started: Long,
-        var wallpaper: Bitmap?, var last: Long = 0L, var redraws: Int = 0, var poseVersion:Long = -1L,val clock:SampleFrameClock=SampleFrameClock())
+        var wallpaper: Bitmap?, var redraws: Int = 0, var poseVersion:Long = -1L,val clock:SampleFrameClock=SampleFrameClock())
     private val leases = WeakHashMap<Surface, Lease>()
     private val tokens = WeakHashMap<Surface, Any>()
     private val frames = WeakHashMap<Surface, Frame>()
@@ -51,9 +51,12 @@ object NativeSurfaceLive {
     private val pool=ArrayList<NativeMaterialSurface>(1)
     private var hookLoader:ClassLoader?=null
     private var hooksInstalled=false
+    private val nativeDrawingSource=ThreadLocal<View>()
+    val originalDrawingSource:View? get()=nativeDrawingSource.get()
     private fun canStream()=PerformancePolicy.transitionGlass && !PerformancePolicy.economy &&
         SystemClock.uptimeMillis()>=LiveBlurEngine.rapidTransitionsUntil &&
-        PrefsHelper.enabled && PrefsHelper.blurEnabled && PrefsHelper.blurMode==SettingsProvider.BLUR_MODE_LIVE
+        PrefsHelper.enabled && PrefsHelper.blurEnabled && PrefsHelper.blurMode==SettingsProvider.BLUR_MODE_LIVE &&
+        !AppGenieTransition.usesProjectedIcon()
     val recordingMaterial get()=recording.get()!=null
     private val warmed=AtomicBoolean(false)
     fun prewarm(materialWidth:Int,canvasSize:Int) {
@@ -203,7 +206,10 @@ object NativeSurfaceLive {
         val id=try {XposedHelpers.callMethod(record,"getRecordId") as? Int}catch(_:Throwable){null} ?: return
         synchronized(lock){
             val old=templates[id] ?: return
-            if(old.lease?.control?.isValid!=true || old.source?.tag!==old.tag)return
+            if(old.lease?.control?.isValid!=true || leases[old.surface]!==old.lease || old.source?.tag!==old.tag){
+                templates.remove(id)
+                return
+            }
             if(frames[old.surface]?.capture?.recordId==id)return
             val capture=old.copy(token=Any())
             tokens[capture.surface]=capture.token;captures[capture.surface]=capture
@@ -214,20 +220,23 @@ object NativeSurfaceLive {
         schedule()
     }
     private fun retire(reason: String, predicate: (Capture) -> Boolean) = synchronized(lock) {
-        captures.entries.removeAll { (_, capture) ->
-            val remove = predicate(capture)
-            if (remove) {
-                tokens.remove(capture.surface)
-                val frame = frames.remove(capture.surface)
-                capture.lease?.let {
-                    controls.remove(it.control,it)
-                    releaseChild(it.control)
-                }
-                GlassLogger.i("LiveSurface", "Retired record=${capture.recordId}, redraws=${frame?.redraws ?: 0}, pose=${capture.lease?.pose?.get()}, reason=$reason")
-            }
-            remove
-        }
+        captures.values.filter(predicate).forEach { forgetCapture(it,reason) }
         refreshActive()
+    }
+
+    /** Called with the lease lock held. Ignore cleanup from a superseded writer. */
+    private fun forgetCapture(capture:Capture,reason:String){
+        if(captures[capture.surface]!==capture)return
+        captures.remove(capture.surface)
+        tokens.remove(capture.surface)
+        val frame=frames.remove(capture.surface)
+        capture.lease?.let {
+            controls.remove(it.control,it)
+            releaseChild(it.control)
+        }
+        GlassLogger.limited("LiveSurface","retire",every=100){
+            "Retired record=${capture.recordId}, redraws=${frame?.redraws ?: 0}, reason=$reason"
+        }
     }
     private val displayPacer=com.cosmod.launcherglass.util.FramePacer()
     private fun schedule() {
@@ -236,8 +245,8 @@ object NativeSurfaceLive {
         // never waits for lockHardwareCanvas / GPU buffer submission here.
         main.post {
             Choreographer.getInstance().postFrameCallback {time->
-                val refresh=com.cosmod.launcherglass.util.PerformancePolicy.captureRefreshHz
-                if(refresh>0f && !displayPacer.ready(time,60,refresh)){
+                val performance=com.cosmod.launcherglass.util.PerformancePolicy
+                if(!displayPacer.ready(time,performance.glassFps(),performance.capturePacingHz)){
                     pending.set(false)
                     if(active)schedule()
                     return@postFrameCallback
@@ -272,7 +281,7 @@ object NativeSurfaceLive {
                     if (now - frame.started > 4000L || tokens[surface] !== owner.token ||
                         leases[surface] !== owner.lease || owner.lease?.control?.isValid != true ||
                         owner.source?.tag !== owner.tag) {
-                        frames.remove(surface); captures.remove(surface); owner.lease?.let {controls.remove(it.control,it);releaseChild(it.control)}
+                        forgetCapture(owner,"expired lease")
                         return@synchronized false
                     }
                     hasNativePose(owner)
@@ -304,7 +313,7 @@ object NativeSurfaceLive {
                             try { draw.render(canvas) } finally { sampling.remove();canvas.restoreToCount(save) }
                         }
                     } catch (t: Throwable) {
-                        synchronized(lock){if(frames[surface]===frame){frames.remove(surface);captures.remove(surface);owner.lease?.let {releaseChild(it.control)}}}
+                        synchronized(lock){forgetCapture(owner,"draw failed")}
                         GlassLogger.e("LiveSurface", "Material lease ended", t)
                     } finally {
                         if (canvas != null)try {
@@ -312,11 +321,14 @@ object NativeSurfaceLive {
                             synchronized(lock){
                                 if(frames[surface]===frame && tokens[surface]===owner.token && leases[surface]===owner.lease){
                                     output.show()
-                                    frame.wallpaper=wallpaper;frame.last=now;frame.poseVersion=poseVersion;frame.redraws++
+                                    frame.wallpaper=wallpaper;frame.poseVersion=poseVersion;frame.redraws++
                                     frame.clock.record(nowNs,fps)
                                 }
                             }
-                        }catch(_:Throwable){}
+                        }catch(t:Throwable){
+                            synchronized(lock){forgetCapture(owner,"submit failed")}
+                            GlassLogger.limited("LiveSurface","submit"){"Native material submission failed: $t"}
+                        }
                         Trace.endSection()
                     }
             }
@@ -337,8 +349,9 @@ object NativeSurfaceLive {
             val source = sourceView
             val capture = Capture(surface, source, source?.tag, leases[surface], record.get(), token)
             captures[surface] = capture
+            if(param.getObjectExtra("capture")==null)param.setObjectExtra("priorCapture", recording.get())
             param.setObjectExtra("capture", capture)
-            param.setObjectExtra("priorCapture", recording.get()); recording.set(capture)
+            recording.set(capture)
         }
     }
     private fun endCapture(param:XC_MethodHook.MethodHookParam) {
@@ -371,7 +384,41 @@ object NativeSurfaceLive {
 
     fun install(loader: ClassLoader) {
         hookLoader=loader
+        installIconHandoff(loader)
         if(PerformancePolicy.transitionGlass)installStreamHooks(loader)
+    }
+
+    private fun installIconHandoff(loader:ClassLoader){
+        val modern=XposedHelpers.findClassIfExists("com.android.launcher3.anim.iconsurfacemanager.surface.IconSurfaceRenderer",loader)
+        val namespace=if(modern!=null)"com.android.launcher3.anim.iconsurfacemanager.surface"
+            else "com.android.launcher3.anim.iconsurfacemanager"
+        val type=XposedHelpers.findClassIfExists("$namespace.IconSurfaceRecord",loader) ?: return
+        val sourceField=type.declaredFields.firstOrNull {
+            it.name=="appIconView" && View::class.java.isAssignableFrom(it.type)
+        }?.apply {isAccessible=true}
+        if(sourceField!=null)ModuleHooks.hookAllMethods(type,"showOriginalIcon",object:XC_MethodHook(){
+            override fun beforeHookedMethod(param:MethodHookParam){
+                if(PrefsHelper.iconsFeatureEnabled)IconGlassHook.onNativeIconReturned(sourceField.get(param.thisObject) as? View)
+            }
+        })
+        val renderer=modern ?: type
+        val drawMethod=if(modern!=null)"drawViewToSurface" else "transferViewToSurface"
+        ModuleHooks.hookAllMethods(renderer,drawMethod,object:XC_MethodHook(){
+            override fun beforeHookedMethod(param:MethodHookParam){
+                if(!PrefsHelper.iconsFeatureEnabled)return
+                val source=param.args.filterIsInstance<View>().lastOrNull() ?: return
+                if(source.tag==null)return
+                param.setObjectExtra("cpiPreviousIconSource",nativeDrawingSource.get())
+                param.setObjectExtra("cpiNativeIconSource",true)
+                nativeDrawingSource.set(source)
+            }
+
+            override fun afterHookedMethod(param:MethodHookParam){
+                if(param.getObjectExtra("cpiNativeIconSource")!=true)return
+                val previous=param.getObjectExtra("cpiPreviousIconSource") as? View
+                if(previous==null)nativeDrawingSource.remove() else nativeDrawingSource.set(previous)
+            }
+        })
     }
 
     private fun installStreamHooks(loader:ClassLoader) {
@@ -428,9 +475,16 @@ object NativeSurfaceLive {
                         val surface = XposedHelpers.callMethod(holder, "getSurface") as? Surface ?: return
                         val control = XposedHelpers.callMethod(holder, "getSc") as? SurfaceControl ?: return
                         synchronized(lock) {
-                            retire("new buffer") {it.lease?.control===control}
+                            retire("new buffer") {it.surface===surface || it.lease?.control===control}
+                            val previous=leases.remove(surface)
+                            if(previous!=null && previous.control!==control){
+                                controls.remove(previous.control,previous)
+                                releaseChild(previous.control)
+                            }
+                            leases.entries.removeAll {it.value.control===control}
+                            templates.values.removeAll {it.surface===surface || it.lease?.control===control}
                             releaseChild(control)
-                            val lease=Lease(param.thisObject, control)
+                            val lease=Lease(control)
                             leases[surface]=lease;controls[control]=lease
                         }
                         legacyTransfer.get()?.let {transfer ->
@@ -443,7 +497,14 @@ object NativeSurfaceLive {
                 ModuleHooks.hookAllMethods(provider, method, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         val control = param.args.filterIsInstance<SurfaceControl>().firstOrNull() ?: return
-                        retire(method) { it.lease?.control === control }
+                        synchronized(lock){
+                            retire(method) { it.lease?.control === control }
+                            controls.remove(control)
+                            if(method=="releaseSurfaceControl"){
+                                leases.entries.removeAll {it.value.control===control}
+                                templates.values.removeAll {it.lease?.control===control}
+                            }
+                        }
                     }
                     override fun afterHookedMethod(param:MethodHookParam){
                         val control=param.args.filterIsInstance<SurfaceControl>().firstOrNull() ?: return

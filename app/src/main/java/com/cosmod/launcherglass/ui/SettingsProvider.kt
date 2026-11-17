@@ -34,7 +34,12 @@ class SettingsProvider : ContentProvider() {
                 if(!valid)throw SecurityException("Only the corresponding host may report its runtime version")
                 val version=extras?.getString("version")?.takeIf {it.length<=64} ?: return bundle
                 val key="runtime_${arg}_version"
-                if(prefs.getString(key,null)!=version){prefs.edit().putString(key,version).apply();context?.contentResolver?.notifyChange(CONTENT_URI,null)}
+                val code=extras.getInt("build",0).coerceAtLeast(0)
+                val buildKey="runtime_${arg}_build"
+                if(prefs.getString(key,null)!=version || prefs.getInt(buildKey,0)!=code){
+                    prefs.edit().putString(key,version).putInt(buildKey,code).apply()
+                    context?.contentResolver?.notifyChange(CONTENT_URI,null)
+                }
             }
             METHOD_REPORT_ICON_APPEARANCE -> {
                 enforceCaller(allowLauncher = true)
@@ -52,6 +57,7 @@ class SettingsProvider : ContentProvider() {
                 }
             }
             METHOD_GET_ALL -> {
+                bundle.putInt(KEY_NATIVE_FLUX_SUPPORT,prefs.getInt(KEY_NATIVE_FLUX_SUPPORT,0))
                 OpticalSettings.booleans.forEach {(k,v)->bundle.putBoolean(k,prefs.getBoolean(k,v))}
                 OpticalSettings.integers.forEach {(k,v)->bundle.putInt(k,prefs.getInt(k,v).coerceIn(OpticalSettings.minimum(k),OpticalSettings.maximum(k)))}
                 bundle.putBoolean(WallpaperGlowSettings.ENABLED,prefs.getBoolean(WallpaperGlowSettings.ENABLED,true))
@@ -226,6 +232,10 @@ class SettingsProvider : ContentProvider() {
                     context?.contentResolver?.notifyChange(CONTENT_URI, null)
                 }
             }
+        }
+        if(method==METHOD_GET_ALL){
+            GlobalGlassSettings.apply(bundle)
+            FeatureSections.apply(bundle)
         }
         return bundle
     }
