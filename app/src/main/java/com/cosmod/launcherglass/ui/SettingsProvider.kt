@@ -24,6 +24,13 @@ class SettingsProvider : ContentProvider() {
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val bundle = Bundle()
         when (method) {
+            com.cosmod.launcherglass.camera.CameraZoomSettings.READ,
+            com.cosmod.launcherglass.camera.CameraZoomSettings.REPORT -> {
+                val camera = com.cosmod.launcherglass.camera.CameraZoomSettings
+                if (callingPackage != camera.PACKAGE) throw SecurityException("Camera diagnostics require the stock camera")
+                if (method == camera.READ) return camera.read(prefs)
+                camera.storeStatus(requireNotNull(context), extras)
+            }
             com.cosmod.launcherglass.haptic.HapticRingStore.READ,
             com.cosmod.launcherglass.haptic.HapticRingStore.REPORT -> {
                 if (Binder.getCallingUid() != Process.SYSTEM_UID) throw SecurityException("Telecom requires the system UID")

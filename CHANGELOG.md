@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 411
+
+- Новая вкладка «Камера» с экспериментальным сглаживанием видеозума, пятью режимами, ручными параметрами, расчётным графиком и диагностикой. Контракт привязан к штатной камере OnePlus 13 IN 7.006.144. Функция по умолчанию выключена.
+
 ### Сборка 406
 
 - Строка функции разворачивается в карточку предпросмотра и плавно возвращается на место. Скорость свайпа влияет на длину отскока.
@@ -58,6 +62,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 411
+
+- Added a Camera tab with experimental video zoom smoothing, five modes, manual tuning, a simulated trajectory and diagnostics. The hook targets stock Camera 7.006.144 on OnePlus 13 IN. Off by default.
 
 ### Build 406
 

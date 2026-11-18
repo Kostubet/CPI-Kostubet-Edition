@@ -124,6 +124,7 @@ internal object SettingsTransfer {
     }
 
     internal fun range(key: String): LongRange {
+        com.cosmod.launcherglass.camera.CameraZoomSettings.ranges[key]?.let { return it.first.toLong()..it.last.toLong() }
         if(key in OpticalSettings.integers)return OpticalSettings.minimum(key).toLong()..OpticalSettings.maximum(key).toLong()
         val base = if (key.startsWith("folder_")) key.removePrefix("folder_") else key
         if(base in OpticalSettings.integers)return OpticalSettings.minimum(base).toLong()..OpticalSettings.maximum(base).toLong()

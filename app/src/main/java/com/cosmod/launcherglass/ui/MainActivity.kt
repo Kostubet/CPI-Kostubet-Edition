@@ -164,6 +164,8 @@ class MainActivity : AppCompatActivity() {
         LOCKSCREEN(R.string.lock_glass_title, R.drawable.ic_catalog_lock, 0x7665EF, R.string.lock_glass_keywords),
         LIGHT(R.string.ui_catalog_light, R.drawable.ic_nav_light, 0xE5AA27, R.string.ui_catalog_keywords_light),
         MOTION(R.string.ui_ba31k_title, R.drawable.ic_catalog_motion, 0x55A4ED, R.string.ui_catalog_keywords_motion),
+        CAMERA(R.string.camera_tab, R.drawable.ic_cpi_camera, 0, 0),
+        CAMERA_ZOOM(R.string.camera_zoom_title, R.drawable.ic_cpi_camera, 0x6793F2, R.string.camera_zoom_keywords),
         PERFORMANCE(R.string.ui_performance, R.drawable.ic_catalog_speed, 0x31B881, R.string.ui_catalog_keywords_performance),
         TOOLS(R.string.ui_about_module, R.drawable.ic_cpi_module, 0, 0),
         SETTINGS(R.string.ui_cpi_settings, R.drawable.ic_settings, 0x969AA8, R.string.ui_catalog_keywords_tools),
@@ -213,7 +215,7 @@ class MainActivity : AppCompatActivity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
     private val darkUi get()=androidx.core.graphics.ColorUtils.calculateLuminance(background)<.5
     private val coloredFeatures get()=sectionScreen==Screen.HOME && bool("coloros_ui_effects") && number("coloros_feature_background")!=0
-    private val rootTabs=listOf(Screen.OVERVIEW,Screen.HOME,Screen.TOOLS)
+    private val rootTabs=listOf(Screen.OVERVIEW,Screen.HOME,Screen.CAMERA,Screen.TOOLS)
     private var menuOverlay:CouiPopup?=null
     private var restartOverlay: View? = null
     private val restartDialogVisible = mutableStateOf(false)
@@ -1013,6 +1015,7 @@ class MainActivity : AppCompatActivity() {
         when(screen){
             Screen.OVERVIEW->buildOverview(body)
             Screen.HOME->buildCatalog(body,scroll,heading,headerBlur,layer,navigation)
+            Screen.CAMERA->buildCameraCatalog(body)
             Screen.TOOLS->buildModule(body)
             Screen.DEVICE->buildDeviceDetails(body)
             Screen.CONTRIBUTORS->buildContributors(body)
@@ -1108,7 +1111,8 @@ class MainActivity : AppCompatActivity() {
         }.also {frame->
             rootNavigation=frame;rootNavigationAppearance=appearance
             val content=CouiRootNavigation(this,darkUi,primary,
-                rootTabs.map {it.icon},listOf(R.drawable.ic_cpi_home_outline,R.drawable.ic_cpi_features_outline,R.drawable.ic_cpi_module_outline),
+                rootTabs.map {it.icon},listOf(R.drawable.ic_cpi_home_outline,R.drawable.ic_cpi_features_outline,
+                    R.drawable.ic_cpi_camera_outline,R.drawable.ic_cpi_module_outline),
                 rootTabs.map {getString(if(it==Screen.TOOLS)R.string.ui_cpi_module else it.title)},
                 rootNavigationIndex){index->haptic(page);openTab(rootTabs[index])}
             frame.addView(content,FrameLayout.LayoutParams(-1,-1))
@@ -1157,6 +1161,7 @@ class MainActivity : AppCompatActivity() {
             R.string.ui_catalog_launcher to listOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,
                 Screen.MOTION),
             R.string.ui_catalog_systemui to listOf(Screen.LOCKSCREEN,Screen.SHADE,Screen.LIVE,Screen.BANNERS,Screen.VOLUME),
+            R.string.camera_tab to listOf(Screen.CAMERA_ZOOM),
             R.string.ui_catalog_general to listOf(Screen.GLASS,Screen.LIGHT,Screen.PERFORMANCE)
         )
         val alternateLanguage=if(UiLanguage.tag(this)=="ru")"en" else "ru"
@@ -1419,6 +1424,100 @@ class MainActivity : AppCompatActivity() {
         CouiPreference(this,darkUi,primary,getString(item.title),matchedSetting,item.icon,Color.BLACK or item.tint,
             catalog=true,onPreview={showFeaturePreview(item,it)}){haptic(it);openScreen(item)}
 
+    private fun buildCameraCatalog(body: LinearLayout) {
+        add(body, card(preferenceLink(getString(R.string.camera_zoom_title), getString(R.string.camera_zoom_description),
+            R.drawable.ic_cpi_camera, primary) { openScreen(Screen.CAMERA_ZOOM) }), bottom = 12)
+    }
+
+    private fun buildCameraZoom(body: LinearLayout) {
+        val zoom = com.cosmod.launcherglass.camera.CameraZoomSettings
+        val custom = { number(zoom.MODE) == com.cosmod.launcherglass.camera.ZoomMode.CUSTOM.ordinal }
+        val bezier = { custom() && number(zoom.CURVE) == com.cosmod.launcherglass.camera.ZoomCurve.BEZIER.ordinal }
+        val basics = column()
+        add(basics, switchRow(getString(R.string.camera_zoom_enable), zoom.ENABLED, getString(R.string.camera_zoom_verify_hint)))
+        divider(basics)
+        modeChoice(basics, R.string.camera_zoom_mode, zoom.MODE,
+            listOf("iPhone Style", "Cinematic", "Responsive", "Adaptive", "Custom")) { true }
+        add(body, card(basics), bottom = 12)
+
+        val preview = column()
+        add(preview, informationRow(R.string.camera_zoom_preview, getString(R.string.camera_zoom_preview_hint)))
+        val graph = CameraZoomCurveView(this, onSurface, primary).apply {
+            setPadding(dp(16), dp(5), dp(16), dp(4))
+            contentDescription = getString(R.string.camera_zoom_preview)
+        }
+        preview.addView(graph, LinearLayout.LayoutParams(-1, dp(128)))
+        var target = 30
+        fun updateCurve() = graph.preview(target / 10.0, zoom.tuning(::number))
+        val targetSelector = CouiSlider(this, darkUi, primary, getString(R.string.camera_zoom_preview_target), 54, 24, null) {
+            String.format(java.util.Locale.getDefault(), "%.1f×", (it + 6) / 10.0)
+        }
+        targetSelector.onTouchFinished = { target = it + 6; updateCurve() }
+        add(preview, targetSelector)
+        refreshers.add(::updateCurve)
+        updateCurve()
+        add(body, card(preview), bottom = 12)
+
+        val parameters = column()
+        val labels = listOf(
+            R.string.camera_zoom_speed_in, R.string.camera_zoom_speed_out, R.string.camera_zoom_speed_max,
+            R.string.camera_zoom_damping, R.string.camera_zoom_acceleration, R.string.camera_zoom_braking,
+            R.string.camera_zoom_jerk, R.string.camera_zoom_inertia, R.string.camera_zoom_response,
+            R.string.camera_zoom_sensitivity, R.string.camera_zoom_bezier_first, R.string.camera_zoom_bezier_second
+        )
+        modeChoice(parameters, R.string.camera_zoom_curve, zoom.CURVE,
+            listOf("Linear", "Ease In", "Ease Out", "Ease In Out", "S-Curve", "Spring", "Custom Bézier")) { custom() }
+        for ((index, knob) in zoom.controls.withIndex()) {
+            val control = slider(getString(labels[index]), knob.key, knob.range.first, knob.range.last,
+                if (knob.key in setOf(zoom.INERTIA, zoom.RESPONSE)) " ms" else " %")
+            gate(control, if (knob.key == zoom.BEZIER_FIRST || knob.key == zoom.BEZIER_SECOND) bezier else custom)
+            add(parameters, control)
+        }
+        accordionCard(body, R.string.camera_zoom_custom, parameters)
+
+        val controls = column()
+        add(controls, switchRow(getString(R.string.camera_zoom_pinch), zoom.PINCH))
+        divider(controls)
+        add(controls, switchRow(getString(R.string.camera_zoom_slider), zoom.SLIDER))
+        divider(controls)
+        add(controls, switchRow(getString(R.string.camera_zoom_steps), zoom.STEPS))
+        accordionCard(body, R.string.camera_zoom_inputs, controls)
+
+        val diagnostics = column()
+        add(diagnostics, switchRow(getString(R.string.camera_zoom_collect), zoom.DIAGNOSTICS, getString(R.string.camera_zoom_collect_hint)))
+        divider(diagnostics)
+        val metrics = column()
+        add(diagnostics, metrics)
+        val version = runCatching { packageManager.getPackageInfo(zoom.PACKAGE, 0).versionName }.getOrNull()
+        fun updateStatusRows() {
+            val report = zoom.status(this)
+            val state = when (report?.getString("state", "")) {
+                zoom.STATE_READY -> R.string.camera_zoom_status_ready
+                zoom.STATE_OBSERVING -> R.string.camera_zoom_status_observing
+                zoom.STATE_UNSUPPORTED -> R.string.camera_zoom_status_unsupported
+                zoom.STATE_ACTIVE -> R.string.camera_zoom_status_active
+                zoom.STATE_ERROR -> R.string.camera_zoom_status_error
+                else -> R.string.camera_zoom_status_wait
+            }
+            metrics.removeAllViews()
+            add(metrics, informationRow(R.string.camera_zoom_firmware, version ?: getString(R.string.camera_zoom_not_present)))
+            add(metrics, informationRow(R.string.camera_zoom_state, getString(state)))
+            report?.getString("mechanism", "")?.takeIf { it.isNotBlank() }?.let {
+                add(metrics, informationRow(R.string.camera_zoom_mechanism, it))
+            }
+            for ((key, label) in listOf("target" to R.string.camera_zoom_target, "applied" to R.string.camera_zoom_applied)) {
+                val ratio = report?.getFloat(key, Float.NaN)
+                if (ratio != null && ratio.isFinite()) add(metrics,
+                    informationRow(label, String.format(java.util.Locale.getDefault(), "%.2f×", ratio)))
+            }
+        }
+        updateStatusRows()
+        add(diagnostics, preferenceLink(getString(R.string.camera_zoom_refresh), getString(R.string.camera_zoom_scope_hint)) {
+            updateStatusRows()
+        })
+        accordionCard(body, R.string.camera_zoom_diagnostics, diagnostics)
+    }
+
     private data class FeatureGroups(val general:LinearLayout,val colors:LinearLayout,val style:LinearLayout)
     private val featureTabSelection=mutableMapOf<Screen,Int>()
 
@@ -1458,11 +1557,12 @@ class MainActivity : AppCompatActivity() {
             Screen.LOCKSCREEN->lockscreenSection(body,general,colors)
             Screen.LIGHT->buildLight(body)
             Screen.MOTION->buildBa31kMotion(body)
+            Screen.CAMERA_ZOOM->buildCameraZoom(body)
             Screen.PERFORMANCE->buildPerformance(body)
             Screen.SETTINGS->buildTools(body)
             else->return
         }
-        if(section !in setOf(Screen.SETTINGS,Screen.MOTION,Screen.SHADE))
+        if(section !in setOf(Screen.SETTINGS,Screen.MOTION,Screen.SHADE,Screen.CAMERA_ZOOM))
             addSavedSettings(common,position=savedPosition)
         if(separated){
             for(tab in listOf(general,colors,body))add(pageBody,tab)

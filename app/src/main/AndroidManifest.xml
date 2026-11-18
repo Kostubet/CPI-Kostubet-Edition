@@ -12,6 +12,7 @@
         <intent><action android:name="android.service.wallpaper.WallpaperService" /></intent>
         <package android:name="com.cosmod.launcherglass" />
         <package android:name="com.android.systemui" />
+        <package android:name="com.oplus.camera" />
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />

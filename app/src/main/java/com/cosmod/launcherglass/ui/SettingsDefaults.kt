@@ -121,7 +121,7 @@ object SettingsDefaults {
         }
         editor.remove("color_theme").putInt("color_profiles_revision", 1).apply()
     }
-    private val booleans = OpticalSettings.booleans + mapOf(
+    private val booleans = OpticalSettings.booleans + com.cosmod.launcherglass.camera.CameraZoomSettings.booleans + mapOf(
         SettingsProvider.KEY_BOOT_RESTART to true,
         SettingsProvider.KEY_BOOT_RESTART_TOAST to true,
         SettingsProvider.KEY_DEVELOPER_MODE to false,
@@ -148,7 +148,7 @@ object SettingsDefaults {
         SettingsProvider.KEY_DESIGN_ENABLED to true,
         SettingsProvider.KEY_VOLUME_ENABLED to true
     )
-    private val integers = OpticalSettings.integers + WallpaperGlowSettings.defaults + mapOf(
+    private val integers = OpticalSettings.integers + WallpaperGlowSettings.defaults + com.cosmod.launcherglass.camera.CameraZoomSettings.integers + mapOf(
         SettingsProvider.KEY_PHOTO_WIDGET_MATERIAL to 1,
         SettingsProvider.KEY_DOCK_BLUR to 14,
 
@@ -201,7 +201,8 @@ object SettingsDefaults {
     /** Only portable module preferences. Device reports, language and migration keys stay local. */
     fun portable(): Map<String, Any> = ((booleans - SettingsProvider.KEY_BOOT_RESTART - SettingsProvider.KEY_BOOT_RESTART_TOAST - SettingsProvider.KEY_MD3_UI) + integers + mapOf(FolderSettingsKeys.OWN to false) +
         FolderSettingsKeys.booleans.associate { FolderSettingsKeys.key(it) to boolean(it) } +
-        FolderSettingsKeys.integers.associate { FolderSettingsKeys.key(it) to integer(it) }) - retiredBlurKeys
+        FolderSettingsKeys.integers.associate { FolderSettingsKeys.key(it) to integer(it) }) - retiredBlurKeys -
+        com.cosmod.launcherglass.camera.CameraZoomSettings.ENABLED - com.cosmod.launcherglass.camera.CameraZoomSettings.DIAGNOSTICS
 
     private val retiredBlurKeys = setOf(SettingsProvider.KEY_BLUR_RADIUS_ENABLED, SettingsProvider.KEY_BLUR_MODE,
         SettingsProvider.KEY_BLUR_QUALITY, SettingsProvider.KEY_LIVE_FPS, SettingsProvider.KEY_IDLE_PAUSE,

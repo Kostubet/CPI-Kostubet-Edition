@@ -48,6 +48,10 @@ class HookEntry : IXposedHookLoadPackage {
             HapticTelecom.install(lpparam.classLoader)
             return
         }
+        if (packageName == com.cosmod.launcherglass.camera.CameraZoomSettings.PACKAGE) {
+            if (lpparam.processName == packageName) runCatching { CameraVideoZoom.install(lpparam.classLoader) }
+            return
+        }
         if(packageName=="com.android.systemui") {
             LiveAlertGlass.install(lpparam.classLoader)
             return

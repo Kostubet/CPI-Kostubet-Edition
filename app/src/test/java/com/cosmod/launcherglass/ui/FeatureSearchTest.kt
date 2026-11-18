@@ -3,6 +3,11 @@ import com.cosmod.launcherglass.R
 import org.junit.Assert.*
 import org.junit.Test
 class FeatureSearchTest {
+    @Test fun cameraZoomIndexesTuningAndDiagnostics() {
+        val labels = FeatureSearch.labels("CAMERA_ZOOM")
+        assertTrue(R.string.camera_zoom_speed_in in labels)
+        assertTrue(R.string.camera_zoom_diagnostics in labels)
+    }
     @Test fun everyFeatureSectionIsIndexed(){
         for(section in FeatureSections.sections)assertTrue("Missing $section",FeatureSearch.labels(section).isNotEmpty())
     }

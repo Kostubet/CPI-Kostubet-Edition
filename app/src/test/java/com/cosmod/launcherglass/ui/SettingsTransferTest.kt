@@ -5,6 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsTransferTest {
+    @Test fun cameraTuningIsPortableButActivationAndLoggingRequireLocalOptIn() {
+        val zoom = com.cosmod.launcherglass.camera.CameraZoomSettings
+        val defaults = SettingsDefaults.portable()
+        assertTrue(zoom.ENABLED !in defaults && zoom.DIAGNOSTICS !in defaults)
+        assertTrue(zoom.MAX_SPEED in defaults)
+        assertEquals(15L..400L, SettingsTransfer.range(zoom.MAX_SPEED))
+    }
+
     @Test fun everyPortableIntegerDefaultPassesImportValidation() {
         SettingsDefaults.portable().forEach { (key, value) ->
             if (value is Int) {
