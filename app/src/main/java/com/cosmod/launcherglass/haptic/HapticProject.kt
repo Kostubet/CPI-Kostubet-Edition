@@ -68,23 +68,26 @@ internal data class HapticPattern(
 
     fun at(time: Int): HapticPoint {
         val ms = time.coerceIn(0, length)
-        val sourceTime = ms - offset
+        val point = sourcePoint(ms - offset)
+        val attack = if (fadeIn == 0) 1f else (ms.toFloat() / fadeIn).coerceAtMost(1f)
+        val release = if (fadeOut == 0) 1f else ((length - ms).toFloat() / fadeOut).coerceAtMost(1f)
+        return point.copy(ms = ms, amplitude = (point.amplitude * intensity * .01f * attack * release).coerceIn(0f, 1f))
+    }
+
+    fun sourcePoint(sourceTime: Int): HapticPoint {
+        if (sourceTime !in 0..length) return HapticPoint(sourceTime.coerceIn(0, length), 0f)
         val index = points.binarySearchBy(sourceTime) { it.ms }
-        val point = when {
-            sourceTime !in 0..length -> HapticPoint(ms, 0f)
+        return when {
             index >= 0 -> points[index]
             else -> {
                 val next = -(index + 1)
                 val a = points[next - 1]
                 val b = points[next]
                 val t = b.curve.fraction((sourceTime - a.ms).toFloat() / (b.ms - a.ms), b.bezierIn, b.bezierOut)
-                HapticPoint(ms, lerp(a.amplitude, b.amplitude, t), lerp(a.hz, b.hz, t),
+                HapticPoint(sourceTime, lerp(a.amplitude, b.amplitude, t), lerp(a.hz, b.hz, t),
                     lerp(a.sharpness, b.sharpness, t), pitch = lerp(a.pitch, b.pitch, t))
             }
         }
-        val attack = if (fadeIn == 0) 1f else (ms.toFloat() / fadeIn).coerceAtMost(1f)
-        val release = if (fadeOut == 0) 1f else ((length - ms).toFloat() / fadeOut).coerceAtMost(1f)
-        return point.copy(ms = ms, amplitude = (point.amplitude * intensity * .01f * attack * release).coerceIn(0f, 1f))
     }
 
     fun replace(point: HapticPoint): HapticPattern {
@@ -99,11 +102,57 @@ internal data class HapticPattern(
 
     fun nativeTaps(start: Int, end: Int): List<HapticClick>? {
         if (points.any { it.tapKind != HapticTap.NATIVE && it.amplitude > 0f }) return null
-        return points.mapNotNull { point ->
+        return tapHits(start, end).takeIf { it.isNotEmpty() }
+    }
+
+    fun tapHits(start: Int, end: Int): List<HapticClick> = points.mapNotNull { point ->
             val time = point.ms + offset
-            if (!point.tap || time !in start until end) return@mapNotNull null
+            if (point.tapKind != HapticTap.NATIVE || time !in start until end) return@mapNotNull null
             at(time).amplitude.takeIf { it > 0f }?.let { HapticClick(time - start, it) }
-        }.takeIf { it.isNotEmpty() }
+    }
+
+    fun insertEffect(at: Int, effect: HapticPattern): HapticPattern? {
+        val start = (at - offset).coerceIn(0, length)
+        val end = start + effect.length
+        if (end > MAX_TRACK_MS) return null
+        val updated = buildList {
+            addAll(points.takeWhile { it.ms < start })
+            if (start > 0 && last().ms < start - 1) add(sourcePoint(start - 1))
+            addAll(effect.points.map { it.copy(ms = start + it.ms) })
+            if (end < length && points.none { it.ms == end + 1 }) add(sourcePoint(end + 1))
+            addAll(points.dropWhile { it.ms <= end })
+        }
+        return if (updated.size > MAX_HAPTIC_POINTS) null else copy(length = maxOf(end, length), points = updated)
+    }
+
+    fun paintStroke(channel: HapticChannel, stroke: List<Pair<Int, Float>>): HapticPattern {
+        if (stroke.isEmpty()) return this
+        val samples = java.util.TreeMap<Int, Float>()
+        for ((time, value) in stroke) samples[(time - offset).coerceIn(0, length)] = value
+        val first = samples.firstKey()
+        val last = samples.lastKey()
+        val updated = buildList {
+            addAll(points.takeWhile { it.ms < first })
+            val original = points.filter { it.ms in first..last }
+            val keys = if (channel == HapticChannel.AMPLITUDE) samples.keys
+                else (samples.keys + original.map { it.ms }).toSortedSet()
+            for (time in keys) {
+                val value = samples[time] ?: run {
+                    val left = samples.floorEntry(time)
+                    val right = samples.ceilingEntry(time)
+                    lerp(left.value, right.value, (time - left.key).toFloat() / (right.key - left.key))
+                }
+                val point = sourcePoint(time)
+                add(when (channel) {
+                    HapticChannel.AMPLITUDE -> point.copy(amplitude = value, curve = HapticCurve.LINEAR)
+                    HapticChannel.FREQUENCY -> point.copy(hz = value)
+                    HapticChannel.RICHTAP -> point.copy(pitch = value)
+                    HapticChannel.SHARPNESS -> point.copy(sharpness = value)
+                })
+            }
+            addAll(points.dropWhile { it.ms <= last })
+        }
+        return if (updated.size > MAX_HAPTIC_POINTS) this else copy(points = updated)
     }
 
     fun resetVibration(): HapticPattern = HapticPattern(name, length,

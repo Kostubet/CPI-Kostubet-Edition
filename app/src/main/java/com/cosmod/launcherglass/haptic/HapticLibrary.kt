@@ -27,7 +27,7 @@ internal object HapticPatternCodec {
         put("style", pattern.style?.name)
         with(pattern.generator) {
             put("generator", JSONArray(listOf(sensitivity, detail, strength, smoothness, bass, melody,
-                impulseMs, repetitions, dynamics, noise)))
+                impulseMs, repetitions, dynamics, noise, tapStrength, tapSensitivity)))
         }
         put("points", JSONArray(pattern.points.map {
             JSONArray(listOf(it.ms, it.amplitude.toDouble(), it.hz.toDouble(), it.sharpness.toDouble(),
@@ -53,6 +53,7 @@ internal object HapticPatternCodec {
         val generator = if (settings == null) GeneratorOptions() else GeneratorOptions(
             settings.getInt(0), settings.getInt(1), settings.getInt(2), settings.getInt(3), settings.getInt(4),
             settings.getInt(5), settings.getInt(6), settings.getInt(7), settings.getInt(8), settings.getInt(9),
+            settings.optInt(10, settings.getInt(2)), settings.optInt(11, settings.getInt(0)),
         )
         return HapticPattern(root.getString("name"), root.getInt("length"), List(points.length()) { i ->
             val p = points.getJSONArray(i)

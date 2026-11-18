@@ -8,13 +8,16 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToInt
+
+internal enum class HapticDrawMode { NAVIGATE, POINT, BRUSH }
 
 internal class HapticTimeline(
     context: Context,
     private val ink: Int,
     private val accent: Int,
-    private val change: (time: Int, value: Float, finished: Boolean) -> Unit,
+    private val change: (stroke: List<Pair<Int, Float>>, finished: Boolean) -> Unit,
     private val seek: (Int) -> Unit,
 ) : View(context) {
     var pattern: HapticPattern? = null
@@ -29,7 +32,11 @@ internal class HapticTimeline(
         set(value) { field = value; invalidate() }
     var cursor = 0
         set(value) { field = value; invalidate() }
-    var drawCurve = false
+    var drawMode = HapticDrawMode.NAVIGATE
+    private val stroke = java.util.TreeMap<Int, Float>()
+    private var editTime: Int? = null
+    private var previousSample: Pair<Int, Float>? = null
+    private var drawing = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val wave = Path()
@@ -48,6 +55,7 @@ internal class HapticTimeline(
     private val graphHeight get() = (height - 25 * density).coerceAtLeast(1f)
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+            finishStroke()
             pinched = true
             return true
         }
@@ -126,12 +134,13 @@ internal class HapticTimeline(
         paint.style = Paint.Style.FILL
         var lastMarker = -100f
         for (point in project.points) {
-            if (point.ms < visibleStart) continue
-            if (point.ms > visibleEnd) break
-            val marker = x(point.ms.toFloat())
+            val time = point.ms + project.offset
+            if (time < visibleStart) continue
+            if (time > visibleEnd) break
+            val marker = x(time.toFloat())
             if (marker - lastMarker < 9f * density && point.ms != selected) continue
             lastMarker = marker
-            canvas.drawCircle(marker, y(value(point)), (if (point.ms == selected) 5f else 2.4f) * density, paint)
+            canvas.drawCircle(marker, y(value(project.at(time))), (if (point.ms == selected) 5f else 2.4f) * density, paint)
         }
         paint.color = ink
         paint.alpha = 210
@@ -149,12 +158,29 @@ internal class HapticTimeline(
                 downX = event.x
                 downY = event.y
                 lastX = event.x
-                if (drawCurve) parent.requestDisallowInterceptTouchEvent(true)
+                if (drawMode != HapticDrawMode.NAVIGATE && downY < graphHeight) {
+                    parent.requestDisallowInterceptTouchEvent(true)
+                    if (drawMode == HapticDrawMode.POINT) {
+                        val touched = time(event.x)
+                        val nearest = pattern?.points?.minByOrNull { abs(it.ms + (pattern?.offset ?: 0) - touched) }
+                        editTime = nearest?.ms?.plus(pattern?.offset ?: 0)?.takeIf {
+                            abs(it - touched) <= 16 * density * visible / width.coerceAtLeast(1)
+                        } ?: touched
+                    }
+                    sampleStroke(event.x, event.y, publish = false)
+                }
             }
-            MotionEvent.ACTION_POINTER_DOWN -> parent.requestDisallowInterceptTouchEvent(true)
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                finishStroke()
+                pinched = true
+                parent.requestDisallowInterceptTouchEvent(true)
+            }
             MotionEvent.ACTION_MOVE -> {
                 if (pinched) return true
-                if (drawCurve && downY < graphHeight) apply(event, false)
+                if (stroke.isNotEmpty()) {
+                    for (i in 0 until event.historySize) sampleStroke(event.getHistoricalX(i), event.getHistoricalY(i), publish = false)
+                    sampleStroke(event.x, event.y)
+                }
                 else if (abs(event.x - downX) > 8 * density) {
                     parent.requestDisallowInterceptTouchEvent(true)
                     if (downY >= graphHeight) seek(time(event.x))
@@ -168,14 +194,18 @@ internal class HapticTimeline(
             }
             MotionEvent.ACTION_UP -> {
                 if (!pinched && !panning) {
-                    if (drawCurve && downY < graphHeight) apply(event, true)
+                    if (stroke.isNotEmpty()) {
+                        sampleStroke(event.x, event.y, publish = false)
+                        drawing = true
+                        finishStroke()
+                    }
                     else seek(time(event.x))
                     performClick()
                 }
                 parent.requestDisallowInterceptTouchEvent(false)
             }
             MotionEvent.ACTION_CANCEL -> {
-                if (drawCurve && !pinched) apply(event, true)
+                finishStroke()
                 parent.requestDisallowInterceptTouchEvent(false)
             }
         }
@@ -186,11 +216,49 @@ internal class HapticTimeline(
     private fun clampLeft(time: Float) = time.coerceIn(0f, (length - visible).coerceAtLeast(0f))
     private fun time(x: Float) = (leftMs + visible * x.coerceIn(0f, width.toFloat()) / width.coerceAtLeast(1))
         .roundToInt().coerceIn(0, length.toInt())
-    private fun apply(event: MotionEvent, finished: Boolean) {
-        val normalized = (1 - (event.y - 8 * density) / (graphHeight - 16 * density).coerceAtLeast(1f)).coerceIn(0f, 1f)
-        val time = time(event.x)
-        val snapped = ((time / 16f).roundToInt() * 16).coerceIn(0, length.toInt())
-        change(snapped, limits.start + normalized * (limits.endInclusive - limits.start), finished)
+    fun zoomBy(factor: Float) {
+        val anchor = cursor.coerceIn(leftMs.toInt(), (leftMs + visible).toInt())
+        val fraction = (anchor - leftMs) / visible
+        zoom = (zoom * factor).coerceIn(1f, 64f)
+        leftMs = clampLeft(anchor - fraction * visible)
+        curvesChanged()
+    }
+
+    private fun sampleStroke(x: Float, y: Float, publish: Boolean = true) {
+        val normalized = (1 - (y - 8 * density) / (graphHeight - 16 * density).coerceAtLeast(1f)).coerceIn(0f, 1f)
+        val value = limits.start + normalized * (limits.endInclusive - limits.start)
+        val at = editTime ?: time(x)
+        previousSample?.let { (before, lastValue) ->
+            val step = maxOf(8f, visible / 260f)
+            val segments = ceil(abs(at - before) / step).toInt()
+            if (segments > 1) {
+                stroke.subMap(minOf(before, at), false, maxOf(before, at), false).clear()
+                for (i in 1 until segments) {
+                    val progress = i.toFloat() / segments
+                    stroke[(before + (at - before) * progress).roundToInt()] = lastValue + (value - lastValue) * progress
+                }
+            }
+        }
+        stroke[at] = value
+        previousSample = at to value
+        if (publish) {
+            drawing = true
+            publishStroke(false)
+        }
+    }
+
+    private fun publishStroke(finished: Boolean) {
+        val at = previousSample?.first ?: return
+        val samples = stroke.entries.map { it.key to it.value }
+        change(samples.filter { it.first != at } + (at to stroke.getValue(at)), finished)
+    }
+
+    private fun finishStroke() {
+        if (drawing) publishStroke(true)
+        drawing = false
+        stroke.clear()
+        previousSample = null
+        editTime = null
     }
 
     private fun value(point: HapticPoint): Float = when (channel) {

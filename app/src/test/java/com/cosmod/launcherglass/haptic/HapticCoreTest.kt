@@ -119,4 +119,44 @@ class HapticCoreTest {
         assertEquals(0, reset.offset)
         assertTrue(!reset.repeat)
     }
+
+    @Test fun insertionKeepsSlidesAndNativeClicksOnTheSameTimeline() {
+        val slide = HapticPattern("track", 1400, listOf(HapticPoint(0, 0f), HapticPoint(120, .65f, pitch = -35f),
+            HapticPoint(420, .75f, pitch = 35f), HapticPoint(610, 0f), HapticPoint(1400, 0f)), offset = 25)
+        val taps = HapticTapTrain(count = 2, spacing = 150)
+        val mixed = requireNotNull(slide.insertEffect(750, HapticPattern("taps", taps.length, taps.points())))
+        assertEquals(slide.at(300), mixed.at(300))
+        assertEquals(listOf(754, 904), mixed.tapHits(0, mixed.length).map { it.time })
+        assertNull(mixed.nativeTaps(0, mixed.length))
+        val payload = requireNotNull(mixedRichTapPayload(mixed, 0, mixed.length, 1, 1))
+        assertEquals(2, payload.count { it == 4097 })
+        assertTrue(4096 in payload)
+    }
+
+    @Test fun mixedGeneratorAlignsTapsToLateOnsetsAndKeepsASlideBetweenThem() {
+        val rate = HapticAnalysis.SAMPLE_RATE
+        val samples = FloatArray(rate * 3) { i ->
+            val time = i * 1000 / rate
+            val attack = time in 375..422 || time in 937..983
+            val amplitude = if (attack) .8 else if (time in 430..890) .12 else 0.0
+            (amplitude * sin(i * 2 * PI * 95 / rate)).toFloat()
+        }
+        val track = HapticAnalysis.analyze(samples, samples.size)
+        val options = HapticStyle.MIXED.options()
+        val points = HapticAnalysis.generate(track, HapticStyle.MIXED, options)
+        assertTrue(points.any { it.tap && it.ms in 370..389 })
+        assertTrue(points.any { it.tap && it.ms in 930..950 })
+        assertTrue(points.any { !it.tap && it.ms in 500..850 && it.amplitude > 0f })
+        assertTrue(HapticAnalysis.generate(track, HapticStyle.MIXED, options.copy(tapStrength = 0)).none { it.tap })
+    }
+
+    @Test fun brushReplacesOnlyItsStrokeAndKeepsOtherChannels() {
+        val pattern = HapticPattern("brush", 1000, listOf(HapticPoint(0, 0f),
+            HapticPoint(300, .2f, pitch = 35f), HapticPoint(500, .6f, pitch = 60f), HapticPoint(1000, 0f)), offset = 20)
+        val stroke = listOf(250 to .3f, 320 to .8f, 400 to .4f)
+        val result = pattern.paintStroke(HapticChannel.AMPLITUDE, stroke)
+        assertEquals(.8f, result.sourcePoint(300).amplitude, .0001f)
+        assertEquals(35f, result.sourcePoint(300).pitch, .0001f)
+        assertEquals(pattern.points[2], result.sourcePoint(500))
+    }
 }

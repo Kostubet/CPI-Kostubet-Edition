@@ -67,13 +67,14 @@ internal object HapticAudio {
 
     private fun readCached(file: AtomicFile): HapticAnalysis.Track? = runCatching {
         DataInputStream(file.openRead().buffered()).use { input ->
-            require(input.readInt() == 1)
+            require(input.readInt() == 2)
             val duration = input.readInt()
             val bpm = input.readInt().takeIf { it in 40..240 }
             val count = input.readInt()
             require(duration in 80..MAX_TRACK_MS && count in 4..(MAX_TRACK_MS / HapticAnalysis.HOP_MS))
             val frames = List(count) {
-                HapticAnalysis.Frame(input.readFloat(), input.readFloat(), input.readFloat(), input.readFloat(), input.readFloat())
+                HapticAnalysis.Frame(input.readFloat(), input.readFloat(), input.readFloat(), input.readFloat(),
+                    input.readFloat(), input.readFloat(), input.readUnsignedByte())
             }
             file.baseFile.setLastModified(System.currentTimeMillis())
             HapticAnalysis.Track(frames, duration, bpm)
@@ -85,7 +86,7 @@ internal object HapticAudio {
             val output = file.startWrite()
             try {
                 val stream = DataOutputStream(output.buffered())
-                stream.writeInt(1)
+                stream.writeInt(2)
                 stream.writeInt(track.length)
                 stream.writeInt(track.bpm ?: 0)
                 stream.writeInt(track.frames.size)
@@ -95,6 +96,8 @@ internal object HapticAudio {
                     stream.writeFloat(frame.mid)
                     stream.writeFloat(frame.high)
                     stream.writeFloat(frame.flux)
+                    stream.writeFloat(frame.rise)
+                    stream.writeByte(frame.onsetMs)
                 }
                 stream.flush()
                 file.finishWrite(output)

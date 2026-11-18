@@ -10,7 +10,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 internal enum class HapticStyle {
-    BALANCED, SMOOTH, DYNAMIC, BASS_FOCUS, MELODY_FLOW, PRECISION, CUSTOM, TAPS;
+    BALANCED, SMOOTH, DYNAMIC, BASS_FOCUS, MELODY_FLOW, PRECISION, CUSTOM, TAPS, MIXED;
 
     fun options() = when (this) {
         BALANCED, CUSTOM -> GeneratorOptions()
@@ -20,6 +20,7 @@ internal enum class HapticStyle {
         MELODY_FLOW -> GeneratorOptions(smoothness = 80, bass = 20, melody = 96, impulseMs = 155)
         PRECISION -> GeneratorOptions(smoothness = 23, detail = 82, impulseMs = 50, noise = 35)
         TAPS -> GeneratorOptions(sensitivity = 74, strength = 88, detail = 82, repetitions = 10, noise = 30)
+        MIXED -> GeneratorOptions(strength = 58, tapStrength = 82, tapSensitivity = 74, repetitions = 6)
     }
 }
 
@@ -34,9 +35,11 @@ internal data class GeneratorOptions(
     val repetitions: Int = 8,
     val dynamics: Int = 52,
     val noise: Int = 24,
+    val tapStrength: Int = strength,
+    val tapSensitivity: Int = sensitivity,
 ) {
     init {
-        require(listOf(sensitivity, detail, strength, smoothness, bass, melody, dynamics, noise).all { it in 0..100 })
+        require(listOf(sensitivity, detail, strength, smoothness, bass, melody, dynamics, noise, tapStrength, tapSensitivity).all { it in 0..100 })
         require(impulseMs in 25..400 && repetitions in 1..16)
     }
 }
@@ -47,7 +50,8 @@ internal object HapticAnalysis {
     private const val HOP = SAMPLE_RATE * HOP_MS / 1000
     private const val FFT_SIZE = 1024
 
-    data class Frame(val rms: Float, val low: Float, val mid: Float, val high: Float, val flux: Float)
+    data class Frame(val rms: Float, val low: Float, val mid: Float, val high: Float, val flux: Float,
+        val rise: Float, val onsetMs: Int)
     data class Track(val frames: List<Frame>, val length: Int, val bpm: Int?)
 
     fun analyze(samples: FloatArray, count: Int): Track {
@@ -56,15 +60,32 @@ internal object HapticAnalysis {
         val imaginary = DoubleArray(FFT_SIZE)
         val previous = DoubleArray(FFT_SIZE / 2)
         val window = DoubleArray(FFT_SIZE) { .5 - .5 * cos(2 * PI * it / (FFT_SIZE - 1)) }
+        val subFrame = HOP / 4
+        var lastLevel = 0f
         val frames = buildList {
             for (start in 0 until count step HOP) {
                 if (Thread.currentThread().isInterrupted) throw java.util.concurrent.CancellationException()
                 var power = 0.0
+                var strongestRise = 0f
+                var onsetMs = 0
+                for (slice in 0..3) {
+                    val first = start + slice * subFrame
+                    var slicePower = 0.0
+                    for (i in first until minOf(first + subFrame, count)) slicePower += samples[i] * samples[i]
+                    power += slicePower
+                    val level = sqrt(slicePower / subFrame).toFloat()
+                    val rise = level - lastLevel
+                    if (rise > strongestRise) {
+                        strongestRise = rise
+                        onsetMs = slice * (HOP_MS / 4)
+                    }
+                    lastLevel = level
+                }
                 for (i in 0 until FFT_SIZE) {
-                    val sample = if (i < count - start) samples[start + i] else 0f
+                    val at = start + HOP / 2 - FFT_SIZE / 2 + i
+                    val sample = if (at in 0 until count) samples[at] else 0f
                     real[i] = sample * window[i]
                     imaginary[i] = 0.0
-                    if (i < HOP) power += sample * sample
                 }
                 transform(real, imaginary)
                 var flux = 0.0
@@ -83,7 +104,7 @@ internal object HapticAnalysis {
                     }
                 }
                 add(Frame(sqrt(power / HOP).toFloat(), sqrt(low).toFloat(), sqrt(mid).toFloat(),
-                    sqrt(high).toFloat(), (flux / 40).toFloat()))
+                    sqrt(high).toFloat(), (flux / 40).toFloat(), strongestRise, onsetMs))
             }
         }
         return Track(frames, (count * 1000L / SAMPLE_RATE).toInt().coerceIn(80, MAX_TRACK_MS), tempo(frames))
@@ -103,12 +124,13 @@ internal object HapticAnalysis {
         var accent = 0f
         var lastAccent = -1000
         val points = ArrayList<HapticPoint>(frames.size + 1)
-        val taps = if (style == HapticStyle.TAPS) ArrayList<HapticClick>() else null
+        val taps = if (style == HapticStyle.TAPS || style == HapticStyle.MIXED) ArrayList<HapticClick>() else null
+        var lastTap = -1000
         points += HapticPoint(0, 0f)
         for (i in frames.indices) {
-            val ms = (i + 1) * HOP_MS
-            if (ms >= track.length) break
             val f = frames[i]
+            val ms = i * HOP_MS + f.onsetMs + 1
+            if (ms >= track.length) break
             val level = (f.rms / peak).coerceIn(0f, 1.25f)
             val bass = (f.low / peak).coerceIn(0f, 1f)
             val melody = (f.mid / peak).coerceIn(0f, 1f)
@@ -116,7 +138,7 @@ internal object HapticAnalysis {
             val t = options.sensitivity * .01f
             val periodic = beatGap != null && abs(i - lastAccent - beatGap) <= 2
             val threshold = baseline * (1.75f - .78f * t) * if (periodic) .87f else 1f
-            val transient = f.flux * (.75f + .5f * bass)
+            val transient = f.flux * (.75f + .5f * bass) + (f.rise / peak).coerceAtMost(1f) * .14f
             baseline += .072f * (transient - baseline)
             val quiet = f.rms <= gate
             accent *= onsetDecay
@@ -131,17 +153,40 @@ internal object HapticAnalysis {
             val target = if (quiet) 0f else (strong + options.dynamics * .01f * (strong * strong - strong)) *
                 options.strength * .01f * if (style == HapticStyle.PRECISION && accent < .12f) .43f else 1f
             if (taps != null) {
-                if (hit) taps += HapticClick(i * HOP_MS, target.coerceIn(0f, 1f))
-                continue
+                val sensitivity = options.tapSensitivity * .01f
+                val onset = (f.rise / peak).coerceAtMost(1f)
+                val spectralHit = f.flux > maxOf(.009f, baseline * (1.65f - .68f * sensitivity))
+                if (!quiet && i - lastTap >= minimumGap &&
+                    (onset > .24f - .18f * sensitivity || spectralHit && onset > .025f)) {
+                    val strength = ((.30f + onset * .52f + bass * .25f) * options.tapStrength * .01f).coerceAtMost(1f)
+                    if (strength > 0f) taps += HapticClick(i * HOP_MS + f.onsetMs, strength)
+                    lastTap = i
+                }
+                if (style == HapticStyle.TAPS) continue
             }
             flowing += (target - flowing) * if (target > flowing) attack else decay
             if (quiet && flowing < .018f) flowing = 0f
             points += HapticPoint(ms, flowing.coerceIn(0f, 1f), sharpness = (.24f + brightness * .46f + accent * .3f)
                 .coerceIn(0f, 1f))
         }
-        if (taps != null) return tapPoints(track.length, taps)
+        if (style == HapticStyle.TAPS) return tapPoints(track.length, requireNotNull(taps))
         points += HapticPoint(track.length, 0f)
-        return points
+        if (taps.isNullOrEmpty()) return points
+        val mixed = java.util.TreeMap<Int, HapticPoint>()
+        val slideBudget = (MAX_HAPTIC_POINTS - taps.size * 3 - 1).coerceAtLeast(2)
+        val step = (points.size + slideBudget - 1) / slideBudget
+        for (i in points.indices step step) mixed[points[i].ms] = points[i]
+        mixed[track.length] = points.last()
+        for (tap in taps) {
+            val from = tap.time
+            val to = from + 32
+            if (to >= track.length) continue
+            mixed.subMap(from, true, to, true).clear()
+            mixed[from] = HapticPoint(from, 0f)
+            mixed[from + 4] = HapticPoint(from + 4, tap.strength, tapKind = HapticTap.NATIVE)
+            mixed[to] = HapticPoint(to, 0f, curve = HapticCurve.EASE_OUT)
+        }
+        return mixed.values.toList()
     }
 
     private fun tempo(frames: List<Frame>): Int? {
@@ -150,7 +195,7 @@ internal object HapticAnalysis {
         var floor = 0f
         for (i in frames.indices) {
             val flux = frames[i].flux
-            onset[i] = if (frames[i].rms > .003f) (flux - floor * 1.1f).coerceAtLeast(0f) else 0f
+            onset[i] = if (frames[i].rms > .003f) (flux - floor * 1.1f).coerceAtLeast(0f) + frames[i].rise else 0f
             floor += .10f * (flux - floor)
         }
         var score = .22
