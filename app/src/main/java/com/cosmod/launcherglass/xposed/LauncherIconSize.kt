@@ -1,8 +1,8 @@
 package com.cosmod.launcherglass.xposed
 
+import android.content.res.TypedArray
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
-import android.view.ViewGroup
 import android.view.View
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
@@ -16,12 +16,12 @@ internal object LauncherIconSize {
     private data class Scale(val nativeX:Float,val nativeY:Float,val appliedX:Float,val appliedY:Float)
     private val containers=WeakHashMap<View,Scale>()
 
-    private fun scaleContainer(view:View,ratio:Float=percent/100f){
+    private fun scaleContainer(view:View,ratio:Float,nativeScale:Float?=null){
         val currentX=view.scaleX
         val currentY=view.scaleY
         val previous=containers[view]
-        val nativeX=if(previous!=null && previous.appliedX==currentX)previous.nativeX else currentX
-        val nativeY=if(previous!=null && previous.appliedY==currentY)previous.nativeY else currentY
+        val nativeX=nativeScale ?: previous?.takeIf {it.appliedX==currentX}?.nativeX ?: currentX
+        val nativeY=nativeScale ?: previous?.takeIf {it.appliedY==currentY}?.nativeY ?: currentY
         val x=nativeX*ratio
         val y=nativeY*ratio
         if(x!=currentX)view.scaleX=x
@@ -44,31 +44,27 @@ internal object LauncherIconSize {
     }
 
     private const val SHORTCUT="com.android.launcher3.viewcontainer.ShortcutContainer"
-    private const val GRID="com.android.launcher3.viewcontainer.GridRecyclerView"
+    private const val FOLDER="com.android.launcher3.folder.FolderIcon"
     private const val FLEX_FOLDER="com.android.launcher3.folder.FlexibleFolderIcon"
+    private var folderTypes:List<Class<*>> = emptyList()
 
-    private fun updateContainer(view:View){
-        val group=view as? ViewGroup
-        val name=view.javaClass.name
-        if(name==SHORTCUT && group!=null){
-            val content=(NativeIconAccess.call(view,"getHoverScaleView") as? View)?.takeIf {it!==view}
-                ?: (0 until group.childCount).firstNotNullOfOrNull {index->group.getChildAt(index).takeIf {it.javaClass.name==GRID}}
-            if(content!=null){
-                scaleContainer(view,1f)
-                scaleContainer(content)
-                return
+    private fun updateContainer(view:View,nativeScale:Float?=null){
+        val large=if(folderTypes.any {it.isInstance(view)}) {
+            val span=NativeIconAccess.call(view,"getSpanRange") as? Rect
+            if(span!=null)span.width()>1 && span.height()>1
+            else {
+                val item=NativeIconAccess.call(view,"getItemInfo") ?: view.tag
+                if(item==null)NativeIconAccess.call(view,"isBigFolderIcon")==true
+                else (NativeIconAccess.field(item,"spanX") as? Int ?: 1)>1 &&
+                    (NativeIconAccess.field(item,"spanY") as? Int ?: 1)>1
             }
-        }
-        val span=if(name==FLEX_FOLDER || name.endsWith("FolderIcon"))NativeIconAccess.call(view,"getSpanRange") as? Rect else null
-        val item=if(span==null && name.endsWith("FolderIcon"))NativeIconAccess.call(view,"getItemInfo") ?: view.tag else null
-        val large=span?.let {it.width()>1 && it.height()>1} ?: (item!=null &&
-            ((NativeIconAccess.field(item,"spanX") as? Int ?: 1)>1) &&
-            ((NativeIconAccess.field(item,"spanY") as? Int ?: 1)>1))
-        scaleContainer(view,if(large)1f else percent/100f)
+        } else false
+        scaleContainer(view,if(large)1f else percent/100f,nativeScale)
     }
 
     fun install(loader:ClassLoader){
-        val targets=listOf("com.android.launcher3.folder.FolderIcon",FLEX_FOLDER,SHORTCUT).mapNotNull {XposedHelpers.findClassIfExists(it,loader)}
+        val targets=listOf(FOLDER,FLEX_FOLDER,SHORTCUT).mapNotNull {XposedHelpers.findClassIfExists(it,loader)}
+        folderTypes=targets.filter {it.name!=SHORTCUT}
         val methods=targets.mapNotNull {type->
             generateSequence(type) {it.superclass}.firstNotNullOfOrNull {owner->
                 owner.declaredMethods.firstOrNull {it.name=="onLayout" && it.parameterCount==5}
@@ -83,8 +79,19 @@ internal object LauncherIconSize {
         }
         for(method in methods)ModuleHooks.hookMethod(method,resize)
         targets.firstOrNull {it.name==SHORTCUT}?.declaredMethods?.filter {
-            it.name=="updateItemIconLayout" && it.parameterCount==2
+            (it.name=="updateItemIconLayout" && it.parameterCount==2) || (it.name=="resetState" && it.parameterCount==0)
         }?.forEach {ModuleHooks.hookMethod(it,resize)}
+        targets.firstOrNull {it.name==FOLDER}?.declaredMethods?.firstOrNull {
+            it.name=="setReorderBounceScale" && it.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
+        }?.let {method->
+            ModuleHooks.hookMethod(method,object:XC_MethodHook(){
+                override fun afterHookedMethod(param:MethodHookParam){
+                    if(!param.hasThrowable())runCatching {
+                        updateContainer(param.thisObject as View,param.args[0] as Float)
+                    }
+                }
+            })
+        }
         val type=XposedHelpers.findClassIfExists("com.android.launcher3.BubbleTextView",loader) ?: return
         runCatching {
             val display=type.getDeclaredField("mDisplay").apply {isAccessible=true}
@@ -93,20 +100,37 @@ internal object LauncherIconSize {
             val workspace=XposedHelpers.getStaticIntField(type,"DISPLAY_WORKSPACE")
             val drawer=XposedHelpers.getStaticIntField(type,"DISPLAY_ALL_APPS")
             val update=type.getDeclaredMethod("updateIconBounds",Drawable::class.java)
-            fun apply(view:View,nativeOverride:Int?=null){
+            fun adjust(view:View,observed:Int,nativeOverride:Boolean=false):Int{
                 val surface=display.getInt(view)
-                if(surface!=workspace && surface!=drawer)return
-                val observed=size.getInt(view)
-                if(observed<=0)return
-                synchronized(sizes){
+                if((surface!=workspace && surface!=drawer) || observed<=0)return observed
+                return synchronized(sizes){
                     val previous=sizes[view]
-                    val native=nativeOverride ?: previous?.takeIf {it.applied==observed}?.native ?: observed
+                    val native=previous?.takeIf {!nativeOverride && it.applied==observed}?.native ?: observed
                     val adjusted=(native*percent+50)/100
-                    if(adjusted!=observed)size.setInt(view,adjusted)
                     if(previous==null || previous.native!=native || previous.applied!=adjusted)sizes[view]=Size(native,adjusted)
+                    adjusted
                 }
             }
-            ModuleHooks.hookAllConstructors(type,object:XC_MethodHook(){
+            fun apply(view:View,nativeOverride:Boolean=false){
+                val observed=size.getInt(view)
+                val adjusted=adjust(view,observed,nativeOverride)
+                if(adjusted!=observed)size.setInt(view,adjusted)
+            }
+            val oplus=XposedHelpers.findClassIfExists("com.android.launcher3.OplusBubbleTextView",loader)
+            // Adjust the stock size after the device profile and any XML override have been resolved.
+            val initialize=object:XC_MethodHook(){
+                override fun afterHookedMethod(param:MethodHookParam){
+                    if(!param.hasThrowable())param.result=adjust(param.thisObject as View,param.result as Int)
+                }
+            }
+            val initializers=listOfNotNull(type,oplus).mapNotNull {owner->
+                owner.declaredMethods.firstOrNull {
+                    it.name=="getInitIconSize" && it.returnType==Int::class.javaPrimitiveType &&
+                        it.parameterTypes.contentEquals(arrayOf(TypedArray::class.java,Int::class.javaPrimitiveType))
+                }
+            }
+            initializers.forEach {ModuleHooks.hookMethod(it,initialize)}
+            if(initializers.isEmpty())ModuleHooks.hookAllConstructors(type,object:XC_MethodHook(){
                 override fun afterHookedMethod(param:MethodHookParam){
                     if(!param.hasThrowable())apply(param.thisObject as View)
                 }
@@ -114,13 +138,12 @@ internal object LauncherIconSize {
             ModuleHooks.hookMethod(update,object:XC_MethodHook(){
                 override fun beforeHookedMethod(param:MethodHookParam){apply(param.thisObject as View)}
             })
-            val oplus=XposedHelpers.findClassIfExists("com.android.launcher3.OplusBubbleTextView",loader)
             oplus?.declaredMethods?.firstOrNull {
                 it.name=="setIconSize" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
             }?.let {method->
                 ModuleHooks.hookMethod(method,object:XC_MethodHook(){
                     override fun afterHookedMethod(param:MethodHookParam){
-                        if(!param.hasThrowable())apply(param.thisObject as View,param.args[0] as Int)
+                        if(!param.hasThrowable())apply(param.thisObject as View,nativeOverride=true)
                     }
                 })
             }

@@ -317,8 +317,8 @@
     <string name="ui_preset_error">Could not read the saved settings</string>
     <string name="ui_reset_section">Reset this section</string>
     <string name="ui_reset_section_confirm">Reset section</string>
-    <string name="ui_icon_size">Launcher icon size</string>
-    <string name="ui_icon_size_hint">Changes icons, stretched shortcuts and closed folders. Restart the launcher if a layout has yet to update.</string>
+    <string name="ui_icon_size">Icon and folder size</string>
+    <string name="ui_icon_size_hint">100% uses the ColorOS size. Adjusts icons, stretched shortcuts, and regular and stretched folders.</string>
     <string name="ui_tilt_gentle">Gentle</string>
     <string name="ui_tilt_balanced">Balanced</string>
     <string name="ui_tilt_expressive">Expressive</string>

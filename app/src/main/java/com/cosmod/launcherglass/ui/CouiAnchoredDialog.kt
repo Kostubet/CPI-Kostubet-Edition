@@ -127,8 +127,10 @@ internal class CouiAnchoredDialog(
         if(animated)group.doOnPreDraw {
             if(closing || finished)return@doOnPreDraw
             resolveAnchor()
-            if(actionPanel!=null) contextFrame=ContextMenuMotion.opening(0f,card.anchorSide())
-            else if(card.hasReplica) anchorFrame=PreviewCardMotion.openingFrame(0f)
+            if(card.hasReplica){
+                if(actionPanel!=null)contextFrame=ContextMenuMotion.opening(0f)
+                else anchorFrame=PreviewCardMotion.openingFrame(0f)
+            }
             pose(0f,0f,0f)
             animateTo(1f){}
         }
@@ -158,17 +160,15 @@ internal class CouiAnchoredDialog(
         progress=value
         contextFrame?.let {frame->
             val offset=if(closing)0f else drag.value
-            val menuHeight=actionPanel?.height?.coerceAtLeast(1) ?: 1
             val drawn=if(closing || offset==0f) frame else ContextMenuMotion.dragging(
-                frame,offset*sidePerVertical/card.width.coerceAtLeast(1),
-                offset/card.height.coerceAtLeast(1),offset/menuHeight)
+                frame,offset*sidePerVertical,offset,card.height.toFloat())
             drawnContextFrame=drawn
             groupOffset=0f
             group.translationY=keyboardOffset
             card.presentContext(drawn)
             actionPanel?.apply {
-                translationY=drawn.menuY*height
-                renderReveal(drawn.menuAlpha,drawn.menuScale)
+                translationY=card.menuOffset-8f*density*(1f-drawn.menu)
+                renderReveal(drawn.menu)
             }
             shade.alpha=drawn.backdrop
             backdrop(drawn.backdrop)
@@ -335,10 +335,10 @@ internal class CouiAnchoredDialog(
 
     private fun isHeaderTouch(x:Float,y:Float):Boolean {
         val location=IntArray(2)
-        card.getLocationOnScreen(location)
-        val scale=group.scaleX
-        val localX=(x-location[0])/scale
-        val localY=(y-location[1])/scale
+        val surface=card.content
+        surface.getLocationOnScreen(location)
+        val localX=(x-location[0])/(group.scaleX*surface.scaleX)
+        val localY=(y-location[1])/(group.scaleY*surface.scaleY)
         if(localY !in 0f..(54f*density))return false
         val inset=if(actionPanel!=null)14f*density else 62f*density
         return localX>=inset && localX<=card.width-inset
@@ -441,19 +441,24 @@ internal class CouiAnchoredDialog(
     }
 
     private fun animateContextMenu(opening:Boolean,start:ContextMenuMotion.Frame,end:()->Unit){
-        val side=card.anchorSide()
-        val durationMs=if(opening)ContextMenuMotion.OPEN_MS else ContextMenuMotion.CLOSE_MS
-        val height=card.height.coerceAtLeast(1)
-        val velocity=(swipeRelease?.velocity ?: 0f)*ContextMenuMotion.CARD_CLOSE_MS/(1000f*height)
-        val fingerSpeed=(swipeRelease?.fingerVelocity ?: 0f)/density
-        val rowDirection=card.rowDirection
+        val release=swipeRelease
+        val durationMs=when {
+            opening->ContextMenuMotion.OPEN_MS
+            release!=null->ContextMenuMotion.SWIPE_CLOSE_MS
+            else->ContextMenuMotion.CLOSE_MS
+        }
+        val travel=card.landingTravel(start)
+        val overrun=ContextMenuMotion.overrun(travel,density,release?.fingerVelocity ?: 0f)
+        val approachSeconds=durationMs*PreviewCardMotion.LANDING/1000f
+        val momentum=((release?.velocity ?: 0f)*approachSeconds)
+            .coerceIn(-card.height*.55f,card.height*.55f)
         animator=ValueAnimator.ofFloat(0f,1f).apply {
             interpolator=LinearInterpolator()
             duration=durationMs.toLong()
             addUpdateListener {
                 val time=it.animatedValue as Float
-                contextFrame=if(opening)ContextMenuMotion.opening(time,side)
-                    else ContextMenuMotion.closing(time,start,velocity,rowDirection,fingerSpeed)
+                contextFrame=if(opening)ContextMenuMotion.opening(time)
+                    else ContextMenuMotion.closing(time,start,travel,overrun,momentum)
                 pose(if(opening)time else 1f-time,0f,0f)
             }
             addListener(object:AnimatorListenerAdapter(){
@@ -527,7 +532,7 @@ internal class CouiAnchoredDialog(
         super.dismiss()
     }
 
-    private class Panel(context:Context,private val content:View,private val dark:Boolean):FrameLayout(context) {
+    private class Panel(context:Context,val content:View,private val dark:Boolean):FrameLayout(context) {
         private val density=resources.displayMetrics.density
         private val material=ColorOsPopupMaterialView(context,dark)
         private val shade=View(context).apply {
@@ -547,6 +552,8 @@ internal class CouiAnchoredDialog(
             private set
         private var frame:PreviewCardMotion.Frame?=null
         private var contextMotion:ContextMenuMotion.Frame?=null
+        private val contentClip=Rect()
+        private var contentClipped=false
         private var dragOffset=0f
         private var dragScale=1f
         var menuOffset=0f
@@ -613,24 +620,27 @@ internal class CouiAnchoredDialog(
 
         fun rowHeight():Float=sourceRow?.height?.toFloat() ?: 0f
 
-        fun anchorSide():Float=((anchorBounds?.exactCenterX() ?: width*.5f)-width*.5f)/width.coerceAtLeast(1)
+        fun landingTravel(frame:ContextMenuMotion.Frame):Float {
+            val row=anchorBounds ?: return 0f
+            return hypot((width*.5f-row.exactCenterX())*frame.position+frame.offsetX,
+                (height*.5f-row.exactCenterY())*frame.position+frame.offsetY)
+        }
 
         fun presentContext(next:ContextMenuMotion.Frame){
             contextMotion=next
-            material.updateTransition(next.alpha,1f,1f)
-            shade.alpha=next.alpha
-            content.alpha=next.alpha
+            material.updateTransition(next.materialAlpha,1f,1f)
+            shade.alpha=next.materialAlpha
+            content.alpha=next.contentAlpha
             replica.alpha=sourceAlpha*next.rowAlpha
-            rowScale=1f+(sourceScale-1f)*next.rowLift
-            replica.pivotX=0f
-            replica.pivotY=0f
-            replica.scaleX=rowScale
-            replica.scaleY=rowScale
             updateBounds()
         }
 
         fun present(opacity:Float,strain:Float,frame:PreviewCardMotion.Frame?,dragOffset:Float,dragScale:Float){
             contextMotion=null
+            if(contentClipped){
+                content.clipBounds=null
+                contentClipped=false
+            }
             this.strain=strain
             this.frame=frame
             this.dragOffset=dragOffset
@@ -654,17 +664,7 @@ internal class CouiAnchoredDialog(
             if(width<=0 || height<=0)return
             val start=anchorBounds
             contextMotion?.let {motion->
-                // Translation addresses the center; scaling never changes the trajectory.
-                val x=width*(.5f+motion.x-motion.scale*.5f)
-                val y=height*(.5f+motion.y-motion.scale*.5f)
-                transform(material,x,y,motion.scale,motion.scale)
-                transform(shade,x,y,motion.scale,motion.scale)
-                transform(content,x,y,motion.scale,motion.scale)
-                val source=sourceRow
-                if(start!=null && source!=null){
-                    replica.translationX=start.width()*.5f-source.width*rowScale*.5f
-                    replica.translationY=start.height()*.5f-source.height*rowScale*.5f+motion.rowY*source.height
-                }
+                if(start!=null)drawMorphedBounds(start,motion)
                 return
             }
             val motion=frame
@@ -696,6 +696,48 @@ internal class CouiAnchoredDialog(
                 replica.translationX=rowCenterX-source.width*rowScale*.5f-start.left
                 replica.translationY=rowCenterY-source.height*rowScale*.5f-start.top
             }
+        }
+
+        private fun drawMorphedBounds(start:Rect,motion:ContextMenuMotion.Frame){
+            val source=sourceRow ?: return
+            val morph=motion.shapeProgress
+            val lift=1f+(sourceScale-1f)*motion.rowLift
+            val rowWidth=source.width*lift
+            val rowHeight=source.height*lift
+            val restX=start.exactCenterX()+(source.width*.5f-source.pivotX)*(1f-sourceScale)
+            val restY=start.exactCenterY()+(source.height*.5f-source.pivotY)*(1f-sourceScale)
+            val rowX=restX+(start.exactCenterX()-restX)*motion.rowLift
+            val rowY=restY+(start.exactCenterY()-restY)*motion.rowLift
+            val centerX=rowX+(width*.5f-rowX)*motion.position+motion.offsetX
+            val centerY=rowY+(height*.5f-rowY)*motion.position+motion.offsetY
+            val surfaceWidth=(rowWidth+(width-rowWidth)*morph)*motion.scale
+            val surfaceHeight=(rowHeight+(height-rowHeight)*morph)*motion.scale
+            val left=centerX-surfaceWidth*.5f
+            val top=centerY-surfaceHeight*.5f
+            val bottom=centerY+surfaceHeight*.5f
+            val pixelWidth=surfaceWidth.roundToInt().coerceAtLeast(1)
+            val pixelHeight=surfaceHeight.roundToInt().coerceAtLeast(1)
+            material.layout(0,0,pixelWidth,pixelHeight)
+            shade.layout(0,0,pixelWidth,pixelHeight)
+            transform(material,left,top,1f,1f)
+            transform(shade,left,top,1f,1f)
+            menuOffset=bottom-height
+            val contentScale=(surfaceWidth/width).coerceAtLeast(.01f)
+            transform(content,left,top,contentScale,contentScale)
+            val clipHeight=(surfaceHeight/contentScale).roundToInt().coerceIn(0,height)
+            if(clipHeight==height){
+                if(contentClipped)content.clipBounds=null
+                contentClipped=false
+            }else if(!contentClipped || contentClip.bottom!=clipHeight || contentClip.right!=width){
+                contentClip.set(0,0,width,clipHeight)
+                content.clipBounds=contentClip
+                contentClipped=true
+            }
+            rowScale=minOf(rowWidth,surfaceWidth)/source.width
+            val titleCenter=25f*density
+            val replicaCenterY=top+(rowHeight*.5f+(titleCenter-rowHeight*.5f)*morph)*motion.scale
+            transform(replica,centerX-source.width*rowScale*.5f-start.left,
+                replicaCenterY-source.height*rowScale*.5f-start.top,rowScale,rowScale)
         }
 
         private fun transform(view:View,x:Float,y:Float,sx:Float,sy:Float){

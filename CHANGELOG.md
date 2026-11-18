@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 406
+
+- Строка функции разворачивается в карточку предпросмотра и плавно возвращается на место. Скорость свайпа влияет на длину отскока.
+- Размер обычных иконок рассчитывается от штатных размеров ColorOS. У растянутых ярлыков подложка и содержимое масштабируются вместе, а у закрытых папок масштаб учитывается при анимации перестановки.
+
 ### Сборка 405
 
 - Стекло иконок в открытой папке получает фон панели папки, включая штатную подложку ColorOS.
@@ -53,6 +58,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 406
+
+- Feature rows expand into their preview cards and smoothly return to the original position. Swipe velocity affects the overshoot distance.
+- Regular icons size relative to the native ColorOS dimensions. Stretched shortcuts scale their backgrounds and contents together, and closed folders keep the selected scale during reorder animations.
 
 ### Build 405
 

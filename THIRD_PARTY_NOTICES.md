@@ -10,6 +10,8 @@ Thanks to @anime_killer2009 for substantial help: https://t.me/anime_killer2009
 
 Thanks to Kostubet Topics for their help: https://t.me/KostubetTopics
 
+LuckyTool by luckyzyx (GPL-3.0) informed the launcher sizing integration. CPI applies a percentage to the size resolved for the individual native icon view. [LuckyTool launcher sizing](https://github.com/luckyzyx/LuckyTool/blob/90af6f61c0b31dff3d1fb14b53d2d935c3c31654/app/src/main/java/com/luckyzyx/luckytool/hook/scopes/launcher/HookOplusBubbleTextView.kt#L51)
+
 ONextBox 17.0.0.100 by MiToverG422 and contributors (GPL-3.0). See third_party/ONextBox-NOTICE.md for upstream source and modifications.
 
 The iOS 27 app transitions adapt the AppGenieMotion and AppWindowDeformation code from CherryPick Icons 0.3.20-dev by immorgue. CPI uses its own ColorOS launcher bindings and animation speed settings. Project: https://github.com/immorgue/CherryPick-Icons

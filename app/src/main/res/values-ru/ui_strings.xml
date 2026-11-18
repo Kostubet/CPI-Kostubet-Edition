@@ -317,8 +317,8 @@
     <string name="ui_preset_error">Не удалось прочитать сохранённые настройки</string>
     <string name="ui_reset_section">Сбросить настройки раздела</string>
     <string name="ui_reset_section_confirm">Сбросить раздел</string>
-    <string name="ui_icon_size">Размер иконок лаунчера</string>
-    <string name="ui_icon_size_hint">Меняет размер иконок, растянутых ярлыков и закрытых папок. Если размер не обновился, перезапусти лаунчер.</string>
+    <string name="ui_icon_size">Размер иконок и папок</string>
+    <string name="ui_icon_size_hint">100% — размер по ColorOS. Регулирует иконки, растянутые ярлыки, обычные и растянутые папки.</string>
     <string name="ui_tilt_gentle">Мягкий</string>
     <string name="ui_tilt_balanced">Сбалансированный</string>
     <string name="ui_tilt_expressive">Выразительный</string>
