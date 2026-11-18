@@ -29,4 +29,22 @@ class SettingsTransferTest {
         assertTrue(SettingsTransfer.legacyNumber(dock, 51) !in SettingsTransfer.range(dock))
         assertEquals(49L, SettingsTransfer.legacyNumber(SettingsProvider.KEY_BLUR_RADIUS, 49))
     }
+
+    @Test fun kyantMaterialFromOldConfigsConvertsToTheSeparateEngineSwitch() {
+        val glass = GlassEngineSettings
+        val style = SettingsProvider.KEY_BLUR_STYLE
+        val width = glass.key(glass.ICONS, GlassEngineSettings.Parameter.EDGE_WIDTH)
+        val power = glass.key(glass.ICONS, GlassEngineSettings.Parameter.POWER)
+        val light = glass.key(glass.ICONS, GlassEngineSettings.Parameter.EDGE_LIGHT)
+        val old = mapOf<String, Any>(style to 3, "kyant_width" to 68,
+            "kyant_distortion" to 79, "kyant_highlight" to 30L, light to 44)
+        val values = old + glass.legacyIconMaterial(old)
+        assertEquals(SettingsProvider.BLUR_STYLE_LIQUID, values[style])
+        assertEquals(true, values[glass.ICONS])
+        assertEquals(68, values[width])
+        assertEquals(79, values[power])
+        assertEquals(44, values[light])
+        assertTrue(glass.legacyIconMaterial(values).isEmpty())
+        assertTrue(glass.legacyIconMaterial(mapOf(style to "3")).isEmpty())
+    }
 }

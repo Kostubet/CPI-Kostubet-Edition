@@ -11,7 +11,7 @@ import java.lang.ref.WeakReference
 
 /** Native shortcut clusters keep their individual items, hit targets and transitions. */
 internal object MultiIconMaterialHook {
-    private fun enabled()=PrefsHelper.enabled && PrefsHelper.blurEnabled
+    private fun enabled()=PrefsHelper.shortcutGlassEnabled
     private class GridPlate(view:View,val native:Drawable):Drawable(){
         private val owner=WeakReference(view)
         private val clip=Path()

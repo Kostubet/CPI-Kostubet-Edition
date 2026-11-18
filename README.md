@@ -35,7 +35,7 @@
 
 Основная конфигурация разработки — OnePlus 13, ColorOS 17 и системный лаунчер 17.3.12. Доступность отдельных эффектов зависит от версии прошивки и лаунчера. [Подробнее об установке](INSTALL.md#русский)
 
-Для плавного зума выберите штатную «Камеру» в области CPI в LSPosed и запустите её заново. В CPI откройте «Камера → iOS Smooth Video Zoom», включите сглаживание и выберите нужные виды управления. Запишите короткое приближение и отдаление внутри диапазона одного объектива на 1080p и 4K при 30 и 60 FPS. Сравните сохранённые ролики с выключенной функцией. Для проверки быстрого разворота смените направление зума в середине движения. Переходы между объективами выполняет штатная камера. Числа в диагностике доступны при включённом сборе метрик, если камера возвращает коэффициент в метаданных кадров.
+Для плавного зума выберите штатную «Камеру» в области CPI в LSPosed и запустите её заново. В CPI откройте «Камера → iOS Smooth Video Zoom», включите сглаживание и выберите нужные виды управления. График реагирует на ручные настройки и меняет шкалу времени под выбранную траекторию. Запишите короткое приближение и отдаление внутри диапазона одного объектива на 1080p и 4K при 30 и 60 FPS. Сравните сохранённые ролики с выключенной функцией. Для проверки быстрого разворота смените направление зума в середине движения. Переходы между объективами выполняет штатная камера. Числа в диагностике доступны при включённом сборе метрик, если камера возвращает коэффициент в метаданных кадров.
 
 В «Функции → Стекло центра управления и уведомлений» выберите панель, включите стекло и настройте материал. Оба эффекта по умолчанию выключены и требуют области **System UI**. У каждого поддерживаемого элемента можно переопределить радиус размытия и непрозрачность либо вернуть системное оформление.
 
@@ -93,7 +93,7 @@ The iOS 27 App Animations page has a separate ba31k engine with independent sett
 
 Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases). Enable the module in LSPosed and select the system launcher. Some features have limited compatibility with Vector. Select **System UI** for system overlays and the lock screen. Enable the stock **Flux** icon style for icon styling. The main development device is the OnePlus 13 on ColorOS 17 with launcher 17.3.12. Feature availability depends on the firmware. [Full installation guide](INSTALL.md#english)
 
-To test smooth zoom, add stock Camera to the LSPosed scope and reopen it. In CPI, open **Camera → iOS Smooth Video Zoom**, turn it on, and select the controls to smooth. Compare saved recordings at 1080p and 4K, at 30 and 60 FPS, while zooming within one lens range and changing direction mid-zoom. Lens switches use the stock camera path.
+To test smooth zoom, add stock Camera to the LSPosed scope and reopen it. In CPI, open **Camera → iOS Smooth Video Zoom**, turn it on, and select the controls to smooth. The graph updates with manual adjustments and scales its time axis to the trajectory. Compare saved recordings at 1080p and 4K, at 30 and 60 FPS, while zooming within one lens range and changing direction mid-zoom. Lens switches use the stock camera path.
 
 ### Build and release
 

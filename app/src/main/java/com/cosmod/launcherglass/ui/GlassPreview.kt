@@ -77,8 +77,10 @@ internal class GlassPreview(context: Context, private val dark: Boolean, useDevi
     }
     fun configure(bundle:android.os.Bundle,scope:Int,opticsOverride:GlassEngineSettings.Optics?=null){
         edgeScope=scope
-        newEngine=com.cosmod.launcherglass.xposed.KyantGlassEngine.enabled(scope,bundle)
-        engineOptics=opticsOverride ?: com.cosmod.launcherglass.xposed.KyantGlassEngine.optics(scope,bundle)
+        val sourceScope=if(scope==com.cosmod.launcherglass.xposed.GlassSurface.FOLDERS &&
+            !bundle.getBoolean(FolderSettingsKeys.OWN))0 else scope
+        newEngine=com.cosmod.launcherglass.xposed.KyantGlassEngine.enabled(sourceScope,bundle)
+        engineOptics=opticsOverride ?: com.cosmod.launcherglass.xposed.KyantGlassEngine.optics(sourceScope,bundle)
         largeFolderEngine=bundle.getBoolean(GlassEngineSettings.LARGE_FOLDERS,false)
         largeFolderOptics=GlassEngineSettings.optics(bundle,GlassEngineSettings.LARGE_FOLDERS)
         com.cosmod.launcherglass.xposed.EdgeLight.update(bundle)
@@ -216,6 +218,7 @@ internal class GlassPreview(context: Context, private val dark: Boolean, useDevi
     }
 
     private fun blurred(base: Bitmap, current: Material): Bitmap {
+        if (!current.enabled) return base
         val radius = if (current.banner) {
             (current.blur * base.width / resources.displayMetrics.widthPixels.toFloat()).toInt().coerceIn(0, 40)
         } else {

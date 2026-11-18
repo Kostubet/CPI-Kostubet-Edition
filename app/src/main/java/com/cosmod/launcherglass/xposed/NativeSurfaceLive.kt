@@ -55,7 +55,7 @@ object NativeSurfaceLive {
     val originalDrawingSource:View? get()=nativeDrawingSource.get()
     private fun canStream()=PerformancePolicy.transitionGlass && !PerformancePolicy.economy &&
         SystemClock.uptimeMillis()>=LiveBlurEngine.rapidTransitionsUntil &&
-        PrefsHelper.enabled && PrefsHelper.blurEnabled && PrefsHelper.blurMode==SettingsProvider.BLUR_MODE_LIVE &&
+        PrefsHelper.shortcutGlassEnabled && PrefsHelper.blurMode==SettingsProvider.BLUR_MODE_LIVE &&
         !AppGenieTransition.usesProjectedIcon()
     val recordingMaterial get()=recording.get()!=null
     private val warmed=AtomicBoolean(false)

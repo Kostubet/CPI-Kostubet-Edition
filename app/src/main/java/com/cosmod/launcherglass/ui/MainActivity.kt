@@ -507,6 +507,10 @@ class MainActivity : AppCompatActivity() {
             when(value) { is Boolean -> putBoolean(key, value); is Int -> putInt(key, value) }
             engine?.let { putBoolean(it.first,it.second) }
         }.apply()
+        if (value == false && (key == com.cosmod.launcherglass.camera.CameraZoomSettings.DIAGNOSTICS ||
+                key == SettingsProvider.KEY_ENABLED)) {
+            com.cosmod.launcherglass.camera.CameraZoomSettings.clearRatios(this)
+        }
         if(key!="coloros_ui_effects" && key!="coloros_feature_background")
             contentResolver.notifyChange(SettingsProvider.CONTENT_URI, null)
         updateGates();updateStatus()
@@ -1452,7 +1456,7 @@ class MainActivity : AppCompatActivity() {
         val targetSelector = CouiSlider(this, darkUi, primary, getString(R.string.camera_zoom_preview_target), 54, 24, null) {
             String.format(java.util.Locale.getDefault(), "%.1f×", (it + 6) / 10.0)
         }
-        targetSelector.onTouchFinished = { target = it + 6; updateCurve() }
+        targetSelector.onChange = { target = it + 6; updateCurve() }
         add(preview, targetSelector)
         refreshers.add(::updateCurve)
         updateCurve()
@@ -1468,8 +1472,18 @@ class MainActivity : AppCompatActivity() {
         modeChoice(parameters, R.string.camera_zoom_curve, zoom.CURVE,
             listOf("Linear", "Ease In", "Ease Out", "Ease In Out", "S-Curve", "Spring", "Custom Bézier")) { custom() }
         for ((index, knob) in zoom.controls.withIndex()) {
-            val control = slider(getString(labels[index]), knob.key, knob.range.first, knob.range.last,
-                if (knob.key in setOf(zoom.INERTIA, zoom.RESPONSE)) " ms" else " %")
+            val suffix = when (knob.key) {
+                zoom.INERTIA, zoom.RESPONSE -> " ms"
+                zoom.BRAKING, zoom.ACCELERATION, zoom.JERK, zoom.SMOOTHING -> ""
+                else -> "%"
+            }
+            val control = slider(getString(labels[index]), knob.key, knob.range.first, knob.range.last, suffix,
+                formatter = if (knob.key in setOf(zoom.BRAKING, zoom.ACCELERATION, zoom.SMOOTHING)) {
+                    { value -> String.format(java.util.Locale.getDefault(), "%.1f", value / 10.0) }
+                } else null,
+                onPreview = { draft ->
+                    graph.preview(target / 10.0, zoom.tuning { key -> if (key == knob.key) draft else number(key) })
+                })
             gate(control, if (knob.key == zoom.BEZIER_FIRST || knob.key == zoom.BEZIER_SECOND) bezier else custom)
             add(parameters, control)
         }
@@ -1484,10 +1498,7 @@ class MainActivity : AppCompatActivity() {
         accordionCard(body, R.string.camera_zoom_inputs, controls)
 
         val diagnostics = column()
-        add(diagnostics, switchRow(getString(R.string.camera_zoom_collect), zoom.DIAGNOSTICS, getString(R.string.camera_zoom_collect_hint)))
-        divider(diagnostics)
         val metrics = column()
-        add(diagnostics, metrics)
         val version = runCatching { packageManager.getPackageInfo(zoom.PACKAGE, 0).versionName }.getOrNull()
         fun updateStatusRows() {
             val report = zoom.status(this)
@@ -1506,11 +1517,16 @@ class MainActivity : AppCompatActivity() {
                 add(metrics, informationRow(R.string.camera_zoom_mechanism, it))
             }
             for ((key, label) in listOf("target" to R.string.camera_zoom_target, "applied" to R.string.camera_zoom_applied)) {
-                val ratio = report?.getFloat(key, Float.NaN)
+                val ratio = report?.takeIf { bool(zoom.DIAGNOSTICS) && bool(SettingsProvider.KEY_ENABLED) }
+                    ?.getFloat(key, Float.NaN)
                 if (ratio != null && ratio.isFinite()) add(metrics,
                     informationRow(label, String.format(java.util.Locale.getDefault(), "%.2f×", ratio)))
             }
         }
+        add(diagnostics, switchRow(getString(R.string.camera_zoom_collect), zoom.DIAGNOSTICS,
+            getString(R.string.camera_zoom_collect_hint), afterSave = ::updateStatusRows))
+        divider(diagnostics)
+        add(diagnostics, metrics)
         updateStatusRows()
         add(diagnostics, preferenceLink(getString(R.string.camera_zoom_refresh), getString(R.string.camera_zoom_scope_hint)) {
             updateStatusRows()
@@ -3178,10 +3194,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun switchRow(label: String, key: String, subtitle: String? = null,
-        expanded: Boolean = false, onExpand: ((Boolean) -> Unit)? = null): View {
+        expanded: Boolean = false, afterSave: (() -> Unit)? = null, onExpand: ((Boolean) -> Unit)? = null): View {
         featureKeys.add(key)
         val row = CouiSwitchRow(this, darkUi, primary, label, subtitle, bool(key), expanded, onExpand) {
             save(key, it)
+            afterSave?.invoke()
         }
         refreshers.add { row.checked = bool(key) }
         return row
@@ -3472,10 +3489,13 @@ class MainActivity : AppCompatActivity() {
         val epoch=previewSettingsEpoch
         val needsIcons=screen==Screen.ICONS || screen==Screen.FOLDERS
         val needsPhoto = screen == Screen.PHOTO && previewPhoto == null
+        val needsWallpaper = previewWallpaper == null
         val context = applicationContext
         val packages=prefs.getString("ui_preview_apps","").orEmpty().split('|').filter {it.isNotBlank()}
         previewExecutor.execute {
-            val wallpaper = runCatching {com.cosmod.launcherglass.util.PreviewWallpaper.read(context)}.getOrNull()
+            val wallpaper = if (needsWallpaper) runCatching {
+                com.cosmod.launcherglass.util.PreviewWallpaper.read(context)
+            }.getOrNull() else null
             val icons = if(needsIcons){
                 if(screen==Screen.FOLDERS)runCatching {
                     com.cosmod.launcherglass.util.PreviewIcons.readInstalled(context,packages,limit=9)
@@ -3485,17 +3505,18 @@ class MainActivity : AppCompatActivity() {
             val photo = if (needsPhoto) com.cosmod.launcherglass.util.PreviewPhotoStore.read(context) else null
             runOnUiThread {
                 previewLoading = false
-                if (isDestroyed) return@runOnUiThread
-                if (previewWallpaperId != wallpaperId || glassPreview !== preview || epoch != previewSettingsEpoch) {
+                if (isDestroyed || previewWallpaperId != wallpaperId || glassPreview !== preview || epoch != previewSettingsEpoch) {
                     wallpaper?.recycle()
                     photo?.recycle()
                     previewLastAttempt=0L
-                    glassPreview?.let(::loadPreviewScene)
+                    if (!isDestroyed) glassPreview?.let(::loadPreviewScene)
                     return@runOnUiThread
                 }
-                if (wallpaper != null) previewWallpaper = wallpaper
+                if (previewWallpaper == null) previewWallpaper = wallpaper else wallpaper?.recycle()
                 if(icons!=null)previewIcons = icons
-                if (previewPhoto == null && photo != null) setPreviewPhoto(photo)
+                if (photo != null) {
+                    if (previewPhoto == null) setPreviewPhoto(photo) else photo.recycle()
+                }
                 preview.setScene(previewWallpaper, previewIcons)
                 previewStatusRefresh?.invoke()
                 previewWidgetRefresh?.invoke()
@@ -3616,7 +3637,7 @@ class MainActivity : AppCompatActivity() {
                     read(key(SettingsProvider.KEY_BLUR_RADIUS)),
                     if(tone)read(key(SettingsProvider.KEY_BG_OPACITY))else 0,
                     read(key(SettingsProvider.KEY_LIQUID_WIDTH)),read(key(SettingsProvider.KEY_LIQUID_DISTORTION)),
-                    read(if(folders)GlassDispersionSettings.FOLDERS else GlassDispersionSettings.ICONS),28,
+                    read(if(own)GlassDispersionSettings.FOLDERS else GlassDispersionSettings.ICONS),28,
                     if(tone)read(key(SettingsProvider.KEY_BLUR_SATURATION))else 100,
                     if(tone)read(key(SettingsProvider.KEY_BLUR_VIBRANCY))else 0,
                     if(tone)read(key(SettingsProvider.KEY_BLUR_LIGHTENING))else 50,
@@ -3729,7 +3750,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun slider(label:String,key:String,min:Int,max:Int,suffix:String,hint:String?=null,
-        formatter:((Int)->String)?=null,inverseOpacity:Boolean=false):View {
+        formatter:((Int)->String)?=null,inverseOpacity:Boolean=false,onPreview:((Int)->Unit)?=null):View {
         featureKeys.add(key)
         val inverse=key==SettingsProvider.KEY_PHOTO_WIDGET_OPACITY || key=="banner_plate_opacity"
         fun reverse(value:Int)=when {
@@ -3765,6 +3786,7 @@ class MainActivity : AppCompatActivity() {
             updateGlassPreview()
         }
         control.onChange={progress->
+            onPreview?.invoke(stored(progress+min))
             if(glassPreview!=null || shadePreview!=null){
                 previewDraft[key]=stored(progress+min)
                 updateGlassPreview()

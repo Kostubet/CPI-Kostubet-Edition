@@ -115,7 +115,7 @@ internal object FolderMaterialHook {
     fun invalidateGeometry(){geometryRevision++;nativeShapes.evictAll()}
     private fun enabled()=PrefsHelper.enabled && PrefsHelper.blurEnabled && PrefsHelper.folderBlurEnabled
     private fun shortcut(view:View?)=view?.javaClass?.name=="com.android.launcher3.viewcontainer.ShortcutContainer"
-    private fun enabled(view:View?)=PrefsHelper.enabled && PrefsHelper.blurEnabled && (shortcut(view) || PrefsHelper.folderBlurEnabled)
+    private fun enabled(view:View?)=if(shortcut(view))PrefsHelper.shortcutGlassEnabled else enabled()
     private fun style(view:View,large:Boolean=false)=if(shortcut(view))GlassStyle.icons().copy(extendedLens=true)
         else FolderSettings.style(view.context,large)
     private fun field(owner:Any,name:String):Any?=try {XposedHelpers.getObjectField(owner,name)}catch(_:Throwable){null}

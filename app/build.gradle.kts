@@ -11,7 +11,7 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 411
+        versionCode = 412
         versionName = "0.3.0"
     }
 
@@ -87,7 +87,8 @@ val generateFeatureSearch by tasks.registering(GenerateFeatureSearch::class) {
         val roots=Regex("(?m)^\\s*Screen\\.(\\w+)\\s*->\\s*(\\w+)\\(body(?:,\\s*\\w+)*\\)")
             .findAll(featureRouting).associate {it.groupValues[1] to it.groupValues[2]}
         val labels=Regex("(?<!android\\.)R\\.string\\.(\\w+)")
-        val blocked=setOf("showPage","openScreen","openTab","backToCatalog","refreshCatalogStyle","save","refreshControls","updateStatus")
+        val blocked=setOf("showPage","openScreen","openTab","backToCatalog","refreshCatalogStyle","save",
+            "refreshControls","updateStatus","updateGlassPreview","informationRow")
         val auxiliary=sources.files.filter {it.name!="MainActivity.kt" && it.name!="FeatureSearch.kt"}.associate {it.nameWithoutExtension to it.readText()}
         val index=roots.mapValues {(_,root)->
             val result=sortedSetOf<String>();val seen=hashSetOf<String>()

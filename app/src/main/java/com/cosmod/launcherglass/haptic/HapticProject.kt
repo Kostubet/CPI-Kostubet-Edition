@@ -74,6 +74,8 @@ internal data class HapticPattern(
         return point.copy(ms = ms, amplitude = (point.amplitude * intensity * .01f * attack * release).coerceIn(0f, 1f))
     }
 
+    fun sourceTimeAt(playbackTime: Int): Int = (playbackTime - offset).coerceIn(0, length)
+
     fun sourcePoint(sourceTime: Int): HapticPoint {
         if (sourceTime !in 0..length) return HapticPoint(sourceTime.coerceIn(0, length), 0f)
         val index = points.binarySearchBy(sourceTime) { it.ms }
@@ -112,7 +114,7 @@ internal data class HapticPattern(
     }
 
     fun insertEffect(at: Int, effect: HapticPattern): HapticPattern? {
-        val start = (at - offset).coerceIn(0, length)
+        val start = sourceTimeAt(at)
         val end = start + effect.length
         if (end > MAX_TRACK_MS) return null
         val updated = buildList {
@@ -128,23 +130,23 @@ internal data class HapticPattern(
     fun paintStroke(channel: HapticChannel, stroke: List<Pair<Int, Float>>): HapticPattern {
         if (stroke.isEmpty()) return this
         val samples = java.util.TreeMap<Int, Float>()
-        for ((time, value) in stroke) samples[(time - offset).coerceIn(0, length)] = value
+        for ((time, value) in stroke) samples[sourceTimeAt(time)] = value
         val first = samples.firstKey()
         val last = samples.lastKey()
         val updated = buildList {
             addAll(points.takeWhile { it.ms < first })
             val original = points.filter { it.ms in first..last }
-            val keys = if (channel == HapticChannel.AMPLITUDE) samples.keys
-                else (samples.keys + original.map { it.ms }).toSortedSet()
+            val keys = java.util.TreeSet(samples.keys)
+            for (point in original) keys.add(point.ms)
             for (time in keys) {
                 val value = samples[time] ?: run {
-                    val left = samples.floorEntry(time)
-                    val right = samples.ceilingEntry(time)
+                    val left = checkNotNull(samples.floorEntry(time))
+                    val right = checkNotNull(samples.ceilingEntry(time))
                     lerp(left.value, right.value, (time - left.key).toFloat() / (right.key - left.key))
                 }
                 val point = sourcePoint(time)
                 add(when (channel) {
-                    HapticChannel.AMPLITUDE -> point.copy(amplitude = value, curve = HapticCurve.LINEAR)
+                    HapticChannel.AMPLITUDE -> point.copy(amplitude = value)
                     HapticChannel.FREQUENCY -> point.copy(hz = value)
                     HapticChannel.RICHTAP -> point.copy(pitch = value)
                     HapticChannel.SHARPNESS -> point.copy(sharpness = value)

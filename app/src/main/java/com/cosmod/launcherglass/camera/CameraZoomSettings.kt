@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings.Global
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.ui.SettingsDefaults
 import com.cosmod.launcherglass.ui.SettingsProvider
@@ -71,25 +72,43 @@ internal object CameraZoomSettings {
     }
 
     private fun reportPrefs(context: Context) = context.getSharedPreferences("camera_zoom_runtime", Context.MODE_PRIVATE)
+    private fun boot(context: Context) = runCatching {
+        Global.getInt(context.contentResolver, "boot_count", -1)
+    }.getOrDefault(-1)
 
-    fun storeStatus(context: Context, extras: Bundle?) {
+    @Synchronized fun storeStatus(context: Context, prefs: SharedPreferences, extras: Bundle?) {
         if (extras == null || extras.getInt("build") != BuildConfig.VERSION_CODE) return
         val state = extras.getString("state") ?: return
         if (state !in setOf(STATE_READY, STATE_OBSERVING, STATE_UNSUPPORTED, STATE_ACTIVE, STATE_ERROR)) return
         reportPrefs(context).edit().apply {
             putString("state", state)
             putLong("time", SystemClock.elapsedRealtime())
+            putInt("boot", boot(context))
+            putLong("bootEpoch", System.currentTimeMillis() - SystemClock.elapsedRealtime())
             putInt("build", BuildConfig.VERSION_CODE)
             putString("mechanism", extras.getString("mechanism")?.take(80).orEmpty())
+            val collectRatios = prefs.getBoolean(DIAGNOSTICS, false) &&
+                prefs.getBoolean(SettingsProvider.KEY_ENABLED, SettingsDefaults.boolean(SettingsProvider.KEY_ENABLED))
             for (key in listOf("target", "applied")) {
-                val ratio = extras.getFloat(key, Float.NaN)
-                putFloat(key, ratio.takeIf { it.isFinite() && it > 0f && it <= 200f } ?: Float.NaN)
+                val ratio = if (collectRatios) extras.getFloat(key, Float.NaN) else Float.NaN
+                if (ratio.isFinite() && ratio > 0f && ratio <= 200f) putFloat(key, ratio) else remove(key)
             }
         }.apply()
     }
 
+    @Synchronized fun clearRatios(context: Context) {
+        reportPrefs(context).edit().remove("target").remove("applied").apply()
+    }
+
     fun status(context: Context): SharedPreferences? = reportPrefs(context).takeIf {
-        val elapsed = SystemClock.elapsedRealtime() - it.getLong("time", -1)
-        it.getInt("build", 0) == BuildConfig.VERSION_CODE && elapsed in 0..90_000
+        val uptime = SystemClock.elapsedRealtime()
+        val elapsed = uptime - it.getLong("time", -1)
+        val currentBoot = boot(context)
+        val knownBoot = it.getInt("boot", -1)
+        val sameBoot = if (currentBoot >= 0 && knownBoot >= 0) knownBoot == currentBoot else {
+            val epoch = it.getLong("bootEpoch", 0L)
+            kotlin.math.abs(epoch - (System.currentTimeMillis() - uptime)) <= 1000L
+        }
+        it.getInt("build", 0) == BuildConfig.VERSION_CODE && sameBoot && elapsed in 0..90_000
     }
 }

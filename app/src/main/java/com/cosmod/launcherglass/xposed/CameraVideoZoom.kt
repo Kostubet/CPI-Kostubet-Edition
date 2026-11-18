@@ -11,6 +11,7 @@ import android.os.Looper
 import android.os.SystemClock
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.camera.CameraZoomSettings as Settings
+import com.cosmod.launcherglass.camera.ZoomFrameWatchdog
 import com.cosmod.launcherglass.camera.ZoomSmoothing
 import com.cosmod.launcherglass.camera.ZoomTuning
 import com.cosmod.launcherglass.ui.SettingsProvider
@@ -24,6 +25,7 @@ import java.util.zip.ZipFile
 import kotlin.math.abs
 
 internal object CameraVideoZoom {
+    private const val VENDOR_PATH = "Oplus ZoomPresenter · vendor and capture request"
     private enum class Input(val key: String, val gesture: Boolean) {
         PINCH(Settings.PINCH, true), SLIDER(Settings.SLIDER, true), STEPS(Settings.STEPS, false)
     }
@@ -67,8 +69,11 @@ internal object CameraVideoZoom {
             val engine: ZoomSmoothing,
             val region: Int,
             var lastCommand: Float,
+            var stockTarget: Float,
+            var stockFinal: Float,
             val lower: Float,
             val upper: Float,
+            val watchdog: ZoomFrameWatchdog,
         )
 
         private val main = Handler(Looper.getMainLooper())
@@ -76,12 +81,13 @@ internal object CameraVideoZoom {
         private val frameQueued = AtomicBoolean(false)
         @Volatile private var config = Config()
         @Volatile private var move: Move? = null
-        @Volatile private var reportedRatio = Float.NaN
+        @Volatile private var stalledPresenter: WeakReference<Any>? = null
+        private var reportedRatio = Float.NaN
         private var state = Settings.STATE_READY
-        private var mechanism = "Oplus ZoomPresenter · vendor and capture request"
+        private var mechanism = VENDOR_PATH
         @Volatile private var lastStatus = Long.MIN_VALUE / 2
-        private var recentFrame = Long.MIN_VALUE / 2
         private var stockTarget = Float.NaN
+        private var stalledAt = 0L
         @Volatile private var failed = false
         private lateinit var submit: Method
         private lateinit var dispatch: Method
@@ -94,10 +100,16 @@ internal object CameraVideoZoom {
         private lateinit var recordMin: java.lang.reflect.Field
         private lateinit var recordMax: java.lang.reflect.Field
 
-        private val timeout = Runnable {
-            if (move != null && SystemClock.uptimeMillis() - recentFrame >= 280L) {
-                finishWithStockTarget()
-                status(Settings.STATE_READY, "Camera frames paused · stock target restored")
+        private val timeout = object : Runnable {
+            override fun run() {
+                val active = move ?: return
+                val now = SystemClock.uptimeMillis()
+                val remaining = active.watchdog.remaining(now)
+                if (remaining > 0) main.postDelayed(this, remaining)
+                else {
+                    active.presenter.get()?.let { waitForPreview(it, now) }
+                    finishWithStockTarget("Camera frames paused · stock zoom")
+                }
             }
         }
 
@@ -112,7 +124,11 @@ internal object CameraVideoZoom {
                 val previous = config
                 config = next
                 if (previous.enabled && (!next.enabled || previous.inputs != next.inputs)) finishWithStockTarget()
-                if (previous.diagnostics != next.diagnostics) status(state, mechanism)
+                if (previous.diagnostics != next.diagnostics) {
+                    stockTarget = Float.NaN
+                    reportedRatio = Float.NaN
+                    status(state, mechanism, force = true)
+                }
             }
             reload()
             runCatching {
@@ -133,7 +149,8 @@ internal object CameraVideoZoom {
             submit = presenter.getDeclaredMethod("k3", float, float, bool)
             dispatch = presenter.getDeclaredMethod("V3", float, bool)
             checks = listOf("isVideoRecording", "isPreviewStarted", "isAlive",
-                "isPaused", "isFrontCamera", "isVideoRecordStarting", "isVideoRecordStopping", "isSwitchingCamera")
+                "isPaused", "isFrontCamera", "isVideoRecordStarting", "isVideoRecordStopping",
+                "isVideoRecordSwitching", "isSwitchingCamera")
                 .map { presenter.getMethod(it) }
             boundaries = listOf("w2", "X3", "Y3", "a4", "Z3").map { presenter.getDeclaredMethod(it, float) }
             sat = presenter.getMethod("getSupportFunction", String::class.java)
@@ -158,8 +175,9 @@ internal object CameraVideoZoom {
             )
             val frameCallback = presenter.getDeclaredMethod("processPreviewData", frame)
             val pausing = presenter.getDeclaredMethod("onPause", bool)
-            val session = presenter.getDeclaredMethod("onSessionCallback",
-                type("com.oplus.camera.protocal.event.message.deviceProtocol.deviceControlCallback.EventMessageSessionState"))
+            val sessionState = type("com.oplus.camera.protocal.event.message.deviceProtocol.deviceControlCallback.EventMessageSessionState")
+            val session = presenter.getDeclaredMethod("onSessionCallback", sessionState)
+            val sessionStage = sessionState.getDeclaredField("b").apply { isAccessible = true }
             val hooks = mutableListOf<XC_MethodHook.Unhook>()
             fun hook(member: Member, callback: XC_MethodHook) { hooks += XposedBridge.hookMethod(member, callback) }
             try {
@@ -182,31 +200,46 @@ internal object CameraVideoZoom {
                 hook(frameCallback, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val now = SystemClock.uptimeMillis()
-                        if (failed || move == null && (!config.diagnostics || now - lastStatus < 500)) return
+                        val movement = move
+                        val host = param.thisObject
+                        val waiting = stalledPresenter?.get() === host
+                        if (failed || movement == null && !waiting && (!config.diagnostics || now - lastStatus < 500)) return
                         val data = param.args[0] ?: return
                         if (runCatching { stage.getInt(data) }.getOrNull() != 1) return
                         if (!frameQueued.compareAndSet(false, true)) return
-                        val host = param.thisObject
-                        if (config.diagnostics && now - lastStatus >= 350) {
-                            reportedRatio = runCatching {
+                        val applied = if (config.diagnostics && now - lastStatus >= 350) {
+                            runCatching {
                                 resultGet.invoke(null, CaptureResult.CONTROL_ZOOM_RATIO, getResult.invoke(data)) as? Float
                             }.getOrNull() ?: Float.NaN
-                        }
+                        } else Float.NaN
                         main.post {
                             frameQueued.set(false)
+                            if (stalledPresenter?.get() === host && now >= stalledAt) stalledPresenter = null
+                            if (movement !== move || failed) return@post
+                            if (config.diagnostics && applied.isFinite()) reportedRatio = applied
                             runCatching { onFrame(host, now) }.onFailure { disable() }
                         }
                     }
                 })
-                val cancel = object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        val host = param.thisObject
-                        val work = Runnable { if (move?.presenter?.get() === host) clear() }
-                        if (Looper.myLooper() == Looper.getMainLooper()) work.run() else main.post(work)
+                fun cancel(host: Any) {
+                    val movement = move?.takeIf { it.presenter.get() === host } ?: return
+                    val work = Runnable {
+                        if (move === movement) {
+                            clear()
+                            status(Settings.STATE_READY)
+                        }
                     }
+                    if (Looper.myLooper() == Looper.getMainLooper()) work.run() else main.post(work)
                 }
-                hook(pausing, cancel)
-                hook(session, cancel)
+                hook(pausing, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) = cancel(param.thisObject)
+                })
+                hook(session, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val stage = runCatching { sessionStage.getInt(param.args[0]) }.getOrNull()
+                        if (stage == 1 || stage == 5) cancel(param.thisObject)
+                    }
+                })
             } catch (failure: Throwable) {
                 hooks.forEach { runCatching { it.unhook() } }
                 throw failure
@@ -219,40 +252,60 @@ internal object CameraVideoZoom {
             val settings = config
             val source = input.get()
             val target = param.args[0] as Float
-            if (settings.diagnostics && target.isFinite() && source != null && allowed(host)) {
+            val running = move?.takeIf { it.presenter.get() === host }
+            val intercept = settings.enabled && source in settings.inputs && stalledPresenter?.get() !== host
+            val eligible = param.args[2] == true && source != null && (intercept || settings.diagnostics) && allowed(host)
+            if (settings.diagnostics && target.isFinite() && eligible) {
                 stockTarget = target
-                if (move == null && SystemClock.uptimeMillis() - lastStatus >= 350) status(Settings.STATE_OBSERVING)
+                if (running == null && SystemClock.uptimeMillis() - lastStatus >= 350) status(Settings.STATE_OBSERVING)
             }
-            if (!settings.enabled || source !in settings.inputs || param.args[2] != true || !allowed(host)) {
-                if (move?.presenter?.get() === host && param.args[2] == true) clear()
+            if (!intercept || !eligible) {
+                if (running != null && param.args[2] == true) {
+                    clear()
+                    status(Settings.STATE_READY)
+                }
                 return
             }
-            val running = move?.takeIf { it.presenter.get() === host }
             val current = running?.lastCommand ?: currentRatio.getFloat(zoomState.get(host))
+            val final = param.args[1] as Float
             val controls = zoomUi.get(host) ?: return
             val min = recordMin.getFloat(controls)
             val max = recordMax.getFloat(controls)
-            if (!current.isFinite() || !target.isFinite() || min <= 0f || max < min ||
+            if (!current.isFinite() || !target.isFinite() || !final.isFinite() ||
+                !min.isFinite() || !max.isFinite() || min <= 0f || max < min ||
                 current !in min..max || target !in min..max || abs(target - current) < .001f) {
-                clear()
+                if (running != null) {
+                    clear()
+                    status(Settings.STATE_READY)
+                }
                 return
             }
             val region = region(host, current)
             if (region(host, target) != region || region == 0 && sat.invoke(host, "func_sat_camera") == true) {
                 clear()
-                if (settings.diagnostics) status(Settings.STATE_OBSERVING, "Lens boundary · stock zoom")
+                status(if (settings.diagnostics) Settings.STATE_OBSERVING else Settings.STATE_READY, "Lens boundary · stock zoom")
                 return
             }
             val now = SystemClock.uptimeMillis()
-            val active = running ?: Move(WeakReference(host), ZoomSmoothing(current.toDouble()), region, current, min, max)
-            active.engine.aim(target.toDouble(), now / 1000.0, source?.gesture == true)
+            if (running != null && running.watchdog.remaining(now) == 0L) {
+                waitForPreview(host, now)
+                clear()
+                status(Settings.STATE_READY, "Camera frames paused · stock zoom")
+                return
+            }
+            val active = running ?: Move(WeakReference(host), ZoomSmoothing(current.toDouble()), region,
+                current, target, final, min, max, ZoomFrameWatchdog(now))
+            active.engine.aim(target.toDouble(), now / 1000.0, source.gesture)
+            active.stockTarget = target
+            active.stockFinal = final
             move = active
-            stockTarget = target
-            if (running == null) recentFrame = now
-            main.removeCallbacks(timeout)
-            main.postDelayed(timeout, 300)
-            // Preserve the original UI and listener path. Future ratios use the same camera submitter.
+            if (running == null) {
+                main.removeCallbacks(timeout)
+                main.postDelayed(timeout, ZoomFrameWatchdog.TIMEOUT_MS)
+            }
+            // Keep the stock UI and listeners; the preview callback alone submits the intermediate ratios.
             param.args[0] = current
+            param.args[2] = false
             if (state != Settings.STATE_ACTIVE) status(Settings.STATE_ACTIVE)
         }
 
@@ -262,12 +315,14 @@ internal object CameraVideoZoom {
                 if (config.diagnostics && time - lastStatus >= 500 && allowed(host)) status(Settings.STATE_OBSERVING)
                 return
             }
-            if (!allowed(host)) { clear(); return }
+            if (!allowed(host)) {
+                clear()
+                status(Settings.STATE_READY)
+                return
+            }
             if (!config.enabled) { finishWithStockTarget(); return }
             val movement = requireNotNull(active)
-            recentFrame = time
-            main.removeCallbacks(timeout)
-            main.postDelayed(timeout, 300)
+            if (!movement.watchdog.acceptFrame(time)) return
             val next = movement.engine.step(time / 1000.0, config.tuning).toFloat().coerceIn(movement.lower, movement.upper)
             if (region(host, next) != movement.region) {
                 finishWithStockTarget()
@@ -287,11 +342,24 @@ internal object CameraVideoZoom {
         private fun region(host: Any, value: Float): Int = boundaries.withIndex().fold(0) { mask, (index, method) ->
             if (method.invoke(host, value) == true) mask or (1 shl index) else mask
         }
+        private fun waitForPreview(host: Any, now: Long) {
+            stalledAt = now
+            stalledPresenter = WeakReference(host)
+        }
         private fun clear() { move = null; main.removeCallbacks(timeout) }
-        private fun finishWithStockTarget() {
-            val host = move?.presenter?.get()
+        private fun finishWithStockTarget(path: String = VENDOR_PATH) {
+            val active = move ?: return
+            val host = active.presenter.get()
             clear()
-            runCatching { if (host != null && stockTarget.isFinite() && allowed(host)) dispatch.invoke(host, stockTarget, true) }
+            runCatching {
+                if (host != null && allowed(host)) {
+                    val previous = input.get()
+                    input.remove()
+                    try { submit.invoke(host, active.stockTarget, active.stockFinal, true) }
+                    finally { input.set(previous) }
+                }
+            }
+                .onSuccess { status(Settings.STATE_READY, path) }
                 .onFailure { disable() }
         }
         private fun disable() {
@@ -299,10 +367,12 @@ internal object CameraVideoZoom {
             clear()
             status(Settings.STATE_ERROR, "Zoom contract failed · stock zoom")
         }
-        fun status(value: String, path: String = "Oplus ZoomPresenter · vendor and capture request") {
+        fun status(value: String, path: String = VENDOR_PATH, force: Boolean = false) {
+            val now = SystemClock.uptimeMillis()
+            if (!force && value == state && path == mechanism && now - lastStatus < 350) return
             state = value
             mechanism = path
-            lastStatus = SystemClock.uptimeMillis()
+            lastStatus = now
             val details = Bundle().apply {
                 putInt("build", BuildConfig.VERSION_CODE)
                 putString("state", value)

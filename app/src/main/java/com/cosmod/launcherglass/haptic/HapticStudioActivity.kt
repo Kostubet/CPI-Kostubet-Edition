@@ -710,7 +710,8 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun addGraph(box: LinearLayout, project: HapticPattern, editable: Boolean) {
-        val timeline = HapticTimeline(this, ink, accent, ::drawStroke, if (editable) ::seek else ::seekLab).apply {
+        val timeline = HapticTimeline(this, ink, accent, ::drawStroke, if (editable) ::seek else ::seekLab,
+            ::cancelStroke).apply {
             pattern = project
             source = if (editable && project.audio == audio?.toString()) waveform else null
             channel = if (editable) this@HapticStudioActivity.channel else HapticChannel.AMPLITUDE
@@ -832,11 +833,9 @@ class HapticStudioActivity : AppCompatActivity() {
         }
     }
 
-    private fun rawPoint(time: Int): HapticPoint = pattern.points.firstOrNull { it.ms == time }
-        ?: HapticPoint(time, 0f)
     private fun selectedPoint() = pattern.points.firstOrNull { it.ms == selected }
     private fun editPoint(ms: Int, change: (HapticPoint) -> HapticPoint) {
-        changePattern(pattern.replace(change(rawPoint(ms))))
+        changePattern(pattern.replace(change(pattern.sourcePoint(ms))))
     }
 
     private fun drawStroke(samples: List<Pair<Int, Float>>, finished: Boolean) {
@@ -847,7 +846,7 @@ class HapticStudioActivity : AppCompatActivity() {
         val ms = samples.last().first
         pattern = requireNotNull(dragBefore).paintStroke(channel, samples)
         graph?.pattern = pattern
-        selected = (ms - pattern.offset).coerceIn(0, pattern.length)
+        selected = pattern.sourceTimeAt(ms)
         graph?.selected = selected
         cursor = ms
         graph?.cursor = ms
@@ -857,6 +856,18 @@ class HapticStudioActivity : AppCompatActivity() {
             dragBefore = null
             refreshPointControls()
         }
+    }
+
+    private fun cancelStroke() {
+        val original = dragBefore ?: return
+        dragBefore = null
+        pattern = original
+        selected = null
+        graph?.apply {
+            pattern = original
+            selected = null
+        }
+        refreshPointControls()
     }
 
     private fun seek(ms: Int) {
@@ -880,9 +891,10 @@ class HapticStudioActivity : AppCompatActivity() {
             point?.let { "${clock(it.ms)} · ${(it.amplitude * 100).roundToInt()}%" }
                 ?: t("Tap the timeline to set the position.", "Коснись шкалы, чтобы выбрать время.")))
         buttons(box, t("Add point", "Добавить точку"), t("Delete", "Удалить"), {
-            changePattern(pattern.replace(rawPoint(cursor)))
-            selected = cursor
-            graph?.selected = cursor
+            val time = pattern.sourceTimeAt(cursor)
+            changePattern(pattern.replace(pattern.sourcePoint(time)))
+            selected = time
+            graph?.selected = time
             refreshPointControls()
         }, { point?.let {
             if (it.ms in 1 until pattern.length) {

@@ -19,9 +19,14 @@ internal class HapticTimeline(
     private val accent: Int,
     private val change: (stroke: List<Pair<Int, Float>>, finished: Boolean) -> Unit,
     private val seek: (Int) -> Unit,
+    private val cancelChange: () -> Unit,
 ) : View(context) {
     var pattern: HapticPattern? = null
-        set(value) { field = value; curvesChanged() }
+        set(value) {
+            field = value
+            leftMs = clampLeft(leftMs)
+            curvesChanged()
+        }
     var source: HapticAnalysis.Track? = null
         set(value) { field = value; curvesChanged() }
     var channel = HapticChannel.AMPLITUDE
@@ -205,7 +210,8 @@ internal class HapticTimeline(
                 parent.requestDisallowInterceptTouchEvent(false)
             }
             MotionEvent.ACTION_CANCEL -> {
-                finishStroke()
+                if (drawing) cancelChange()
+                clearStroke()
                 parent.requestDisallowInterceptTouchEvent(false)
             }
         }
@@ -255,6 +261,10 @@ internal class HapticTimeline(
 
     private fun finishStroke() {
         if (drawing) publishStroke(true)
+        clearStroke()
+    }
+
+    private fun clearStroke() {
         drawing = false
         stroke.clear()
         previousSample = null

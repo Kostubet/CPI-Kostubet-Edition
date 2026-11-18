@@ -5,29 +5,30 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.view.View
-import com.cosmod.launcherglass.camera.ZoomSmoothing
+import com.cosmod.launcherglass.camera.ZoomTrajectory
 import com.cosmod.launcherglass.camera.ZoomTuning
-import kotlin.math.ln
 
 internal class CameraZoomCurveView(context: Context, private val ink: Int, private val accent: Int) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
-    private var curve = FloatArray(0)
-
-    fun preview(target: Double, tuning: ZoomTuning) {
-        val engine = ZoomSmoothing(1.0)
-        engine.aim(target, 0.0, gesture = true)
-        val range = maxOf(1.0, target)
-        val lower = minOf(1.0, target)
-        curve = FloatArray(241) {
-            val sample = engine.step(it / 60.0, tuning).coerceIn(lower, range)
-            ((ln(sample) - ln(lower)) / (ln(range) - ln(lower)).coerceAtLeast(.001)).toFloat()
-        }
+    private var curve: ZoomTrajectory? = null
+    private var pendingTarget = Double.NaN
+    private var pendingTuning: ZoomTuning? = null
+    private val refresh = Runnable {
+        pendingTuning?.let { curve = ZoomTrajectory(pendingTarget, it) }
         invalidate()
     }
 
+    fun preview(target: Double, tuning: ZoomTuning) {
+        if (target == pendingTarget && tuning == pendingTuning) return
+        pendingTarget = target
+        pendingTuning = tuning
+        removeCallbacks(refresh)
+        postOnAnimation(refresh)
+    }
+
     override fun onDraw(canvas: Canvas) {
-        if (curve.isEmpty()) return
+        val trajectory = curve ?: return
         val density = resources.displayMetrics.density
         val labelSpace = 18f * density
         val plotHeight = (height - labelSpace - paddingTop - paddingBottom).coerceAtLeast(1f)
@@ -40,9 +41,11 @@ internal class CameraZoomCurveView(context: Context, private val ink: Int, priva
             canvas.drawLine(paddingLeft.toFloat(), y, paddingLeft + plotWidth.toFloat(), y, paint)
         }
         path.rewind()
-        curve.forEachIndexed { index, value ->
-            val x = paddingLeft + index.toFloat() / curve.lastIndex * plotWidth
-            val y = paddingTop + (1 - value) * plotHeight
+        val plotSamples = plotWidth.coerceIn(2, 600)
+        for (index in 0..plotSamples) {
+            val fraction = index.toFloat() / plotSamples
+            val x = paddingLeft + fraction * plotWidth
+            val y = paddingTop + (1 - trajectory.sampleAt(fraction)) * plotHeight
             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         paint.style = Paint.Style.STROKE
@@ -54,9 +57,9 @@ internal class CameraZoomCurveView(context: Context, private val ink: Int, priva
         paint.color = ink
         paint.alpha = 155
         paint.textSize = 11f * density
-        for (second in 0..4) {
-            val label = "${second}s"
-            val x = paddingLeft + second * (plotWidth - paint.measureText(label)) / 4
+        for (tick in 0..4) {
+            val label = "${tick * trajectory.durationSeconds / 4}s"
+            val x = paddingLeft + tick * (plotWidth - paint.measureText(label)) / 4
             canvas.drawText(label, x, paddingTop + plotHeight + 14f * density, paint)
         }
     }

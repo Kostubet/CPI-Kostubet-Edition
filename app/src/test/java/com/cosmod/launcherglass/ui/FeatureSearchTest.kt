@@ -45,6 +45,14 @@ class FeatureSearchTest {
         assertTrue(R.string.lock_glass_clock in FeatureSearch.labels("LOCKSCREEN"))
         assertTrue(R.string.lock_glass_widgets in FeatureSearch.labels("LOCKSCREEN"))
     }
+
+    @Test fun unrelatedSectionsDoNotMatchLockscreenSettingsThroughPreviewRefresh() {
+        val lockscreenLabels = setOf(R.string.lock_glass_clock, R.string.lock_glass_widgets, R.string.lock_glass_capsule)
+        for (section in (FeatureSections.sections - "LOCKSCREEN") + "CAMERA_ZOOM") {
+            assertTrue(section, FeatureSearch.labels(section).none { it in lockscreenLabels })
+        }
+        assertFalse(R.string.ui_device_unknown in FeatureSearch.labels("CAMERA_ZOOM"))
+    }
     @Test fun shadeSearchIndexesBothPanelsAndMaterialOptions(){
         val labels=FeatureSearch.labels("SHADE")
         assertTrue(R.string.shade_glass_control in labels)

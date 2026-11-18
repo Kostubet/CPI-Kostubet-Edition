@@ -76,6 +76,28 @@ object GlassEngineSettings {
 
     fun optics(bundle:Bundle,scope:String)=read(scope,bundle::getInt)
 
+    internal fun legacyIconMaterial(values: Map<String, Any?>): Map<String, Any> {
+        val style = values[SettingsProvider.KEY_BLUR_STYLE]
+        if (style != 3 && style != 3L) return emptyMap()
+        return buildMap {
+            // Older CherryPick files encoded the Kyant engine as a material ID.
+            put(SettingsProvider.KEY_BLUR_STYLE, SettingsProvider.BLUR_STYLE_LIQUID)
+            put(ICONS, true)
+            for ((oldKey, parameter) in listOf(
+                "kyant_distortion" to Parameter.POWER,
+                "kyant_width" to Parameter.EDGE_WIDTH,
+                "kyant_highlight" to Parameter.EDGE_LIGHT,
+            )) {
+                val key = key(ICONS, parameter)
+                if (key in values) continue
+                val old = values[oldKey]
+                if (old is Int || old is Long) {
+                    put(key, (old as Number).toLong().coerceIn(0, parameter.max.toLong()).toInt())
+                }
+            }
+        }
+    }
+
     /** Keep the effective radius of configurations saved before the single blur slider. */
     internal fun legacyRadii(values:Map<String,Any?>):Map<String,Int> = buildMap {
         fun migrate(scope:String, radiusKey:String, max:Int, switchKey:String?=null) {

@@ -7,6 +7,69 @@ import kotlin.math.abs
 import kotlin.math.ln
 
 class ZoomSmoothingTest {
+    @Test fun previewShowsTheEntireTransitionWhenTheConfiguredZoomIsSlow() {
+        val curve = ZoomTrajectory(6.0, ZoomTuning(speedIn = .15, maxSpeed = .15, curve = ZoomCurve.EASE_OUT))
+        assertTrue(curve.durationSeconds > 4)
+        assertEquals(0f, curve.sampleAt(0f), .001f)
+        assertEquals(1f, curve.sampleAt(1f), .001f)
+        assertTrue(curve.sampleAt(.2f) < .75f)
+        assertEquals(.5f, ZoomTrajectory(1.0, ZoomTuning()).sampleAt(.5f), .001f)
+    }
+
+    @Test fun manualSpeedLimitHoldsDuringAccelerationAndBraking() {
+        val tuning = ZoomTuning(speedIn = 3.5, speedOut = 3.5, maxSpeed = .15, smoothing = 16.0,
+            acceleration = 16.0, braking = 18.0, jerk = 2.0, inertia = .02, response = .005)
+        val zoom = ZoomSmoothing(1.0)
+        zoom.aim(3.0, 0.0, false)
+        var previous = 1.0
+        for (frame in 1..(60 * 30)) {
+            val next = zoom.step(frame / 60.0, tuning)
+            assertTrue("limit exceeded at frame $frame", ln(next / previous) <= .15 / 60.0 + .000001)
+            previous = next
+        }
+        assertEquals(3.0, zoom.ratio, .000001)
+    }
+
+    @Test fun abruptCustomSettingsStillReachBothEndpointsWithoutASnap() {
+        val tunings = listOf(
+            ZoomTuning(speedIn = 3.5, speedOut = 3.5, maxSpeed = 4.0, acceleration = 16.0,
+                braking = .5, jerk = 2.0, smoothing = 16.0, inertia = .02, response = .005),
+            ZoomTuning(speedIn = 3.5, speedOut = 3.5, maxSpeed = 4.0, acceleration = 16.0,
+                braking = 18.0, jerk = 2.0, smoothing = 1.0, inertia = .02, response = .005),
+        )
+        for (tuning in tunings) for ((start, target) in listOf(1.0 to 6.0, 6.0 to 1.0)) for (fps in listOf(24, 60, 120)) {
+            val zoom = ZoomSmoothing(start)
+            val direction = if (target > start) 1 else -1
+            zoom.aim(target, 0.0, false)
+            var previous = start
+            for (frame in 1..(fps * 30)) {
+                val ratio = zoom.step(frame.toDouble() / fps, tuning)
+                val step = ln(ratio / previous) * direction
+                assertTrue("zoom reversed at frame $frame", step >= -1e-9)
+                if (!zoom.active) {
+                    assertTrue("zoom snapped to its target at frame $frame", step < .002)
+                    break
+                }
+                previous = ratio
+            }
+            assertEquals(target, zoom.ratio, .000001)
+        }
+    }
+
+    @Test fun retargetingToCurrentZoomClearsOldMomentumAndRejectsInvalidTime() {
+        val tuning = ZoomTuning()
+        val zoom = ZoomSmoothing(1.0)
+        zoom.aim(5.0, Double.NaN, false)
+        assertTrue(!zoom.active)
+        zoom.aim(5.0, 0.0, true)
+        for (i in 1..30) zoom.step(i / 60.0, tuning)
+        val held = zoom.ratio
+        zoom.aim(held, .5, true)
+        assertTrue(!zoom.active)
+        zoom.aim(.65, .6, true)
+        assertTrue(zoom.step(.65, tuning) <= held)
+    }
+
     @Test fun reachesTheTargetWithoutOvershootingAtCommonVideoRates() {
         val tuning = ZoomTuning()
         for (fps in listOf(24, 30, 60, 120)) {

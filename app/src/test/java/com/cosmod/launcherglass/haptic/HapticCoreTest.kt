@@ -159,4 +159,26 @@ class HapticCoreTest {
         assertEquals(35f, result.sourcePoint(300).pitch, .0001f)
         assertEquals(pattern.points[2], result.sourcePoint(500))
     }
+
+    @Test fun amplitudeStrokeKeepsTapsAndFrequencyAnchorsBetweenTouchSamples() {
+        val pattern = HapticPattern("brush", 1000, listOf(HapticPoint(0, 0f),
+            HapticPoint(250, .15f, hz = 150f, pitch = 30f, curve = HapticCurve.EASE_IN),
+            HapticPoint(300, .65f, hz = 120f, pitch = 80f, tapKind = HapticTap.NATIVE),
+            HapticPoint(330, 0f), HapticPoint(1000, 0f)), offset = 20)
+        val result = pattern.paintStroke(HapticChannel.AMPLITUDE, listOf(220 to .2f, 420 to .8f))
+        assertEquals(150f, result.sourcePoint(250).hz, 0f)
+        assertEquals(HapticCurve.EASE_IN, result.sourcePoint(250).curve)
+        assertEquals(80f, result.sourcePoint(300).pitch, 0f)
+        assertEquals(320, result.tapHits(0, 1000).single().time)
+        assertEquals(.5f, result.sourcePoint(300).amplitude, .0001f)
+    }
+
+    @Test fun addingAPointUsesVibrationTimeAndKeepsTheExistingValue() {
+        val pattern = HapticPattern("offset", 1000, listOf(HapticPoint(0, 0f),
+            HapticPoint(500, .8f, hz = 150f), HapticPoint(1000, 0f)), offset = 100)
+        val point = pattern.sourcePoint(pattern.sourceTimeAt(350))
+        assertEquals(250, point.ms)
+        assertEquals(.4f, point.amplitude, .0001f)
+        assertEquals(pattern.at(350), pattern.replace(point).at(350))
+    }
 }

@@ -29,7 +29,7 @@ class SettingsProvider : ContentProvider() {
                 val camera = com.cosmod.launcherglass.camera.CameraZoomSettings
                 if (callingPackage != camera.PACKAGE) throw SecurityException("Camera diagnostics require the stock camera")
                 if (method == camera.READ) return camera.read(prefs)
-                camera.storeStatus(requireNotNull(context), extras)
+                camera.storeStatus(requireNotNull(context), prefs, extras)
             }
             com.cosmod.launcherglass.haptic.HapticRingStore.READ,
             com.cosmod.launcherglass.haptic.HapticRingStore.REPORT -> {

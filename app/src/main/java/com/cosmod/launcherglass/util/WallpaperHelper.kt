@@ -679,17 +679,19 @@ object WallpaperHelper {
 
             fun withFolders(icons:Bitmap):Backdrops {
                 if(!PrefsHelper.folderBlurEnabled || !PrefsHelper.enabled)return Backdrops(icons,null,widgets,null,neutral)
-                val folder=FolderSettings.processing
-                val opacity=KyantGlassEngine.optics(GlassSurface.FOLDERS).blur.opacity
+                val folder=FolderSettings.backdrop()
+                val separate=FolderSettings.own
+                val opacity=KyantGlassEngine.optics(if(separate)GlassSurface.FOLDERS else 0).blur.opacity
                 fun render(settings:FolderSettings.Processing,alpha:Int)=runCatching {
                     folderBackdrop(rawBitmap,heightLimit,settings,alpha)
                 }.onFailure {
                     GlassLogger.limited("FolderMaterial","wallpaper-processing"){"Folder backdrop unavailable: $it"}
                 }.getOrNull()
-                val normal=if(FolderSettings.own)render(folder,opacity) else null
+                val normal=if(separate)render(folder,opacity) else null
                 val large=FolderSettings.largeBackdrop()?.let { settings ->
                     val largeOpacity=KyantGlassEngine.largeFolderOptics().blur.opacity
-                    if(normal!=null && settings==folder && largeOpacity==opacity)normal
+                    if(settings==folder && largeOpacity==opacity)normal ?: icons.takeUnless { separate }
+                        ?: render(settings,largeOpacity)
                     else render(settings,largeOpacity)
                 }
                 return Backdrops(icons,normal,widgets,large,neutral)

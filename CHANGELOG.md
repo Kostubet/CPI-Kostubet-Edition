@@ -4,6 +4,14 @@
 
 ## Русский
 
+### Сборка 412
+
+- Сглаживание видеозума соблюдает максимальную скорость и мягче тормозит у цели. При остановке кадров управление возвращается штатной камере до следующего кадра. График обновляется при движении ползунков и показывает всю траекторию.
+- Отключение раздела «Иконки» возвращает штатные подложки растянутых ярлыков. Когда папки наследуют настройки иконок, движок и его параметры совпадают на рабочем столе и в предпросмотре.
+- Поиск показывает часы и виджеты экрана блокировки в их разделе.
+- Импорт распознаёт старый идентификатор стекла Kyant в конфигах CherryPick и переносит его в настройки нового движка.
+- Предпросмотры переиспользуют уже загруженные обои и пропускают вычисление размытия при выключенном стекле.
+
 ### Сборка 411
 
 - Новая вкладка «Камера» с экспериментальным сглаживанием видеозума, пятью режимами, ручными параметрами, расчётным графиком и диагностикой. Контракт привязан к штатной камере OnePlus 13 IN 7.006.144. Функция по умолчанию выключена.
@@ -62,6 +70,14 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 412
+
+- Video zoom smoothing respects the speed limit and decelerates more smoothly. If preview frames stall, zoom falls back to the stock camera until frames resume. The graph updates while sliders move and shows the entire trajectory.
+- Disabling Icons restores the stock backgrounds of stretched shortcuts. Folders that inherit icon settings use the same engine and parameters on the home screen and in the preview.
+- Search returns lock-screen clocks and widgets under Lock screen.
+- Import maps the old Kyant material ID in CherryPick configs to the new engine settings.
+- Previews reuse loaded wallpapers and skip blur processing when glass is off.
 
 ### Build 411
 

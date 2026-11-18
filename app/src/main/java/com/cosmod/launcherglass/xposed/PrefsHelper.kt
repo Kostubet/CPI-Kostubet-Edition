@@ -55,7 +55,9 @@ object PrefsHelper {
         private set
     val widgetGlassEnabled get()=widgets.enabled
     val dockGlassEnabled get() = enabled && dockStyle > 0
-    val wallpaperEffectsEnabled get()=blurEnabled || widgetGlassEnabled || dockGlassEnabled || PageIndicatorGlass.profile.mode>0
+    internal val shortcutGlassEnabled get() = enabled && blurEnabled && iconsFeatureEnabled
+    val wallpaperEffectsEnabled get()=(blurEnabled && (iconsFeatureEnabled || folderBlurEnabled)) ||
+        widgetGlassEnabled || dockGlassEnabled || PageIndicatorGlass.profile.mode>0
     @Volatile var drawerBlurEnabled: Boolean = SettingsDefaults.boolean(SettingsProvider.KEY_DRAWER_BLUR_ENABLED)
     @Volatile var blurRadius: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_RADIUS)
     @Volatile var blurMode: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_MODE)
@@ -352,9 +354,9 @@ object PrefsHelper {
             if(!loaded || masterChanged || blurModeChanged || drawerChanged || performanceChanged ||
                 wallpaperEffectsEnabled!=previousWallpaperEffects)LiveBlurEngine.onPrefsChanged()
             NativeSurfaceLive.onSettingsChanged()
-            if(masterChanged || folderEnabledChanged || materialChanged || folderChanged)FolderMaterialHook.onSettingsChanged()
+            if(masterChanged || iconsSectionChanged || folderEnabledChanged || materialChanged || folderChanged)FolderMaterialHook.onSettingsChanged()
             LiftedBackdrop.onSettingsChanged()
-            if(masterChanged || materialChanged || paletteChanged)MultiIconMaterialHook.onSettingsChanged()
+            if(masterChanged || iconsSectionChanged || materialChanged || paletteChanged)MultiIconMaterialHook.onSettingsChanged()
             if(masterChanged || widgetChanged || widgetElementsChanged || photoSourceChanged || edgeChanged || glassEngineChanged)PhotoWidgetMaterial.onSettingsChanged()
             DockMaterial.onSettingsChanged()
             LauncherIconSize.onSettingsChanged()

@@ -71,7 +71,8 @@ internal object SettingsTransfer {
         val schema = defaults
         val values = linkedMapOf<String, Any>()
         val saved=source.keys().asSequence().associateWith {source.get(it)}
-        val migrated=saved+LockscreenSettings.sharedShortcutValues(saved)+GlassEngineSettings.inheritLegacy(saved)
+        val migrated=saved+LockscreenSettings.sharedShortcutValues(saved)+GlassEngineSettings.inheritLegacy(saved)+
+            GlassEngineSettings.legacyIconMaterial(saved)
         val normalized=migrated+GlassEngineSettings.legacyRadii(migrated)+
             com.cosmod.launcherglass.util.Ba31kAnimationSettings.migrateClassic(saved)
         for ((key,value) in normalized) {

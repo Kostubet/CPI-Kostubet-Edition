@@ -56,6 +56,8 @@ internal data class ZoomTuning(
 
 /** Speed and acceleration operate in log-ratio space so equal perceived zoom steps take equal time. */
 internal class ZoomSmoothing(initial: Double) {
+    init { require(initial.isFinite() && initial > 0) }
+
     private var position = ln(initial)
     private var target = position
     private var filtered = position
@@ -71,8 +73,12 @@ internal class ZoomSmoothing(initial: Double) {
     val active get() = position != target
 
     fun aim(ratio: Double, now: Double, gesture: Boolean) {
-        if (!ratio.isFinite() || ratio <= 0) return
+        if (!ratio.isFinite() || ratio <= 0 || !now.isFinite()) return
         val next = ln(ratio)
+        if (abs(next - position) < 1e-9) {
+            settle(next)
+            return
+        }
         val previous = target
         gestureInput = gesture
         val gap = now - lastInputTime
@@ -102,29 +108,64 @@ internal class ZoomSmoothing(initial: Double) {
         val sensitivity = if (gestureInput) tuning.sensitivity else 1.0
         val response = (tuning.response / sensitivity).coerceAtLeast(.005)
         filtered += (target - filtered) * (1 - exp(-dt / response))
-        val distance = filtered - position
         val endDistance = target - position
+        val direction = endDistance.sign
+        val distance = ((filtered - position) * direction).coerceAtLeast(0.0)
+        val approach = velocity * direction
         val boost = if (tuning.adaptive) (1 + .18 * targetRate + .45 * abs(endDistance)).coerceIn(1.0, 2.25) else 1.0
         targetRate *= exp(-dt * 3)
-        val limit = if (distance >= 0) tuning.speedIn else tuning.speedOut
+        val limit = if (direction > 0) tuning.speedIn else tuning.speedOut
         val progress = (position - origin) / (target - origin).let { if (abs(it) < .0001) .0001 else it }
         val rate = tuning.curve.rate(progress, tuning.bezier.first, tuning.bezier.second)
-        val stoppingSpeed = sqrt(2 * tuning.braking * boost * abs(distance))
-        val desired = distance.sign * minOf(limit * boost * rate, tuning.maxSpeed * boost,
-            stoppingSpeed, abs(distance) * tuning.smoothing * boost)
+        val speedCap = tuning.maxSpeed * boost
+        val braking = tuning.braking * boost
+        val jerk = tuning.jerk * boost
+        val brakeLimit = brakingSpeed(distance, approach, acceleration * direction, braking, jerk, tuning.inertia)
+        val desired = direction * minOf(limit * boost * rate, speedCap, brakeLimit, distance * tuning.smoothing * boost)
         val accelerating = velocity == 0.0 || desired.sign == velocity.sign && abs(desired) > abs(velocity)
         val accelerationCap = (if (accelerating) tuning.acceleration else tuning.braking) * boost
         val desiredAcceleration = ((desired - velocity) / tuning.inertia.coerceAtLeast(.02))
             .coerceIn(-accelerationCap, accelerationCap)
-        val maxChange = tuning.jerk * boost * dt
-        acceleration += (desiredAcceleration - acceleration).coerceIn(-maxChange, maxChange)
-        velocity += acceleration * dt
-        val next = position + velocity * dt
-        if ((next - target).sign != (position - target).sign || abs(endDistance) < .0005 && abs(velocity) < .02) {
-            position = target
-            filtered = target
+        val rise = if (direction < 0 && approach >= 0) -velocity else speedCap - velocity
+        val fall = if (direction > 0 && approach >= 0) velocity else speedCap + velocity
+        val availableIn = sqrt(2 * jerk * rise.coerceAtLeast(0.0))
+        val availableOut = sqrt(2 * jerk * fall.coerceAtLeast(0.0))
+        val cappedAcceleration = desiredAcceleration.coerceIn(-availableOut, availableIn)
+        val maxChange = jerk * dt
+        acceleration += (cappedAcceleration - acceleration).coerceIn(-maxChange, maxChange)
+        val nextVelocity = (velocity + acceleration * dt).coerceIn(-speedCap, speedCap)
+        if (approach >= 0 && nextVelocity * direction < 0) {
             velocity = 0.0
             acceleration = 0.0
+        } else velocity = nextVelocity
+        val next = position + velocity * dt
+        if ((next - target).sign != (position - target).sign || abs(endDistance) < .0005 && abs(velocity) < .02) {
+            settle(target)
         } else position = next
+    }
+
+    private fun brakingSpeed(distance: Double, velocity: Double, acceleration: Double,
+        braking: Double, jerk: Double, inertia: Double): Double {
+        // Reserve distance and speed while releasing the current acceleration and the actuator settles.
+        val positive = acceleration.coerceAtLeast(0.0)
+        val release = positive / jerk
+        val reserve = velocity.coerceAtLeast(0.0) * (release + 1.35 * inertia + .025) +
+            positive * release * release / 3
+        val available = (distance - reserve).coerceAtLeast(0.0)
+        // A triangular deceleration ramp fits short stops; longer stops reach the braking limit.
+        val triangular = Math.cbrt(jerk * available * available)
+        val cap = if (triangular <= braking * braking / jerk) triangular else {
+            val margin = braking * braking / (2 * jerk)
+            sqrt(margin * margin + 2 * braking * available) - margin
+        }
+        return (cap - .5 * positive * release).coerceAtLeast(0.0)
+    }
+
+    private fun settle(value: Double) {
+        position = value
+        target = value
+        filtered = value
+        velocity = 0.0
+        acceleration = 0.0
     }
 }
