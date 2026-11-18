@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 414
+
+- Поиск и нижняя панель используют системное размытие ColorOS, когда композитор его предоставляет. Запасная заливка соответствует теме CPI.
+- Сужение поиска пересчитывает только капсулу, а фоны карточек сохраняют форму COUI без отдельных композиций.
+- Внутренние вкладки используют SegmentButton из COUI 2.0 с перетаскиванием бегунка.
+
 ### Сборка 413
 
 - Интерфейс настроек CPI переведён на COUI 2.0. Обновлены панели навигации, поиск, карточки, переключатели, ползунки, меню выбора и диалоги, включая импорт, экспорт и «Ваши настройки».
@@ -75,6 +81,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 414
+
+- The search field and bottom bar use ColorOS compositor blur where available, with CPI's theme colors as a fallback.
+- Resizing the search field lays out just the capsule. Cards keep the COUI shape without separate background compositions.
+- Section tabs use COUI 2.0 SegmentButton with a draggable selection indicator.
 
 ### Build 413
 

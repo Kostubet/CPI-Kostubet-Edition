@@ -2,10 +2,15 @@ package com.cosmod.launcherglass.ui
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,7 +36,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Card
-import io.github.suqi8.coui.kmp.basic.CardDefaults
 import io.github.suqi8.coui.kmp.basic.DropdownEntry
 import io.github.suqi8.coui.kmp.basic.DropdownItem
 import io.github.suqi8.coui.kmp.basic.Icon
@@ -53,12 +57,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.ButtonColors
@@ -75,6 +84,8 @@ import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.suqi8.coui.kmp.effect.LocalCOUIMaterialEffectEnabled
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
+import io.github.suqi8.coui.kmp.squircle.SquircleShape
+import io.github.suqi8.coui.kmp.theme.COUIRoundCorner
 import io.github.suqi8.coui.kmp.theme.darkColorScheme
 import io.github.suqi8.coui.kmp.theme.lightColorScheme
 import com.cosmod.launcherglass.R
@@ -82,7 +93,12 @@ import kotlin.math.roundToInt
 
 /** Connects the COUI controls to CPI's View-based feature pages. */
 internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int) : FrameLayout(context) {
-    private val colors = if (dark) darkColorScheme(primary = Color(accent)) else lightColorScheme(primary = Color(accent))
+    private val surface = Color(ContextCompat.getColor(context, R.color.cpi_ui_panel))
+    private val colors = if (dark) {
+        darkColorScheme(primary = Color(accent), backgroundTop = surface, surface = surface, bar = surface)
+    } else {
+        lightColorScheme(primary = Color(accent), backgroundTop = surface, surface = surface, bar = surface)
+    }
     protected var controlEnabled by mutableStateOf(true)
         private set
     protected val composition = ComposeView(context).apply {
@@ -390,43 +406,38 @@ internal class CouiPreviewActions(context: Context, dark: Boolean, accent: Int,
     }
 }
 
-internal class CouiSurface(context: Context, dark: Boolean, accent: Int, fill: Int, radius: Int) :
-    CouiControl(context, dark, accent) {
-    var color by mutableStateOf(fill)
-    init {
-        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
-        content {
-            Card(Modifier.fillMaxSize(), cornerRadius = radius.dp, insideMargin = PaddingValues(0.dp),
-                colors = CardDefaults.defaultColors(color = Color(color))) {}
-        }
-    }
-}
-
 internal class CouiCardHost(
-    context: Context, dark: Boolean, accent: Int, color: Int, radius: Int, private val body: View,
+    context: Context, color: Int, radius: Int, body: View,
 ) : FrameLayout(context) {
-    private val surface = CouiSurface(context, dark, accent, color, radius)
-
     init {
         clipChildren = false
         clipToPadding = false
-        addView(surface, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        background = CouiCardFill(context, color, radius)
         addView(body, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }
+}
 
-    // Size the decorative surface to the rows, including when the card is inside a scroll view.
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        measureChildWithMargins(body, widthMeasureSpec, 0, heightMeasureSpec, 0)
-        setMeasuredDimension(
-            resolveSizeAndState(body.measuredWidth + paddingLeft + paddingRight, widthMeasureSpec, body.measuredState),
-            resolveSizeAndState(body.measuredHeight + paddingTop + paddingBottom, heightMeasureSpec, 0),
-        )
-        surface.measure(
-            MeasureSpec.makeMeasureSpec(measuredWidth - paddingLeft - paddingRight, MeasureSpec.EXACTLY),
-            MeasureSpec.makeMeasureSpec(measuredHeight - paddingTop - paddingBottom, MeasureSpec.EXACTLY),
-        )
+/** Paint the COUI Card outline for View rows without creating a composition for the fill. */
+private class CouiCardFill(context: Context, color: Int, radius: Int) : Drawable() {
+    private val density = Density(context.resources.displayMetrics.density)
+    private val shape = SquircleShape(radius.dp, COUIRoundCorner.Normal.Weight)
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+    private val path = android.graphics.Path()
+
+    override fun onBoundsChange(bounds: Rect) {
+        path.rewind()
+        if (!bounds.isEmpty) {
+            val size = Size(bounds.width().toFloat(), bounds.height().toFloat())
+            val outline = shape.createOutline(size, LayoutDirection.Ltr, density) as Outline.Generic
+            path.addPath(outline.path.asAndroidPath(), bounds.left.toFloat(), bounds.top.toFloat())
+        }
     }
+
+    override fun draw(canvas: Canvas) = canvas.drawPath(path, paint)
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
+    override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter; invalidateSelf() }
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
 
 internal class CouiPreference(context: Context, dark: Boolean, accent: Int, title: String,

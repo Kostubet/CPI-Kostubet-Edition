@@ -1,5 +1,7 @@
 # ONextBox UI motion
 
+The current COUI 2.0 settings UI uses the ONextBox Android compositor bridge for the app bar, navigation capsule, search field, and anchored popup material.
+
 The CPI View implementations in `OnextMotion.kt` and `ColorosControls.kt` adapt ONextBox by MiToverG422 and contributors, licensed under GPL-3.0. `OnextSliderSpotlight.kt` contains the upstream slider spotlight AGSL.
 
 Upstream revision: `5437fcf80dc95657451866a04036b118b2c87701` (V17.0.0.100).

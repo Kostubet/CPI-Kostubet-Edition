@@ -1106,7 +1106,7 @@ class HapticStudioActivity : AppCompatActivity() {
         val box = column()
         content(box)
         if (divided) for (index in (box.childCount - 1) downTo 1) divider(box, index)
-        parent.addView(CouiCardHost(this, dark, accent, surface, 20, box),
+        parent.addView(CouiCardHost(this, surface, 20, box),
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
     }
     private fun choose(title: String, options: List<String>, action: (Int) -> Unit) {

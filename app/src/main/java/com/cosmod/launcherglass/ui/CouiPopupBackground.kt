@@ -8,16 +8,15 @@ import android.view.ViewOutlineProvider
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Outline as CouiOutline
 import androidx.compose.ui.graphics.asAndroidPath
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.view.doOnPreDraw
+import androidx.core.content.ContextCompat
+import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.onextbox.applyOplusPopupBlur
 import io.github.suqi8.coui.kmp.basic.ListPopupDefaults
 import io.github.suqi8.coui.kmp.squircle.SquircleShape
 import io.github.suqi8.coui.kmp.theme.COUIRoundCorner
-import io.github.suqi8.coui.kmp.theme.darkColorScheme
-import io.github.suqi8.coui.kmp.theme.lightColorScheme
 
 /** Uses COUI's popup shape and palette during CPI's row-to-card transition. */
 internal class CouiPopupBackground(context: Context, private val dark: Boolean) : View(context) {
@@ -39,7 +38,7 @@ internal class CouiPopupBackground(context: Context, private val dark: Boolean) 
             }
         }
         background = GradientDrawable().apply {
-            setColor((if (dark) darkColorScheme() else lightColorScheme()).backgroundTop.toArgb())
+            setColor(ContextCompat.getColor(context, R.color.cpi_ui_panel))
             cornerRadius = with(density) { radius.toPx() }
         }
         renderProgress(progress)

@@ -433,8 +433,10 @@ class MainActivity : AppCompatActivity() {
     private fun card(content:View,inner:Boolean=false):FrameLayout {
         val color=if(coloredFeatures)withAlpha(Color.WHITE,if(darkUi)27 else 154)else if(inner)raised else panel
         val radius=if(inner)16 else 20
-        return CouiCardHost(this,darkUi,primary,color,radius,content)
+        return CouiCardHost(this,color,radius,content)
     }
+
+    private fun chromeSurface() = if (bool("coloros_ui_effects")) withAlpha(panel, 224) else panel
 
     private fun button():CouiButton {
         val fill=androidx.core.graphics.ColorUtils.compositeColors(withAlpha(primary,22),panel)
@@ -469,9 +471,8 @@ class MainActivity : AppCompatActivity() {
     private fun optionRow(title: String, value: String) = CouiSelection(this, darkUi, primary, title, value)
 
     private fun divider(parent:LinearLayout,startInset:Int=16){
-        parent.addView(CouiSlot(this,darkUi,primary) {
-            HorizontalDivider(color = ComposeColor(withAlpha(onSurface,19)))
-        },LinearLayout.LayoutParams(-1,-2).apply {leftMargin=dp(startInset);rightMargin=dp(16)})
+        val line = View(this).apply { setBackgroundColor(withAlpha(onSurface, 19)) }
+        parent.addView(line, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(startInset); rightMargin = dp(16) })
     }
     private fun gate(view:View,allowed:()->Boolean){gates.add(Gate(view,allowed))}
     private fun enableTree(view:View,enabled:Boolean){
@@ -1092,7 +1093,7 @@ class MainActivity : AppCompatActivity() {
                 rootTabs.map {it.icon},listOf(R.drawable.ic_cpi_home_outline,R.drawable.ic_cpi_features_outline,
                     R.drawable.ic_cpi_camera_outline,R.drawable.ic_cpi_module_outline),
                 rootTabs.map {getString(if(it==Screen.TOOLS)R.string.ui_cpi_module else it.title)},
-                rootNavigationIndex){index->haptic(page);openTab(rootTabs[index])}
+                rootNavigationIndex,chromeSurface()){index->haptic(page);openTab(rootTabs[index])}
             frame.addView(content,FrameLayout.LayoutParams(-1,-1))
             page.addView(frame,FrameLayout.LayoutParams(-1,dp(176),Gravity.BOTTOM))
         }
@@ -1202,7 +1203,7 @@ class MainActivity : AppCompatActivity() {
             })
         }
         var syncSearchMode: (() -> Unit)? = null
-        val searchPanel = CouiSearchHost(this, darkUi, primary, getString(R.string.ui_catalog_search), searchQuery,
+        val searchPanel = CouiSearchHost(this, darkUi, primary, chromeSurface(), getString(R.string.ui_catalog_search), searchQuery,
             onQueryChanged = { query ->
                 searchQuery = query
                 renderResults()
@@ -1232,33 +1233,20 @@ class MainActivity : AppCompatActivity() {
         ).apply { translationY = (topInset + dp(64)).toFloat() }
         searchInput = searchPanel
         layer.addView(searchPanel,FrameLayout.LayoutParams(-1,dp(45),Gravity.TOP or Gravity.START).apply {
-            marginStart=dp(16)
+            marginStart=dp(16); marginEnd=dp(16)
         })
         val restart=layer.findViewWithTag<View>("root_restart")
         restart?.bringToFront()
         var searchTarget=-1f
         var searchProgress=0f
         var searchPositionReady=false
-        val searchEffects=arrayOfNulls<android.graphics.RenderEffect>(9)
-        var searchBlurStep=0
-        fun blurSearch(velocity:Float){
-            val step=(kotlin.math.abs(velocity)*4f).roundToInt().coerceIn(0,searchEffects.lastIndex)
-            if(step==searchBlurStep)return
-            searchBlurStep=step
-            val effect=if(step==0)null else searchEffects[step] ?: run {
-                val radius=resources.displayMetrics.density*.56f*step
-                android.graphics.RenderEffect.createBlurEffect(radius,radius,
-                    android.graphics.Shader.TileMode.DECAL).also {searchEffects[step]=it}
-            }
-            searchPanel.setRenderEffect(effect)
-        }
         fun placeSearch(){
             val expanded=maxOf(dp(64),heading.bottom).toFloat()
             val desired=topInset+CatalogSearchGeometry.top(searchProgress,expanded,resources.displayMetrics.density)
             val y=if(restart==null)desired else {
                 val horizontalGap=if(!restart.isLaidOut || !searchPanel.isLaidOut)0
-                    else if(layer.layoutDirection==View.LAYOUT_DIRECTION_RTL)searchPanel.left-restart.right
-                    else restart.left-searchPanel.right
+                    else if(layer.layoutDirection==View.LAYOUT_DIRECTION_RTL)searchPanel.right-searchPanel.capsuleWidth-restart.right
+                    else restart.left-searchPanel.left-searchPanel.capsuleWidth
                 val bottom=maxOf(restart.bottom,topInset+dp(52))+dp(2)
                 CatalogSearchGeometry.topWithoutOverlap(desired,bottom.toFloat(),horizontalGap,dp(6))
             }
@@ -1273,23 +1261,16 @@ class MainActivity : AppCompatActivity() {
             return (windowWidth-dp(16)*2-reserved).coerceAtLeast(1)
         }
         fun layoutSearch(progress:Float){
-            val width=desiredSearchWidth(progress)
-            val params=searchPanel.layoutParams as FrameLayout.LayoutParams
-            if(params.width!=width){
-                params.width=width
-                searchPanel.layoutParams=params
-            }
+            searchPanel.resizeCapsule(desiredSearchWidth(progress))
             placeSearch()
         }
         val searchMotion=androidx.dynamicanimation.animation.SpringAnimation(androidx.dynamicanimation.animation.FloatValueHolder(0f)).apply {
             spring=androidx.dynamicanimation.animation.SpringForce(0f).setStiffness(130f).setDampingRatio(.63f)
             minimumVisibleChange=.001f
-            addUpdateListener {_,value,velocity->
+            addUpdateListener {_,value,_->
                 searchProgress=value
                 layoutSearch(value)
-                blurSearch(velocity)
             }
-            addEndListener {_,_,_,_->blurSearch(0f)}
         }
         searchPanel.addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view:View){}
@@ -1334,7 +1315,7 @@ class MainActivity : AppCompatActivity() {
             private var retries=0
             override fun onPreDraw():Boolean{
                 positionSearch(scroll.scrollY)
-                if(searchPanel.width!=desiredSearchWidth(searchProgress) && retries++<2)return false
+                if(searchPanel.capsuleWidth!=desiredSearchWidth(searchProgress) && retries++<2)return false
                 if(layer.viewTreeObserver.isAlive)layer.viewTreeObserver.removeOnPreDrawListener(this)
                 searchPositionReady=true
                 return true
@@ -1476,7 +1457,7 @@ class MainActivity : AppCompatActivity() {
             val selected=featureTabSelection[section] ?: if(section==Screen.ICONS)0 else 2
             val titles=listOf(R.string.ui_feature_tab_general,R.string.ui_feature_tab_colors,
                 R.string.ui_feature_tab_style).map(::getString)
-            add(pageBody,ShadeGlassTabs(this,darkUi,primary,titles,selected){index->
+            add(pageBody,CouiSectionTabs(this,darkUi,primary,titles,selected){index->
                 featureTabSelection[section]=index
                 pages.forEachIndexed {i, tab->tab.visibility=if(i==index)View.VISIBLE else View.GONE}
             },bottom=12)
@@ -1536,7 +1517,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { showChoicePopup(this,items.mapIndexed { i,value->i to value },selected,onPick=pick) }
             }
         }
-        add(pageBody,ShadeGlassTabs(this,darkUi,primary,panelTitles,panel.ordinal) { index->
+        add(pageBody,CouiSectionTabs(this,darkUi,primary,panelTitles,panel.ordinal,commitOnRelease = true) { index->
             if(index!=panel.ordinal){
                 shadePanel=ShadeGlassSettings.Panel.entries[index]
                 shadeComponent=0
