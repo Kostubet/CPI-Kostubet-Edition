@@ -13,29 +13,46 @@ import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.NestedScrollView
 import com.cosmod.launcherglass.R
+import com.cosmod.launcherglass.ui.ColorosScrollView
 import com.cosmod.launcherglass.ui.CouiAnchoredDialog
-import com.cosmod.launcherglass.ui.CouiButton
+import com.cosmod.launcherglass.ui.CouiCardHost
 import com.cosmod.launcherglass.ui.CouiField
 import com.cosmod.launcherglass.ui.CouiIconButton
 import com.cosmod.launcherglass.ui.CouiInformation
+import com.cosmod.launcherglass.ui.CouiPopup
 import com.cosmod.launcherglass.ui.CouiPreference
 import com.cosmod.launcherglass.ui.CouiSelection
 import com.cosmod.launcherglass.ui.CouiSlider
-import com.cosmod.launcherglass.ui.CouiSurface
+import com.cosmod.launcherglass.ui.CouiSlot
 import com.cosmod.launcherglass.ui.CouiSwitchRow
 import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.ui.UiLanguage
+import com.cosmod.launcherglass.ui.onextbox.ColorOs17Button
+import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
+import com.cosmod.launcherglass.ui.onextbox.SettingsDivider
+import io.github.suqi8.coui.kmp.basic.SmallTitle
+import io.github.suqi8.coui.kmp.basic.Text
+import io.github.suqi8.coui.kmp.theme.COUITheme
 import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -43,9 +60,9 @@ import kotlin.math.roundToInt
 class HapticStudioActivity : AppCompatActivity() {
     private enum class Page { HOME, GENERATOR, EDITOR, LAB, LIBRARY, HARDWARE }
     private var page = Page.HOME
-    private lateinit var root: LinearLayout
+    private lateinit var root: FrameLayout
     private lateinit var body: LinearLayout
-    private lateinit var scroller: ScrollView
+    private lateinit var scroller: ColorosScrollView
     private lateinit var motor: HapticMotor
     private lateinit var player: HapticPreview
     private lateinit var store: HapticLibrary
@@ -65,8 +82,13 @@ class HapticStudioActivity : AppCompatActivity() {
     private var channel = HapticChannel.AMPLITUDE
     private var drawCurve = false
     private var graph: HapticTimeline? = null
-    private var timeLabel: TextView? = null
-    private var playButton: CouiButton? = null
+    private var playback: HapticPlaybackBar? = null
+    private var labCursor = 0
+    private var topInset = 0
+    private var bottomInset = 0
+    private var toolbar: LinearLayout? = null
+    private var headerBlur: ColorOsAppBarBlurView? = null
+    private var popup: CouiPopup? = null
     private var dragBefore: HapticPattern? = null
     private val undo = ArrayDeque<HapticPattern>()
     private val redo = ArrayDeque<HapticPattern>()
@@ -82,11 +104,15 @@ class HapticStudioActivity : AppCompatActivity() {
     private var labFrequency = 50
     private var labFrequencyEnd = 80
     private var labDensity = 3
+    private var labTaps = 3
+    private var tapSpacing = 220
+    private val labLength get() = if (slide == HapticSlide.TAPS) labTaps * tapSpacing else labDuration
     private var dark = false
-    private val canvasColor get() = if (dark) 0xff08090d.toInt() else 0xfff3f5f8.toInt()
-    private val surface get() = if (dark) 0xff1c1e26.toInt() else 0xffffffff.toInt()
-    private val ink get() = if (dark) 0xfff2f3f8.toInt() else 0xff191d28.toInt()
-    private val accent get() = if (dark) 0xff76a9ff.toInt() else 0xff175ac9.toInt()
+    private val canvasColor get() = ContextCompat.getColor(this, R.color.cpi_ui_background)
+    private val surface get() = ContextCompat.getColor(this, R.color.cpi_ui_panel)
+    private val ink get() = ContextCompat.getColor(this, R.color.cpi_ui_text)
+    private val accent get() = ContextCompat.getColor(this, R.color.cpi_ui_accent)
+    private var effects = true
     private val ru get() = resources.configuration.locales[0].language == "ru"
     private fun t(en: String, russian: String) = if (ru) russian else en
 
@@ -110,8 +136,8 @@ class HapticStudioActivity : AppCompatActivity() {
                 val pitch = imported.points.any { point -> point.pitch != 0f }
                 if ((hz && motor.frequency == null) || (pitch && !motor.richTap)) {
                     showDialog(t("Adapt imported pattern?", "Адаптировать паттерн?")) { box, d ->
-                        box.addView(label(t("Hardware frequency data will be removed. The amplitude curve will be kept.",
-                            "Частотные параметры будут удалены. Кривая амплитуды сохранится."), 14f))
+                        box.addView(summary(t("Hardware frequency data will be removed. The amplitude curve will be kept.",
+                            "Частотные параметры будут удалены. Кривая амплитуды сохранится.")))
                         box.addView(button(t("Adapt", "Адаптировать")) {
                             acceptImport(imported.copy(points = imported.points.map { it.copy(
                                 hz = if (motor.frequency == null) 0f else it.hz,
@@ -138,21 +164,24 @@ class HapticStudioActivity : AppCompatActivity() {
     override fun attachBaseContext(newBase: Context) = super.attachBaseContext(UiLanguage.wrap(newBase))
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        dark = when (getSharedPreferences(SettingsProvider.PREFS_NAME, MODE_PRIVATE).getInt("ui_theme", 0)) {
-            1 -> false
-            2 -> true
-            else -> resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        val prefs = getSharedPreferences(SettingsProvider.PREFS_NAME, MODE_PRIVATE)
+        delegate.localNightMode = when (prefs.getInt("ui_theme", 0)) {
+            1 -> AppCompatDelegate.MODE_NIGHT_NO
+            2 -> AppCompatDelegate.MODE_NIGHT_YES
+            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
         }
+        super.onCreate(savedInstanceState)
+        dark = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        effects = prefs.getBoolean("coloros_ui_effects", true)
         motor = HapticMotor(this)
         store = HapticLibrary(this)
         pattern = HapticPattern.empty(t("Untitled pattern", "Новый паттерн"))
         player = HapticPreview(this, motor, { ms ->
             graph?.cursor = ms
-            timeLabel?.text = "${clock(ms)} / ${clock(pattern.length)}"
-            playButton?.text = if (player.playing) t("Pause", "Пауза") else t("Play", "Воспроизвести")
+            playback?.update(ms, player.playing)
         }, { message(t("Cannot play this selection", "Не удалось воспроизвести фрагмент")) })
-        setContentView(column().also { root = it })
+        root = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
+        setContentView(root)
         root.setBackgroundColor(canvasColor)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, root).apply {
@@ -161,12 +190,16 @@ class HapticStudioActivity : AppCompatActivity() {
         }
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(safe.left + dp(16), safe.top, safe.right + dp(16), safe.bottom)
+            view.setPadding(safe.left, 0, safe.right, 0)
+            topInset = safe.top
+            bottomInset = safe.bottom
+            applyInsets()
             insets
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (page == Page.HOME) finish() else { player.stop(); show(Page.HOME) }
+                if (popup != null) popup?.close()
+                else if (page == Page.HOME) finish() else { player.stop(); show(Page.HOME) }
             }
         })
         show(Page.HOME)
@@ -183,21 +216,39 @@ class HapticStudioActivity : AppCompatActivity() {
     private fun show(next: Page = page, preserveScroll: Boolean = false) {
         val savedScroll = if (preserveScroll && ::scroller.isInitialized) scroller.scrollY else 0
         page = next
+        popup = null
         root.removeAllViews()
         graph = null
         displayPointBox = null
-        timeLabel = null
-        playButton = null
-        val heading = row()
-        heading.addView(CouiIconButton(this, dark, accent, ink, surface, R.drawable.ic_arrow_back, t("Back", "Назад"), true)
+        playback = null
+        body = column().apply { setPadding(dp(16), dp(8), dp(16), dp(10)) }
+        scroller = ColorosScrollView(this, canAnimate()).apply {
+            clipToPadding = false
+            addView(body)
+        }
+        root.addView(scroller, FrameLayout.LayoutParams(-1, -1))
+        headerBlur = if (effects) ColorOsAppBarBlurView(this, dark, canvasColor).apply {
+            updateAppearance(dark, canvasColor, 0f)
+            root.addView(this, FrameLayout.LayoutParams(-1, 0, Gravity.TOP))
+        } else null
+        val toolbarView = row().apply {
+            setPadding(dp(16), 0, dp(16), 0)
+            if (!effects) setBackgroundColor(canvasColor)
+        }
+        toolbarView.addView(CouiIconButton(this, dark, accent, ink, surface, R.drawable.ic_arrow_back, t("Back", "Назад"), effects)
             .apply { setOnClickListener { onBackPressedDispatcher.onBackPressed() } },
             LinearLayout.LayoutParams(dp(46), dp(46)))
-        heading.addView(label(title(page), 22f).apply { setPadding(dp(10), 0, 0, 0) },
-            LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(heading)
-        body = column().apply { setPadding(0, dp(8), 0, dp(18)) }
-        scroller = ScrollView(this).apply { isFillViewport = false; addView(body) }
-        root.addView(scroller, LinearLayout.LayoutParams(-1, 0, 1f))
+        toolbarView.addView(CouiSlot(this, dark, accent) {
+            Text(title(next), Modifier.padding(start = 6.dp).semantics { heading() },
+                style = COUITheme.textStyles.title4, color = COUITheme.colorScheme.onBackground,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        toolbar = toolbarView
+        root.addView(toolbarView, FrameLayout.LayoutParams(-1, dp(54), Gravity.TOP))
+        applyInsets()
+        scroller.setOnScrollChangeListener(NestedScrollView.OnScrollChangeListener { _, _, y, _, _ ->
+            headerBlur?.updateAppearance(dark, canvasColor, (y / dp(30).toFloat()).coerceIn(0f, 1f))
+        })
         when (page) {
             Page.HOME -> home()
             Page.GENERATOR -> generatorPage()
@@ -209,19 +260,34 @@ class HapticStudioActivity : AppCompatActivity() {
         if (savedScroll > 0) scroller.post { scroller.scrollTo(0, savedScroll) }
     }
 
+    private fun applyInsets() {
+        if (!::scroller.isInitialized) return
+        scroller.setPadding(0, topInset + dp(57), 0, bottomInset)
+        toolbar?.let { it.layoutParams = (it.layoutParams as FrameLayout.LayoutParams).apply { topMargin = topInset } }
+        headerBlur?.let { it.layoutParams = it.layoutParams.apply { height = topInset + dp(64) } }
+    }
+
+    private fun canAnimate() = effects && ValueAnimator.areAnimatorsEnabled()
+
     private fun home() {
-        card(body) { box ->
-            box.addView(CouiInformation(this, dark, accent, pattern.name,
-                "${clock(pattern.length)} · ${pattern.points.size} " + t("points", "точек")))
+        card(body, t("Current pattern", "Текущий паттерн")) { box ->
+            box.addView(CouiInformation(this, dark, accent, pattern.name, "${pattern.points.size} " + t("points", "точек")))
             previewControls(box)
         }
-        card(body) { box ->
-            for (destination in Page.entries.drop(1)) {
-                link(box, title(destination)) { player.stop(); show(destination) }
+        card(body, t("Studio", "Студия"), divided = true) { box ->
+            val tools = listOf(
+                Page.GENERATOR to R.drawable.ic_catalog_motion,
+                Page.EDITOR to R.drawable.ic_cpi_edit,
+                Page.LAB to R.drawable.ic_catalog_speed,
+                Page.LIBRARY to R.drawable.ic_catalog_folder,
+                Page.HARDWARE to R.drawable.ic_cpi_module_outline,
+            )
+            for ((destination, icon) in tools) {
+                link(box, title(destination), icon = icon) { player.stop(); show(destination) }
             }
         }
-        card(body) { box ->
-            toggle(box, t("Use for incoming calls", "Вибрация входящих звонков"), HapticRingStore.enabled(this)) {
+        card(body, t("Incoming calls", "Входящие звонки"), divided = true) { box ->
+            toggle(box, t("Use current vibration settings", "Использовать паттерны студии"), HapticRingStore.enabled(this)) {
                 HapticRingStore.enable(this, it)
             }
             val adapter = HapticRingStore.status(this)
@@ -258,7 +324,7 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun generatorPage() {
-        card(body) { box ->
+        card(body, t("Audio source", "Источник аудио"), divided = true) { box ->
             link(box, t("Choose audio file", "Выбрать аудиофайл")) { if (!busy) openAudio.launch(arrayOf("audio/*")) }
             link(box, t("Choose ringtone", "Выбрать рингтон")) {
                 if (!busy) runCatching { ringtonePicker.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
@@ -276,25 +342,30 @@ class HapticStudioActivity : AppCompatActivity() {
                 box.addView(CouiInformation(this, dark, accent, t("Audio analyzed", "Аудио проанализировано"),
                     "${clock(track.length)} · $tempo"))
             }
+        }
+        card(body, t("Generation", "Генерация")) { box ->
             option(box, t("Generation style", "Стиль генерации"), style.ordinal, HapticStyle.entries.map(::styleName)) {
                 style = HapticStyle.entries[it]
                 generator = style.options()
                 show(preserveScroll = true)
             }
-            box.addView(button(if (busy) t("Analyzing…", "Анализ…") else t("Generate", "Сгенерировать")) {
+            box.addView(button(if (busy) t("Analyzing…", "Анализ…") else t("Generate", "Сгенерировать"),
+                primary = true, enabled = !busy) {
                 val source = audio ?: pattern.audio?.let(Uri::parse)
                 if (source == null) message(t("Choose audio first", "Сначала выбери аудио"))
                 else if (!busy) analyze(source, true)
-            }.apply { isEnabled = !busy })
+            }, actionMargin())
         }
-        card(body) { box ->
+        card(body, t("Signal analysis", "Анализ сигнала")) { box ->
             generatorSlider(box, t("Accent sensitivity", "Чувствительность к акцентам"), 0, 100, generator.sensitivity) { generator.copy(sensitivity = it) }
             generatorSlider(box, t("Detail", "Детализация"), 0, 100, generator.detail) { generator.copy(detail = it) }
             generatorSlider(box, t("Intensity", "Интенсивность"), 0, 100, generator.strength) { generator.copy(strength = it) }
-            generatorSlider(box, t("Smoothness", "Плавность"), 0, 100, generator.smoothness) { generator.copy(smoothness = it) }
+            if (style != HapticStyle.TAPS)
+                generatorSlider(box, t("Smoothness", "Плавность"), 0, 100, generator.smoothness) { generator.copy(smoothness = it) }
             generatorSlider(box, t("Bass emphasis", "Акцент на басах"), 0, 100, generator.bass) { generator.copy(bass = it) }
             generatorSlider(box, t("Melody sensitivity", "Чувствительность к мелодии"), 0, 100, generator.melody) { generator.copy(melody = it) }
-            generatorSlider(box, t("Impulse length · ms", "Длительность импульса · мс"), 25, 400, generator.impulseMs) { generator.copy(impulseMs = it) }
+            if (style != HapticStyle.TAPS)
+                generatorSlider(box, t("Impulse length · ms", "Длительность импульса · мс"), 25, 400, generator.impulseMs) { generator.copy(impulseMs = it) }
             generatorSlider(box, t("Accent limit · per second", "Предел акцентов · в секунду"), 1, 16, generator.repetitions) { generator.copy(repetitions = it) }
             generatorSlider(box, t("Dynamics", "Динамика"), 0, 100, generator.dynamics) { generator.copy(dynamics = it) }
             generatorSlider(box, t("Noise suppression", "Подавление слабых звуков"), 0, 100, generator.noise) { generator.copy(noise = it) }
@@ -305,7 +376,7 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun editor() {
-        card(body) { box ->
+        card(body, t("Timeline", "Временная шкала")) { box ->
             val channels = availableChannels()
             option(box, t("Envelope", "Огибающая"), channels.indexOf(channel).coerceAtLeast(0), channels.map(::channelName)) {
                 channel = channels[it]; show(preserveScroll = true)
@@ -317,14 +388,14 @@ class HapticStudioActivity : AppCompatActivity() {
             addGraph(box, pattern, true)
             previewControls(box)
         }
-        card(body) { box ->
+        card(body, t("Control points", "Контрольные точки")) { box ->
             displayPointBox = column()
             box.addView(displayPointBox)
             refreshPointControls()
             buttons(box, t("Undo", "Отменить"), t("Redo", "Повторить"),
                 { restore(undo, redo) }, { restore(redo, undo) })
         }
-        card(body) { box ->
+        card(body, t("Fragment", "Фрагмент")) { box ->
             link(box, t("Set exact position", "Задать точное время"), "${cursor} ms") {
                 numberDialog(t("Position · ms", "Время · мс"), cursor, 0..pattern.length, ::seek)
             }
@@ -343,6 +414,8 @@ class HapticStudioActivity : AppCompatActivity() {
                     { transferGroup(false) }, { transferGroup(true) })
                 link(box, t("Clear selection", "Снять выделение")) { regionStart = 0; regionEnd = null; show(preserveScroll = true) }
             }
+        }
+        card(body, t("Pattern", "Паттерн")) { box ->
             slider(box, t("Global intensity", "Общая интенсивность"), 0, 150, pattern.intensity, "%") {
                 changePattern(pattern.copy(intensity = it))
             }
@@ -390,17 +463,22 @@ class HapticStudioActivity : AppCompatActivity() {
             (it != HapticSlide.FREQUENCY || motor.frequency != null || motor.richTap) &&
                 (it != HapticSlide.SHARPNESS || motor.envelope != null)
         }
-        card(body) { box ->
+        card(body, t("Effect preview", "Предпросмотр эффекта")) { box ->
             option(box, "Haptic Slide", types.indexOf(slide).coerceAtLeast(0), types.map(::slideName)) {
-                slide = types[it]; show(preserveScroll = true)
+                player.stop()
+                labCursor = 0
+                slide = types[it]
+                show(preserveScroll = true)
             }
             addGraph(box, labPattern(), false)
-            buttons(box, t("Test slide", "Проверить"), t("Insert at cursor", "Вставить в дорожку"), {
+            playbackBar(box, labLength, labCursor, ::seekLab) {
                 val project = labPattern()
-                player.play(project, null, 0, project.length, false)
-            }, {
+                player.play(project, null, labCursor.takeIf { it < project.length } ?: 0, project.length, false)
+            }
+            box.addView(button(t("Insert at cursor", "Вставить в дорожку"), primary = true) {
                 val project = labPattern()
                 if (cursor + project.length <= MAX_TRACK_MS) {
+                    player.stop()
                     val stop = cursor + project.length
                     val length = maxOf(pattern.length, stop)
                     val points = pattern.points.filterNot { it.ms in cursor..stop } +
@@ -410,14 +488,25 @@ class HapticStudioActivity : AppCompatActivity() {
                         show(Page.EDITOR)
                     }
                 }
-            })
+            }, actionMargin())
         }
-        card(body) { box ->
+        card(body, t("Effect settings", "Настройки эффекта")) { box ->
             fun control(title: String, min: Int, max: Int, initial: Int, set: (Int) -> Unit) {
-                slider(box, title, min, max, initial) { value -> set(value); graph?.pattern = labPattern() }
+                slider(box, title, min, max, initial) { value ->
+                    if (player.playing) player.stop()
+                    set(value)
+                    graph?.pattern = labPattern()
+                    playback?.duration = labLength
+                    seekLab(labCursor)
+                }
+            }
+            control(t("Amplitude", "Амплитуда"), 0, 100, labStrength) { labStrength = it }
+            if (slide == HapticSlide.TAPS) {
+                control(t("Number of taps", "Количество постукиваний"), 1, 8, labTaps) { labTaps = it }
+                control(t("Interval · ms", "Интервал · мс"), 80, 700, tapSpacing) { tapSpacing = it }
+                return@card
             }
             control(t("Duration · ms", "Длительность · мс"), 80, 5000, labDuration) { labDuration = it }
-            control(t("Amplitude", "Амплитуда"), 0, 100, labStrength) { labStrength = it }
             control(t("Attack · ms", "Нарастание · мс"), 1, 2000, adsr.attack) { adsr = adsr.copy(attack = it) }
             control(t("Decay · ms", "Начальное затухание · мс"), 1, 2000, adsr.decay) { adsr = adsr.copy(decay = it) }
             control(t("Sustain", "Уровень удержания"), 0, 100, adsr.sustain) { adsr = adsr.copy(sustain = it) }
@@ -440,34 +529,38 @@ class HapticStudioActivity : AppCompatActivity() {
     private fun labPattern(): HapticPattern {
         val hz = motor.frequency
         fun absolute(value: Int) = if (hz == null) 0f else hz.start + (hz.endInclusive - hz.start) * value / 100f
-        val raw = slidePoints(slide, 0, labDuration, labStrength * .01f, labSharpness * .01f,
-            absolute(labFrequency), absolute(labFrequencyEnd), labDensity, adsr, curve)
-        val points = if (hz == null && motor.richTap) raw.map {
+        val raw = slidePoints(slide, 0, labLength, labStrength * .01f, labSharpness * .01f,
+            absolute(labFrequency), absolute(labFrequencyEnd), if (slide == HapticSlide.TAPS) labTaps else labDensity, adsr, curve)
+        val points = if (hz == null && motor.richTap && slide != HapticSlide.TAPS) raw.map {
             val from = (labFrequency - 50) * 2f
             val to = if (slide == HapticSlide.FREQUENCY) (labFrequencyEnd - 50) * 2f else from
             it.copy(pitch = from + (to - from) * it.ms / labDuration)
         } else raw
-        return HapticPattern(slideName(slide), labDuration, points)
+        return HapticPattern(slideName(slide), labLength, points)
     }
 
     private fun library() {
-        card(body) { box ->
+        card(body, t("Current pattern", "Текущий паттерн")) { box ->
+            box.addView(CouiInformation(this, dark, accent, pattern.name, clock(pattern.length)))
             buttons(box, t("New", "Новый"), t("Save", "Сохранить"), {
                 acceptImport(HapticPattern.empty(t("Untitled pattern", "Новый паттерн")))
             }, { save(false) })
             buttons(box, t("Rename", "Переименовать"), t("Duplicate", "Дублировать"),
                 { save(false) }, { save(true) })
-            buttons(box, t("Import", "Импорт"), t("Export", "Экспорт"), {
+        }
+        card(body, t("Transfer", "Перенос"), divided = true) { box ->
+            link(box, t("Import pattern", "Импортировать паттерн")) {
                 if (!busy) openPattern.launch(arrayOf("application/json", "text/plain", "application/octet-stream"))
-            }, {
+            }
+            link(box, t("Export pattern", "Экспортировать паттерн")) {
                 exportProject = pattern
                 val fileName = pattern.name.replace(Regex("[^\\p{L}\\p{N} _.-]"), "_").trim().trim('.').ifEmpty { "haptic" }
                 export.launch("$fileName.cpi-haptic.json")
-            })
+            }
         }
-        card(body) { box ->
+        card(body, t("Saved patterns", "Сохранённые паттерны"), divided = true) { box ->
             if (entries.isEmpty()) box.addView(CouiInformation(this, dark, accent,
-                t("Saved patterns", "Сохранённые паттерны"), t("Save the current pattern to start your library.", "Сохрани текущий паттерн, чтобы создать библиотеку.")))
+                t("Library is empty", "Библиотека пуста"), t("Save the current pattern to add it here.", "Сохрани текущий паттерн, чтобы добавить его сюда.")))
             for (entry in entries) link(box, entry.pattern.name,
                 if (selectedId == entry.id) t("Current", "Текущий") else clock(entry.pattern.length)) {
                 choose(entry.pattern.name, listOf(t("Open", "Открыть"), t("Remove", "Удалить"))) {
@@ -490,7 +583,7 @@ class HapticStudioActivity : AppCompatActivity() {
             motor.amplitude || motor.primitives > 0 || hardware != null -> "Advanced Haptics"
             else -> "Basic Haptics"
         }
-        card(body) { box ->
+        card(body, divided = true) { box ->
             fun report(title: String, value: String) { box.addView(CouiInformation(this, dark, accent, title, value)) }
             fun status(value: Boolean) = if (value) t("Available", "Доступно") else t("Unavailable", "Недоступно")
             report(t("Hardware level", "Возможности устройства"), tier)
@@ -508,7 +601,7 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun addGraph(box: LinearLayout, project: HapticPattern, editable: Boolean) {
-        val timeline = HapticTimeline(this, ink, accent, ::drawPoint, ::seek).apply {
+        val timeline = HapticTimeline(this, ink, accent, ::drawPoint, if (editable) ::seek else ::seekLab).apply {
             pattern = project
             source = if (editable && project.audio == audio?.toString()) waveform else null
             channel = if (editable) this@HapticStudioActivity.channel else HapticChannel.AMPLITUDE
@@ -518,7 +611,7 @@ class HapticStudioActivity : AppCompatActivity() {
                 else -> 0f..1f
             }
             selected = this@HapticStudioActivity.selected
-            cursor = this@HapticStudioActivity.cursor
+            cursor = if (editable) this@HapticStudioActivity.cursor else labCursor
             drawCurve = editable && this@HapticStudioActivity.drawCurve
             contentDescription = t("Audio and haptic timeline", "Звуковая и тактильная дорожки")
         }
@@ -527,18 +620,35 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun previewControls(box: LinearLayout) {
-        timeLabel = label("${clock(cursor)} / ${clock(pattern.length)}", 13f).also {
-            it.gravity = Gravity.CENTER; box.addView(it)
-        }
-        val controls = row()
-        playButton = button(if (player.playing) t("Pause", "Пауза") else t("Play", "Воспроизвести")) {
-            if (player.playing) { cursor = player.position; player.stop() } else play(false)
-        }.also { controls.addView(it, LinearLayout.LayoutParams(0, -2, 1f)) }
-        controls.addView(button(t("Stop", "Стоп")) { player.stop(); seek(regionStart) }, LinearLayout.LayoutParams(0, -2, 1f))
-        box.addView(controls)
+        playbackBar(box, pattern.length, cursor, ::seek, regionStart) { play(false) }
+        divider(box)
         link(box, t("Haptics only", "Только вибрация")) { play(true) }
         toggle(box, t("Loop fragment", "Зациклить фрагмент"), pattern.repeat) { changePattern(pattern.copy(repeat = it)) }
         if (original != null) toggle(box, t("Compare with original", "Сравнить с оригиналом"), compare) { compare = it }
+    }
+
+    private fun playbackBar(box: LinearLayout, duration: Int, position: Int, seek: (Int) -> Unit, start: Int = 0, play: () -> Unit) {
+        val bar = HapticPlaybackBar(this, dark, accent, t("Play", "Воспроизвести"), t("Pause", "Пауза"), t("Stop", "Остановить"),
+            toggle = {
+                if (player.playing) {
+                    val pausedAt = player.position
+                    player.stop()
+                    seek(pausedAt)
+                } else play()
+            },
+            stop = { player.stop(); seek(start) },
+        )
+        bar.duration = duration
+        bar.update(if (player.playing) player.position else position, player.playing)
+        playback = bar
+        box.addView(bar)
+    }
+
+    private fun seekLab(position: Int) {
+        if (player.playing) player.stop()
+        labCursor = position.coerceIn(0, labLength)
+        graph?.cursor = labCursor
+        playback?.update(labCursor, false)
     }
 
     private fun play(silent: Boolean) {
@@ -631,7 +741,7 @@ class HapticStudioActivity : AppCompatActivity() {
         selected = ms
         cursor = ms
         graph?.cursor = ms
-        timeLabel?.text = "${clock(cursor)} / ${clock(pattern.length)}"
+        playback?.update(cursor, player.playing)
         if (finished) {
             dragBefore?.takeIf { it != pattern }?.let(::record)
             dragBefore = null
@@ -647,7 +757,7 @@ class HapticStudioActivity : AppCompatActivity() {
         selected = nearest?.ms?.takeIf { abs(it - cursor) <= maxOf(18, pattern.length / 100) }
         graph?.cursor = cursor
         graph?.selected = selected
-        timeLabel?.text = "${clock(cursor)} / ${clock(pattern.length)}"
+        playback?.update(cursor, player.playing)
         if (page == Page.EDITOR && previous != selected) refreshPointControls()
     }
 
@@ -713,6 +823,7 @@ class HapticStudioActivity : AppCompatActivity() {
         record(pattern)
         pattern = next
         graph?.pattern = next
+        playback?.duration = next.length
         cursor = cursor.coerceAtMost(next.length)
         if (regionStart >= next.length || (regionEnd ?: 0) > next.length) resetSelection()
     }
@@ -753,6 +864,7 @@ class HapticStudioActivity : AppCompatActivity() {
         t("Soft rise", "Мягкое нарастание"), t("Soft fall", "Мягкое затухание"),
         t("Haptic wave", "Волна"), t("Pulse flow", "Поток импульсов"),
         t("Sharpness transition", "Переход резкости"), t("Custom curve", "Своя кривая"),
+        t("Taps", "Постукивания"),
     )[value.ordinal]
     private fun curveName(value: HapticCurve) = listOf(
         t("Linear", "Линейная"), t("Ease in", "Плавный старт"), t("Ease out", "Плавный финиш"),
@@ -760,6 +872,7 @@ class HapticStudioActivity : AppCompatActivity() {
     )[value.ordinal]
     private fun styleName(value: HapticStyle) = listOf(
         "Balanced", "Smooth", "Dynamic", "Bass Focus", "Melody Flow", "Precision", "Custom AI",
+        t("Taps", "Постукивания"),
     )[value.ordinal]
     private fun title(value: Page) = when (value) {
         Page.HOME -> "Advanced Haptic Studio"
@@ -773,22 +886,37 @@ class HapticStudioActivity : AppCompatActivity() {
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
     private fun clock(ms: Int) = "%d:%02d.%02d".format(java.util.Locale.ROOT, ms / 60_000, ms / 1000 % 60, ms / 10 % 100)
-    private fun column() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-    private fun label(value: String, size: Float) = TextView(this).apply { text = value; textSize = size; setTextColor(ink) }
+    private fun column() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        clipChildren = false
+        clipToPadding = false
+    }
+    private fun row() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        clipChildren = false
+        clipToPadding = false
+    }
+    private fun summary(value: String) = CouiSlot(this, dark, accent) {
+        Text(value, Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+    }
     private fun message(value: String) { Toast.makeText(this, value, Toast.LENGTH_SHORT).show() }
-    private fun button(title: String, action: () -> Unit) = CouiButton(this, dark, accent, ink, surface).apply {
-        text = title
-        setOnClickListener { action() }
+    private fun button(title: String, primary: Boolean = false, enabled: Boolean = true, action: () -> Unit) = CouiSlot(this, dark, accent) {
+        ColorOs17Button(title, primary, onClick = action, enabled = enabled, modifier = Modifier.fillMaxWidth(),
+            minimumHeight = 44.dp)
+    }
+    private fun actionMargin() = LinearLayout.LayoutParams(-1, -2).apply {
+        setMargins(dp(16), dp(6), dp(16), dp(12))
     }
     private fun buttons(parent: LinearLayout, first: String, second: String, a: () -> Unit, b: () -> Unit) {
         parent.addView(row().apply {
-            addView(button(first, a), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(button(second, b), LinearLayout.LayoutParams(0, -2, 1f))
-        })
+            addView(button(first, action = a), LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(8) })
+            addView(button(second, action = b), LinearLayout.LayoutParams(0, -2, 1f))
+        }, actionMargin())
     }
-    private fun link(parent: LinearLayout, title: String, detail: String? = null, action: () -> Unit) {
-        parent.addView(CouiPreference(this, dark, accent, title, detail, null, accent) { action() })
+    private fun link(parent: LinearLayout, title: String, detail: String? = null, icon: Int? = null, action: () -> Unit) {
+        parent.addView(CouiPreference(this, dark, accent, title, detail, icon, accent) { action() })
     }
     private fun toggle(parent: LinearLayout, title: String, state: Boolean, change: (Boolean) -> Unit) {
         parent.addView(CouiSwitchRow(this, dark, accent, title, null, state, false, null, change))
@@ -806,17 +934,38 @@ class HapticStudioActivity : AppCompatActivity() {
     }
     private fun option(parent: LinearLayout, title: String, value: Int, choices: List<String>, select: (Int) -> Unit) {
         parent.addView(CouiSelection(this, dark, accent, title, choices[value]).apply {
-            setOnClickListener { choose(title, choices, select) }
+            setOnClickListener { showOptions(this, choices, value, select) }
         })
     }
-    private fun card(parent: LinearLayout, content: (LinearLayout) -> Unit) {
+    private fun showOptions(anchor: View, choices: List<String>, selected: Int, select: (Int) -> Unit) {
+        popup?.let(root::removeView)
+        val anchorPos = IntArray(2)
+        val rootPos = IntArray(2)
+        anchor.getLocationInWindow(anchorPos)
+        root.getLocationInWindow(rootPos)
+        lateinit var menu: CouiPopup
+        menu = CouiPopup(this, dark, accent, choices.mapIndexed { i, label -> i to label }, selected, {
+            root.removeView(menu)
+            if (popup === menu) popup = null
+        }, select)
+        popup = menu
+        root.addView(menu, FrameLayout.LayoutParams(anchor.width, anchor.height).apply {
+            leftMargin = anchorPos[0] - rootPos[0] - root.paddingLeft
+            topMargin = anchorPos[1] - rootPos[1]
+        })
+    }
+    private fun divider(parent: LinearLayout, position: Int = parent.childCount) {
+        parent.addView(CouiSlot(this, dark, accent) { SettingsDivider() }, position)
+    }
+    private fun card(parent: LinearLayout, title: String? = null, divided: Boolean = false, content: (LinearLayout) -> Unit) {
+        if (title != null) parent.addView(CouiSlot(this, dark, accent) {
+            SmallTitle(title, Modifier.semantics { heading() }, insideMargin = PaddingValues(16.dp, 8.dp))
+        })
         val box = column()
-        val glass = CouiSurface(this, dark, accent, surface, 24)
-        val shell = FrameLayout(this)
-        shell.addView(glass, FrameLayout.LayoutParams(-1, -1))
-        shell.addView(box, FrameLayout.LayoutParams(-1, -2))
-        parent.addView(shell, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         content(box)
+        if (divided) for (index in (box.childCount - 1) downTo 1) divider(box, index)
+        parent.addView(CouiCardHost(this, dark, accent, surface, 20, box),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
     }
     private fun choose(title: String, options: List<String>, action: (Int) -> Unit) {
         showDialog(title) { box, dialog ->
@@ -837,16 +986,24 @@ class HapticStudioActivity : AppCompatActivity() {
             }
             field.onSubmit = submit
             box.addView(field)
-            box.addView(button(t("Apply", "Применить"), submit))
+            box.addView(button(t("Apply", "Применить"), primary = true, action = submit))
         }
     }
     private fun showDialog(title: String, keyboard: Boolean = false, content: (LinearLayout, CouiAnchoredDialog) -> Unit) {
         dialog?.dispose()
         val panel = column().apply { setPadding(dp(14), dp(12), dp(14), dp(14)) }
-        panel.addView(label(title, 19f).apply { gravity = Gravity.CENTER; setPadding(0, dp(8), 0, dp(8)) })
+        val dialogHeader = row()
+        val close = CouiIconButton(this, dark, accent, ink, surface, R.drawable.ic_close, t("Close", "Закрыть"), effects)
+        dialogHeader.addView(close, LinearLayout.LayoutParams(dp(42), dp(42)))
+        dialogHeader.addView(CouiSlot(this, dark, accent) {
+            Text(title, Modifier.padding(start = 8.dp).semantics { heading() }, style = COUITheme.textStyles.title4,
+                color = COUITheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        panel.addView(dialogHeader, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         val effect = RenderEffect.createBlurEffect(dp(11).toFloat(), dp(11).toFloat(), Shader.TileMode.CLAMP)
         val d = CouiAnchoredDialog(this, panel, dark, minOf(dp(420), root.width - dp(24)).coerceAtLeast(dp(180)),
-            null, ValueAnimator.areAnimatorsEnabled()) { alpha -> root.setRenderEffect(if (alpha > .15f) effect else null) }
+            null, canAnimate()) { alpha -> if (effects) root.setRenderEffect(if (alpha > .15f) effect else null) }
+        close.setOnClickListener { d.dismiss() }
         content(panel, d)
         d.setOnDismissListener { if (dialog === d) { dialog = null; root.setRenderEffect(null) } }
         dialog = d

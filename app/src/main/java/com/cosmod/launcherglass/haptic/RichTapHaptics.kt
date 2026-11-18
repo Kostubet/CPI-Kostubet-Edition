@@ -14,6 +14,12 @@ internal class RichTapHaptics private constructor(private val createPattern: Met
         createPattern.invoke(null, payload, if (repeating) Int.MAX_VALUE else 1, 0, 255, 0) as? VibrationEffect
     }.getOrNull()
 
+    fun tapEffect(taps: List<HapticClick>, duration: Int): VibrationEffect? = runCatching {
+        if (duration > 40_000 || taps.size > 160) return null
+        val payload = richTapTapPayload(taps, Process.myPid(), sequence.incrementAndGet())
+        createPattern.invoke(null, payload, 1, 0, 255, 0) as? VibrationEffect
+    }.getOrNull()
+
     companion object {
         private val sequence = AtomicInteger()
         fun discover(): RichTapHaptics? = runCatching {
@@ -26,6 +32,20 @@ internal class RichTapHaptics private constructor(private val createPattern: Met
             RichTapHaptics(method)
         }.getOrNull()
     }
+}
+
+internal fun richTapTapPayload(taps: List<HapticClick>, pid: Int, sequence: Int): IntArray {
+    val groups = taps.chunked(16)
+    val payload = ArrayList<Int>(5 + groups.size * 3 + taps.size * 7)
+    payload.addAll(listOf(2, 2, pid, sequence, groups.size or (groups.size shl 16)))
+    groups.forEachIndexed { index, group ->
+        val first = group.first().time
+        payload.addAll(listOf(index, first, group.size))
+        group.forEach { tap ->
+            payload.addAll(listOf(4097, 5, 0, tap.time - first, (tap.strength * 100).roundToInt(), 0, 0))
+        }
+    }
+    return payload.toIntArray()
 }
 
 internal fun richTapPayload(pattern: HapticPattern, start: Int, end: Int, pid: Int, sequence: Int): IntArray? {

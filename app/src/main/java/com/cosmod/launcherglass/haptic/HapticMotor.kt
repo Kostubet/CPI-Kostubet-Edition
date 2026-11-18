@@ -48,6 +48,13 @@ internal class HapticMotor(context: Context) {
         if (!present || end <= start) return null
         val useFrequency = frequency != null && pattern.points.any { it.hz > 0f }
         val useRichTap = vendor != null && pattern.points.any { it.pitch != 0f }
+        if (pattern.hasTapPoints && !useFrequency && !useRichTap) {
+            pattern.nativeTaps(start, end)?.let { taps ->
+                clickEffect(taps)?.let { return it }
+                vendor?.tapEffect(taps, end - start)?.let { return it }
+            }
+            return HapticWaveform.sample(pattern, start, end, amplitude).effect(false)
+        }
         if (useRichTap) vendor.effect(pattern, start, end)?.let { return it }
         if (Build.VERSION.SDK_INT >= 36 && envelope != null) {
             val effect = nativeEnvelope(pattern, start, end, envelope, useFrequency)
@@ -56,6 +63,21 @@ internal class HapticMotor(context: Context) {
         if (!useRichTap && end - start <= 5000) vendor?.effect(pattern, start, end)?.let { return it }
         return HapticWaveform.sample(pattern, start, end, amplitude).effect(false)
     }
+
+    private fun clickEffect(taps: List<HapticClick>): VibrationEffect? = runCatching {
+        val motor = vibrator ?: return null
+        val primitive = VibrationEffect.Composition.PRIMITIVE_CLICK
+        if (taps.size > 256 || !motor.areAllPrimitivesSupported(primitive)) return null
+        val duration = motor.getPrimitiveDurations(primitive).firstOrNull()?.takeIf { it > 0 } ?: return null
+        var previousEnd = 0
+        val composition = VibrationEffect.startComposition()
+        for (tap in taps) {
+            if (tap.time < previousEnd) return null
+            composition.addPrimitive(primitive, tap.strength, tap.time - previousEnd)
+            previousEnd = tap.time + duration
+        }
+        composition.compose()
+    }.getOrNull()
 
     fun nativeRingtone(pattern: HapticPattern): VibrationEffect? {
         val hardware = envelope
@@ -126,7 +148,7 @@ internal class HapticWaveform(val times: LongArray, val levels: IntArray) {
 
     companion object {
         fun sample(pattern: HapticPattern, start: Int, end: Int, amplitude: Boolean): HapticWaveform {
-            val interval = if (amplitude) 16 else 32
+            val interval = if (pattern.hasTapPoints) 8 else if (amplitude) 16 else 32
             val times = ArrayList<Long>()
             val levels = ArrayList<Int>()
             var time = start

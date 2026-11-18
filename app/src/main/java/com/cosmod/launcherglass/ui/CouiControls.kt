@@ -384,6 +384,32 @@ internal class CouiSurface(context: Context, dark: Boolean, accent: Int, fill: I
     }
 }
 
+internal class CouiCardHost(
+    context: Context, dark: Boolean, accent: Int, color: Int, radius: Int, private val body: View,
+) : FrameLayout(context) {
+    private val surface = CouiSurface(context, dark, accent, color, radius)
+
+    init {
+        clipChildren = false
+        clipToPadding = false
+        addView(surface, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(body, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+    }
+
+    // Size the decorative surface to the rows, including when the card is inside a scroll view.
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        measureChildWithMargins(body, widthMeasureSpec, 0, heightMeasureSpec, 0)
+        setMeasuredDimension(
+            resolveSizeAndState(body.measuredWidth + paddingLeft + paddingRight, widthMeasureSpec, body.measuredState),
+            resolveSizeAndState(body.measuredHeight + paddingTop + paddingBottom, heightMeasureSpec, 0),
+        )
+        surface.measure(
+            MeasureSpec.makeMeasureSpec(measuredWidth - paddingLeft - paddingRight, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(measuredHeight - paddingTop - paddingBottom, MeasureSpec.EXACTLY),
+        )
+    }
+}
+
 internal class CouiPreference(context: Context, dark: Boolean, accent: Int, title: String,
     summary: String?, icon: Int?, iconTint: Int, catalog:Boolean=false, onPreview:((View)->Unit)?=null,
     longPressLabel:Int=R.string.ui_feature_peek_title,

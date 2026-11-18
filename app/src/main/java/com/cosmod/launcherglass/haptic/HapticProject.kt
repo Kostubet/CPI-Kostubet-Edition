@@ -24,7 +24,7 @@ internal enum class HapticCurve {
     }
 }
 
-internal enum class HapticSlide { INTENSITY, FREQUENCY, RISE, FALL, WAVE, PULSE_FLOW, SHARPNESS, CUSTOM }
+internal enum class HapticSlide { INTENSITY, FREQUENCY, RISE, FALL, WAVE, PULSE_FLOW, SHARPNESS, CUSTOM, TAPS }
 internal enum class HapticChannel { AMPLITUDE, FREQUENCY, RICHTAP, SHARPNESS }
 
 internal data class HapticPoint(
@@ -36,6 +36,7 @@ internal data class HapticPoint(
     val bezierIn: Float = .25f,
     val bezierOut: Float = .75f,
     val pitch: Float = 0f,
+    val tap: Boolean = false,
 ) {
     init {
         require(ms in 0..MAX_TRACK_MS && amplitude in 0f..1f && hz in 0f..2000f &&
@@ -92,12 +93,37 @@ internal data class HapticPattern(
         return copy(points = updated)
     }
 
+    val hasTapPoints get() = points.any { it.tap && it.amplitude > 0f }
+
+    fun nativeTaps(start: Int, end: Int): List<HapticClick>? {
+        if (points.any { !it.tap && it.amplitude > 0f }) return null
+        return points.mapNotNull { point ->
+            val time = point.ms + offset
+            if (!point.tap || time !in start until end) return@mapNotNull null
+            at(time).amplitude.takeIf { it > 0f }?.let { HapticClick(time - start, it) }
+        }.takeIf { it.isNotEmpty() }
+    }
+
     companion object {
         fun empty(name: String) = HapticPattern(name, 2_000, listOf(HapticPoint(0, 0f), HapticPoint(2_000, 0f)))
     }
 }
 
 internal data class HapticAdsr(val attack: Int = 160, val decay: Int = 200, val sustain: Int = 55, val release: Int = 220)
+internal data class HapticClick(val time: Int, val strength: Float)
+
+internal fun tapPoints(length: Int, clicks: List<HapticClick>): List<HapticPoint> = buildList {
+    add(HapticPoint(0, 0f))
+    for (click in clicks) {
+        val start = maxOf(last().ms, click.time)
+        val end = minOf(start + 32, length)
+        if (end - start < 12 || click.strength <= 0f) continue
+        if (last().ms != start) add(HapticPoint(start, 0f))
+        add(HapticPoint(start + 4, click.strength, tap = true))
+        add(HapticPoint(end, 0f, curve = HapticCurve.EASE_OUT))
+    }
+    if (last().ms < length) add(HapticPoint(length, 0f))
+}
 
 internal fun slidePoints(
     type: HapticSlide,
@@ -111,6 +137,11 @@ internal fun slidePoints(
     adsr: HapticAdsr,
     curve: HapticCurve,
 ): List<HapticPoint> {
+    if (type == HapticSlide.TAPS) {
+        val count = minOf(density, duration / 64).coerceAtLeast(1)
+        return tapPoints(duration, List(count) { HapticClick(duration * it / count, amplitude) })
+            .map { it.copy(ms = it.ms + start) }
+    }
     val attack = adsr.attack.coerceIn(1, duration / 2)
     val decay = adsr.decay.coerceIn(1, duration - attack - 1)
     val release = adsr.release.coerceIn(1, duration - attack - decay)

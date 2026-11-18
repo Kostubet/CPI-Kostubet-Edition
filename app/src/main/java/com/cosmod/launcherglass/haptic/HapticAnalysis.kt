@@ -10,7 +10,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 internal enum class HapticStyle {
-    BALANCED, SMOOTH, DYNAMIC, BASS_FOCUS, MELODY_FLOW, PRECISION, CUSTOM;
+    BALANCED, SMOOTH, DYNAMIC, BASS_FOCUS, MELODY_FLOW, PRECISION, CUSTOM, TAPS;
 
     fun options() = when (this) {
         BALANCED, CUSTOM -> GeneratorOptions()
@@ -19,6 +19,7 @@ internal enum class HapticStyle {
         BASS_FOCUS -> GeneratorOptions(bass = 94, melody = 15, impulseMs = 90)
         MELODY_FLOW -> GeneratorOptions(smoothness = 80, bass = 20, melody = 96, impulseMs = 155)
         PRECISION -> GeneratorOptions(smoothness = 23, detail = 82, impulseMs = 50, noise = 35)
+        TAPS -> GeneratorOptions(sensitivity = 74, strength = 88, detail = 82, repetitions = 10, noise = 30)
     }
 }
 
@@ -102,6 +103,7 @@ internal object HapticAnalysis {
         var accent = 0f
         var lastAccent = -1000
         val points = ArrayList<HapticPoint>(frames.size + 1)
+        val taps = if (style == HapticStyle.TAPS) ArrayList<HapticClick>() else null
         points += HapticPoint(0, 0f)
         for (i in frames.indices) {
             val ms = (i + 1) * HOP_MS
@@ -118,7 +120,8 @@ internal object HapticAnalysis {
             baseline += .072f * (transient - baseline)
             val quiet = f.rms <= gate
             accent *= onsetDecay
-            if (!quiet && i - lastAccent >= minimumGap && transient > threshold.coerceAtLeast(.009f)) {
+            val hit = !quiet && i - lastAccent >= minimumGap && transient > threshold.coerceAtLeast(.009f)
+            if (hit) {
                 accent = (.24f + (transient - threshold) * .85f + bass * .42f).coerceAtMost(.9f)
                 lastAccent = i
             }
@@ -127,11 +130,16 @@ internal object HapticAnalysis {
                 .coerceIn(0f, 1f)
             val target = if (quiet) 0f else (strong + options.dynamics * .01f * (strong * strong - strong)) *
                 options.strength * .01f * if (style == HapticStyle.PRECISION && accent < .12f) .43f else 1f
+            if (taps != null) {
+                if (hit) taps += HapticClick(i * HOP_MS, target.coerceIn(0f, 1f))
+                continue
+            }
             flowing += (target - flowing) * if (target > flowing) attack else decay
             if (quiet && flowing < .018f) flowing = 0f
             points += HapticPoint(ms, flowing.coerceIn(0f, 1f), sharpness = (.24f + brightness * .46f + accent * .3f)
                 .coerceIn(0f, 1f))
         }
+        if (taps != null) return tapPoints(track.length, taps)
         points += HapticPoint(track.length, 0f)
         return points
     }

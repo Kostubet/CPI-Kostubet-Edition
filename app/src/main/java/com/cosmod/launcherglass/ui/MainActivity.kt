@@ -432,23 +432,10 @@ class MainActivity : AppCompatActivity() {
         cornerRadius=dp(radius).toFloat()
     }
 
-    private fun card(content:View,inner:Boolean=false):FrameLayout=object:FrameLayout(this){
-        // A decorative MATCH_PARENT surface must not determine a WRAP_CONTENT card's height.
-        override fun onMeasure(widthMeasureSpec:Int,heightMeasureSpec:Int){
-            measureChildWithMargins(content,widthMeasureSpec,0,heightMeasureSpec,0)
-            setMeasuredDimension(
-                View.resolveSizeAndState(content.measuredWidth+paddingLeft+paddingRight,widthMeasureSpec,content.measuredState),
-                View.resolveSizeAndState(content.measuredHeight+paddingTop+paddingBottom,heightMeasureSpec,0))
-            getChildAt(0).measure(View.MeasureSpec.makeMeasureSpec(measuredWidth-paddingLeft-paddingRight,View.MeasureSpec.EXACTLY),
-                View.MeasureSpec.makeMeasureSpec(measuredHeight-paddingTop-paddingBottom,View.MeasureSpec.EXACTLY))
-        }
-    }.apply {
+    private fun card(content:View,inner:Boolean=false):FrameLayout {
         val color=if(coloredFeatures)withAlpha(Color.WHITE,if(darkUi)27 else 154)else if(inner)raised else panel
         val radius=if(inner)16 else 20
-        addView(CouiSurface(this@MainActivity,darkUi,primary,color,radius),FrameLayout.LayoutParams(-1,-1))
-        clipChildren=false
-        clipToPadding=false
-        addView(content,FrameLayout.LayoutParams(-1,-2))
+        return CouiCardHost(this,darkUi,primary,color,radius,content)
     }
 
     private fun button():CouiButton {

@@ -31,7 +31,7 @@ internal object HapticPatternCodec {
         }
         put("points", JSONArray(pattern.points.map {
             JSONArray(listOf(it.ms, it.amplitude.toDouble(), it.hz.toDouble(), it.sharpness.toDouble(),
-                it.curve.name, it.bezierIn.toDouble(), it.bezierOut.toDouble(), it.pitch.toDouble()))
+                it.curve.name, it.bezierIn.toDouble(), it.bezierOut.toDouble(), it.pitch.toDouble(), it.tap))
         }))
     }.toString()
 
@@ -57,7 +57,7 @@ internal object HapticPatternCodec {
             val p = points.getJSONArray(i)
             HapticPoint(p.getInt(0), p.getDouble(1).toFloat(), p.getDouble(2).toFloat(), p.getDouble(3).toFloat(),
                 HapticCurve.valueOf(p.getString(4)), p.getDouble(5).toFloat(), p.getDouble(6).toFloat(),
-                p.optDouble(7, 0.0).toFloat())
+                p.optDouble(7, 0.0).toFloat(), p.optBoolean(8))
         }, root.optString("audio").takeIf { includeAudio && Uri.parse(it).scheme == "content" },
             root.optInt("intensity", 100), root.optInt("offset", 0), root.optInt("fadeIn", 0), root.optInt("fadeOut", 0),
             root.optString("style").takeIf { it.isNotEmpty() }?.let(HapticStyle::valueOf), generator, root.optBoolean("repeat"))
