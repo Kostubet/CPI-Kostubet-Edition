@@ -41,7 +41,6 @@ object IconBitmapProcessor {
     fun clearCache() {
         cache.clear()
         clearTintCache()
-        com.cosmod.launcherglass.util.GlyphShadowHelper.clearCache()
         cachedOpacity = -1
     }
 

@@ -21,7 +21,7 @@ internal object FeatureSections {
         if(off("VOLUME"))disable("volume_glass_enabled")
         if(off("SHADE"))disable(ShadeGlassSettings.Panel.CONTROL.enabled,
             ShadeGlassSettings.Panel.NOTIFICATIONS.enabled,ShadeGlassSettings.CONTROL_BACKGROUND)
-        if(off("MOTION"))disable("app_tilt_enabled",com.cosmod.launcherglass.util.Ba31kAnimationSettings.ENABLED)
+        if(off("MOTION"))disable(com.cosmod.launcherglass.util.Ba31kAnimationSettings.ENABLED)
         if(off("LOCKSCREEN")){
             LockscreenSettings.Surface.entries.forEach {disable(it.key("enabled"))}
             disable(LockscreenSettings.CLEAR_BOUNCER_BLUR,LockscreenSettings.UNLOCK_ENABLED,LockscreenSettings.AOD_BLUR_ENABLED)

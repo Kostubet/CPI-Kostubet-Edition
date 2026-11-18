@@ -16,7 +16,7 @@ object IconMaterialRenderer {
     private data class Key(
         val mask: Bitmap, val glyph: Bitmap, val width: Int, val height: Int,
         val color: Int, val opacity: Int, val hideGlyph: Boolean, val blurred: Boolean,
-        val gradient: Int, val stroke: Int, val shadow: Int, val glyphStroke: Int, val glyphStrokeWidth: Int, val glyphStrokeBrightness: Int,
+        val gradient: Int, val stroke: Int, val glyphStroke: Int, val glyphStrokeWidth: Int, val glyphStrokeBrightness: Int,
         val depthBits:Int,val depthStage:Int
     )
 
@@ -180,7 +180,7 @@ object IconMaterialRenderer {
         if(sampler.node.hasDisplayList())return false
         sampler.folderPanel=null
         val canvas=sampler.node.beginRecording(sampler.node.width,sampler.node.height)
-        canvas.drawColor(Color.BLACK)
+        canvas.drawColor(if(sampler.style.folderBackdrop)Color.TRANSPARENT else Color.BLACK)
         sampler.node.endRecording()
         GlassLogger.limited("IconMaterial","restoredSample"){"Restored discarded wallpaper sample display list"}
         return true
@@ -375,16 +375,15 @@ object IconMaterialRenderer {
             view.transformMatrixToGlobal(it)
         }
         var restored=false
+        var folderImage:Bitmap?=null
         val scroll=com.cosmod.launcherglass.util.LiveBlurEngine.wallpaperScrollRatio
         val finish=opticalKey()
         val footprint=RectF()
-        var folderImage:Bitmap?=null
         for(sampler in entries.values){
             restored=restoreSample(sampler) || restored
             if(sampleFolderPanel(sampler,view,sampler.style))continue
-            val image=if(sampler.style.folderBackdrop) {
-                folderImage ?: com.cosmod.launcherglass.util.WallpaperHelper.getFolderWallpaper(view.context).also {folderImage=it}
-            } else if(sampler.style.surfaceScope==GlassSurface.PAGE_INDICATOR){
+            if(sampler.style.folderBackdrop)continue
+            val image=if(sampler.style.surfaceScope==GlassSurface.PAGE_INDICATOR){
                 PageIndicatorGlass.wallpaper(view) ?: continue
             }else if(sampler.style.surfaceScope==GlassSurface.WIDGETS){
                 com.cosmod.launcherglass.util.WallpaperHelper.getWidgetWallpaper(view.context) ?: continue
@@ -425,13 +424,14 @@ object IconMaterialRenderer {
         val width = bounds.width()
         val height = bounds.height()
         if (width <= 0 || height <= 0) return
-        val blurred = wallpaper != null && source != null
+        val folderSample = style.folderBackdrop && binding?.foreign == false && PrefsHelper.gpuEffects &&
+            canvas.isHardwareAccelerated && android.os.Build.VERSION.SDK_INT >= 33
+        val blurred = folderSample || (wallpaper != null && source != null && !style.folderBackdrop)
         val surfaceTint=SurfaceTints.get(style.surfaceScope)
         val key = Key(mask, glyph, width, height, surfaceTint?.color ?: color,
             surfaceTint?.let {it.opacity*255/100} ?: tintAlpha, hideGlyph, blurred,
             if(volume)style.volumeOpacity ?: PrefsHelper.gradientOpacity else 0,
             style.rimOpacity ?: if (!hideGlyph && PrefsHelper.iconStroke) PrefsHelper.strokeOpacity else 0,
-            if (PrefsHelper.glyphShadow) PrefsHelper.shadowOpacity else 0,
             if (PrefsHelper.glyphStroke) PrefsHelper.glyphStrokeOpacity else 0,
             if (PrefsHelper.glyphStroke) PrefsHelper.glyphStrokeWidth else 0,
             if (PrefsHelper.glyphStroke) PrefsHelper.glyphStrokeBrightness else 0,PrefsHelper.colorDepthBits,PrefsHelper.colorDepthStage)
@@ -504,7 +504,7 @@ object IconMaterialRenderer {
             val softwarePlate=if(finalDepth && !canvas.isHardwareAccelerated)Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)else null
             val plate=depthNode?.beginRecording(width,height) ?: softwarePlate?.let(::Canvas) ?: canvas
             try {
-            if (wallpaper != null && source != null && material.mask != null) {
+            if (blurred && material.mask != null) {
                 val existing=if(binding?.foreign==true && canvas.isHardwareAccelerated)
                     foreignSampler(binding,material,width,height) else null
                 if(existing!=null){
@@ -517,7 +517,7 @@ object IconMaterialRenderer {
                         val node=RenderNode("CherryPick.wallpaperSample")
                         node.setPosition(0,0,width,height)
                         val recording=node.beginRecording(width,height)
-                        recording.drawColor(Color.BLACK)
+                        recording.drawColor(if(style.folderBackdrop)Color.TRANSPARENT else Color.BLACK)
                         node.endRecording()
                         sampler=Sampler(node,material,RectF(binding.local),binding.screenW,binding.screenH,style)
                         sampler.created=frameSerial
@@ -528,7 +528,7 @@ object IconMaterialRenderer {
                         if(sampler.node.width!=width || sampler.node.height!=height){
                             sampler.node.setPosition(0,0,width,height)
                             val recording=sampler.node.beginRecording(width,height)
-                            recording.drawColor(Color.BLACK)
+                            recording.drawColor(if(style.folderBackdrop)Color.TRANSPARENT else Color.BLACK)
                             sampler.node.endRecording()
                         }
                         sampler.material=material
@@ -551,7 +551,7 @@ object IconMaterialRenderer {
                     val hold=motion.holdHomeGlassGeometry &&
                         !IconGlassHook.isDrawerIcon(binding.view) && sampler.worldValid && sampler.lift==null &&
                         sampler.wallpaper===wallpaper && sampler.appliedStyle==style
-                    if(!sampleFolderPanel(sampler,binding.view,style) &&
+                    if(!sampleFolderPanel(sampler,binding.view,style) && !style.folderBackdrop && wallpaper!=null &&
                         !hold && (sampler.source==null || ((binding.dragPreview || !motion.deferWorkspaceSampling) &&
                             !freezeEdge(binding.view,world))) &&
                         samplerEffect(sampler,wallpaper,WallpaperFootprint.source(wallpaper,binding.screenW,binding.screenH,rect),view=binding.view)){
@@ -559,7 +559,7 @@ object IconMaterialRenderer {
                         sampler.scroll=com.cosmod.launcherglass.util.LiveBlurEngine.wallpaperScrollRatio
                     }
                     plate.drawRenderNode(liftNode(sampler,binding) ?: sampler.node)
-                }else{
+                }else if(wallpaper!=null && source!=null){
                     val nowNs=System.nanoTime()
                     val fps=MiniIconRefresh.fps(PrefsHelper.liveFps,false,false)
                     val hardware=canvas.isHardwareAccelerated

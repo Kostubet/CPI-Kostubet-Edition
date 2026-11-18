@@ -3,8 +3,6 @@ package com.cosmod.launcherglass.ui
 object OpticalSettings {
     val booleans=mapOf("indicator_keep_visible" to true,"edge_light_enabled" to true,"edge_light_motion" to true,"island_glass_enabled" to false,"volume_glass_enabled" to false,
         "banner_glass_enabled" to false,"banner_glass_motion" to true,"banner_plate_enabled" to false,
-        "app_tilt_enabled" to false,"app_tilt_open" to true,"app_tilt_close" to true,"app_genie_droplet" to true,
-        "app_genie_trajectory" to false,
         "performance_light_drawer" to false,"performance_live_transition_glass" to false,
         "performance_adaptive_alerts" to true,"coloros_ui_effects" to true,"performance_ltpo_idle" to true,
         "performance_high_refresh_pacing" to false,"performance_glass_120fps" to false,
@@ -23,7 +21,6 @@ object OpticalSettings {
         "banner_open_speed" to 100,"banner_close_speed" to 100,"banner_plate_hue" to 0,
         "banner_plate_saturation" to 0,"banner_plate_brightness" to 10,"banner_plate_opacity" to 45,
         "banner_plate_bottom_fade" to 65,"banner_top_darkness" to 0,
-        "app_tilt_reference_strength" to 100,"app_genie_open_speed" to 100,"app_genie_close_speed" to 100,
         "indicator_glass_style" to 0,"indicator_glass_blur" to 12,"indicator_glass_opacity" to 26,
         "indicator_glass_corner" to 50,"indicator_glass_width" to 42,"indicator_glass_distortion" to 80,
         "indicator_glass_dispersion" to 0,"volume_glass_blur" to 14,"volume_glass_style" to 1,
@@ -63,8 +60,6 @@ object OpticalSettings {
         "launcher_icon_size"->130
         "dock_backdrop_saturation"->200
         "dock_width_percent","dock_height_percent"->160
-        "app_tilt_reference_strength"->200
-        "app_genie_open_speed","app_genie_close_speed"->160
         "banner_plate_hue","photo_widget_tint_hue"->360
         else->100
     }
@@ -72,7 +67,6 @@ object OpticalSettings {
         in com.cosmod.launcherglass.util.Ba31kAnimationSettings.integers->com.cosmod.launcherglass.util.Ba31kAnimationSettings.minimum(key)
         LockscreenSettings.NOTIFICATION_CORNER->-1
         LockscreenSettings.UNLOCK_SPEED->LockscreenSettings.MIN_UNLOCK_SPEED
-        "app_genie_open_speed","app_genie_close_speed"->50
         "volume_glass_height"->60
         "volume_glass_brightness","photo_widget_tint_lightness","banner_plate_lightness"->-100
         in EdgeSettings.darkWidthKeys->1

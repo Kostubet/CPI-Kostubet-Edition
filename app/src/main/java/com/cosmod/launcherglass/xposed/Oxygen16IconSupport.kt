@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.Drawable
 import com.cosmod.launcherglass.util.GlassLogger
-import com.cosmod.launcherglass.util.GlyphShadowHelper
 import de.robv.android.xposed.*
 import java.util.WeakHashMap
 import kotlin.math.abs
@@ -107,12 +106,6 @@ internal object Oxygen16IconSupport {
         return plate.copy(glyphBitmap=glyph)
     }
     private fun drawGlyph(canvas:Canvas,bounds:Rect,glyph:Bitmap,paint:Paint){
-        if(PrefsHelper.glyphShadow && PrefsHelper.shadowOpacity>0)GlyphShadowHelper.getOrCreateShadow(glyph)?.let {shadow ->
-            val sx=bounds.width().toFloat()/glyph.width;val sy=bounds.height().toFloat()/glyph.height
-            val x=bounds.left+shadow.offsetX*sx
-            val y=bounds.top+shadow.offsetY*sy+maxOf(2f,bounds.height()*.016f)
-            canvas.drawBitmap(shadow.bitmap,null,RectF(x,y,x+shadow.bitmap.width*sx,y+shadow.bitmap.height*sy),Paint(3).apply {alpha=175*PrefsHelper.shadowOpacity/100*paint.alpha/255})
-        }
         GlyphMaterialRenderer.draw(canvas,bounds,glyph,paint)
     }
 }

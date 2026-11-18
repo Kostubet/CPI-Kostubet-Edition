@@ -58,8 +58,6 @@
     <string name="ui_logo_outline_opacity">Непрозрачность окантовки</string>
     <string name="ui_logo_outline_width">Толщина окантовки</string>
     <string name="ui_logo_outline_brightness">Яркость окантовки</string>
-    <string name="ui_logo_shadow">Затемнение под логотипами</string>
-    <string name="ui_logo_shadow_opacity">Тень логотипов</string>
     <string name="ui_icon_depth">Объём иконок</string>
     <string name="ui_depth_strength">Интенсивность объёма</string>
     <string name="ui_coloring">Окрашивание</string>
@@ -196,8 +194,6 @@
     <string name="banner_hint">Баннеры ColorOS с размытием и преломлением фона в реальном времени. Нужен доступ к System UI в LSPosed.</string>
     <string name="banner_motion">Анимация баннера в стиле iOS</string>
     <string name="app_tilt_title">Анимации iOS (классический движок)</string>
-    <string name="ui_motion_engines_enabled">Разрешить анимации iOS</string>
-    <string name="ui_motion_engines_scope">Общий переключатель для обоих движков.</string>
     <string name="app_tilt_hint">Окно вытягивается в сторону иконки при открытии и закрытии приложения. Эффект следует за системной анимацией ColorOS.</string>
     <string name="app_tilt_open">Открытие приложений</string>
     <string name="app_tilt_close">Закрытие приложений</string>
@@ -499,8 +495,8 @@
     <string name="ui_feature_peek_title">Предпросмотр</string>
     <string name="ui_feature_peek_open">Открыть раздел</string>
     <string name="ui_floating_close">Закрыть</string>
-    <string name="ui_ba31k_title">Анимации iOS (New engine)</string>
-    <string name="ui_ba31k_summary">Пока включено, используется этот движок. После отключения вернётся прежний движок, если он включён.</string>
+    <string name="ui_ba31k_title">Анимации iOS</string>
+    <string name="ui_ba31k_summary">Настройка движения окон и иконок при открытии приложений и возврате на рабочий стол.</string>
     <string name="ui_ba31k_transitions">Переходы приложений</string>
     <string name="ui_ba31k_bounce">Отскок при жесте «Домой»</string>
     <string name="ui_ba31k_effects">Эффекты окна</string>
@@ -518,4 +514,10 @@
     <string name="ui_ba31k_damping">Затухание наклона</string>
     <string name="ui_ba31k_velocity">Начальная скорость наклона</string>
     <string name="ui_ba31k_duration">Длительность перехода</string>
+    <string name="ui_feature_tab_general">Общие</string>
+    <string name="ui_feature_tab_colors">Цвета</string>
+    <string name="ui_feature_tab_style">Стиль</string>
+    <string name="ui_ios_deformation_strength">Сила деформации</string>
+    <string name="ui_ios_tilt_strength">Сила наклона</string>
+    <string name="ui_folder_icons_blur">Стекло иконок внутри папок</string>
 </resources>

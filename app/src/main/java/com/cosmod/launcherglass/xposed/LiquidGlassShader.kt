@@ -249,8 +249,12 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 if(p.x<0.0 || p.y<0.0 || p.x>size.x || p.y>size.y)return half4(0.0);
                 half alpha=mask.eval(p).a;
                 if(alpha<=.001)return half4(0.0);
-                float radius=nativeContour>.5 ? contourRadius(p) : rounding*min(size.x,size.y);
-                float opticalRadius=rounding*min(size.x,size.y);
+                float extent=min(size.x,size.y);
+                // Shape refraction independently of the OEM silhouette mask.
+                float opticalRadius=rounding*extent;
+                float radius=nativeContour>.5
+                    ? clamp(contourRadius(p)+(rounding-.30)*extent,0.0,.5*extent)
+                    : opticalRadius;
                 float2 lens=kyantEngine>.5 ? kyantOffset(p,radius) :
                     (nativeContour>.5 ? softLens(p,radius,opticalRadius) : lensSample(p));
                 float2 q=clamp(xy+lensHeight*lens,float2(.5),limit-float2(.5));

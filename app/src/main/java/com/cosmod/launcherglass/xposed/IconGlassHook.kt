@@ -500,7 +500,9 @@ object IconGlassHook {
         val source=compatible?.let {sourceRect(it,a,footprint)}
         val plateColor=if(PrefsHelper.blurEnabled)PrefsHelper.iconPlateColor(parts.bgColor) else parts.bgColor
         val plateOpacity=PrefsHelper.bgOpacity
-        val style=GlassStyle.icons().copy(folderBackdrop=useFolderBackdrop(a))
+        val folderBackdrop=PrefsHelper.folderIconsBlurEnabled &&
+            (binding?.view?.let(FolderMaterialHook::ownsBackdrop)==true || a?.openFolder==true)
+        val style=GlassStyle.icons().copy(folderBackdrop=folderBackdrop)
         val lighterDrawer=(a?.drawer==true || binding?.view?.let(::isDrawerIcon)==true) &&
             com.cosmod.launcherglass.util.PerformancePolicy.lightDrawer
         IconMaterialRenderer.draw(canvas,bounds,plateMask,parts.glyphBitmap,plateColor,
@@ -520,13 +522,6 @@ object IconGlassHook {
             if(PrefsHelper.iconStroke && PrefsHelper.strokeOpacity>0){
                 target.drawBitmap(GlassGeometry.rim(plateMask),null,local,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
             }
-            if(PrefsHelper.glyphShadow && PrefsHelper.shadowOpacity>0){
-                GlyphShadowHelper.getOrCreateShadow(parts.glyphBitmap)?.let {shadow ->
-                    val sx=local.width().toFloat()/parts.glyphBitmap.width;val sy=local.height().toFloat()/parts.glyphBitmap.height
-                    val x=shadow.offsetX*sx;val y=shadow.offsetY*sy+(local.height()*.016f).coerceAtLeast(2f)
-                    target.drawBitmap(shadow.bitmap,null,RectF(x,y,x+shadow.bitmap.width*sx,y+shadow.bitmap.height*sy),Paint(Paint.FILTER_BITMAP_FLAG).apply {alpha=175*PrefsHelper.shadowOpacity/100})
-                }
-            }
             GlyphMaterialRenderer.draw(target,local,parts.glyphBitmap,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
         }
     }
@@ -534,10 +529,9 @@ object IconGlassHook {
         if(!PrefsHelper.blurEnabled)return null
         if(a?.folder==true && !PrefsHelper.folderIconsBlurEnabled)return null
         if(a?.drawer==true && !PrefsHelper.drawerBlurEnabled)return null
-        if(useFolderBackdrop(a))return WallpaperHelper.getFolderWallpaper(appContext)
+        if(a?.openFolder==true)return null
         return WallpaperHelper.getBlurredWallpaper(appContext)
     }
-    private fun useFolderBackdrop(a:Anchor?)=a?.openFolder==true && PrefsHelper.folderBlurEnabled
     /** Live complete material for one native animation. No global last-app state. */
     private fun snapshot(original:Drawable,backgroundOnly:Boolean=false,explicitHost:View?=null):Drawable? {
         if(!PrefsHelper.iconsFeatureEnabled)return null

@@ -31,6 +31,13 @@ object SettingsDefaults {
             putBoolean("glass_engine_type_revision",true)
         }.apply()
         WidgetSettings.migrate(prefs)
+        val motion=com.cosmod.launcherglass.util.Ba31kAnimationSettings
+        if(prefs.contains("app_tilt_enabled"))prefs.edit().apply {
+            motion.migrateClassic(prefs.all).forEach { (key,value)->
+                when(value){is Boolean->putBoolean(key,value);is Int->putInt(key,value)}
+            }
+            motion.classicKeys.forEach {remove(it)}
+        }.apply()
         if(!prefs.getBoolean("glass_blur_controls_revision",false))prefs.edit().apply {
             GlassEngineSettings.legacyRadii(prefs.all).forEach { (key,value)->putInt(key,value) }
             putBoolean("glass_blur_controls_revision",true)
@@ -48,7 +55,7 @@ object SettingsDefaults {
             val oldIntegers = mapOf(SettingsProvider.KEY_BG_OPACITY to 35,
                 SettingsProvider.KEY_BLUR_RADIUS to 25, SettingsProvider.KEY_BLUR_MODE to SettingsProvider.BLUR_MODE_LIVE,
                 SettingsProvider.KEY_LIVE_FPS to 30, SettingsProvider.KEY_STROKE_OPACITY to 70,
-                SettingsProvider.KEY_SHADOW_OPACITY to 60, SettingsProvider.KEY_GRADIENT_OPACITY to 60)
+                SettingsProvider.KEY_GRADIENT_OPACITY to 60)
             oldBooleans.forEach { (key, value) -> if (!prefs.contains(key)) editor.putBoolean(key, value) }
             oldIntegers.forEach { (key, value) -> if (!prefs.contains(key)) editor.putInt(key, value) }
         }
@@ -138,7 +145,6 @@ object SettingsDefaults {
         SettingsProvider.KEY_DRAWER_BLUR_ENABLED to false,
         SettingsProvider.KEY_IDLE_PAUSE to true,
         SettingsProvider.KEY_ICON_STROKE to true,
-        SettingsProvider.KEY_GLYPH_SHADOW to true,
         SettingsProvider.KEY_DESIGN_ENABLED to true,
         SettingsProvider.KEY_VOLUME_ENABLED to true
     )
@@ -190,7 +196,6 @@ object SettingsDefaults {
         SettingsProvider.KEY_BLUR_MODE to SettingsProvider.BLUR_MODE_LIVE,
         SettingsProvider.KEY_LIVE_FPS to 60,
         SettingsProvider.KEY_STROKE_OPACITY to 40,
-        SettingsProvider.KEY_SHADOW_OPACITY to 40,
         SettingsProvider.KEY_GRADIENT_OPACITY to 50
     )
     /** Only portable module preferences. Device reports, language and migration keys stay local. */

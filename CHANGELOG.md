@@ -4,6 +4,15 @@
 
 ## Русский
 
+### Сборка 405
+
+- Стекло иконок в открытой папке получает фон панели папки, включая штатную подложку ColorOS.
+- Раздел «Анимации iOS» использует один движок. Наклон и деформация имеют отдельные регулировки.
+- Настройки стекла сгруппированы во вкладках COUI «Общие», «Цвета» и «Стиль» с общим предпросмотром. Группы настроек открываются по нажатию. В общих настройках иконок оставлен размер.
+- Удалено затемнение под логотипами. Скругление линзы «Живых оповещений» влияет на оптику внутри системной формы карточки.
+
+### Сборка 404
+
 Сборка **404**. Изменения относительно последней публичной сборки **0.2.78 build 329**. APK обновляет установленный CPI с тем же сертификатом и сохраняет настройки.
 
 ### Стекло и рабочий стол
@@ -44,6 +53,15 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 405
+
+- Glass icons in open folders sample the folder panel, including the stock ColorOS surface.
+- iOS Animations uses one engine, with separate tilt and deformation controls.
+- Glass settings use COUI General, Colors, and Style tabs with a shared preview. Setting groups start collapsed. Icon size is in General.
+- Removed logo shading. The Live Alerts lens corner setting adjusts the optics inside the native card outline.
+
+### Build 404
 
 Build **404**. Changes since the latest public **0.2.78 build 329**. The APK updates an existing CPI installation signed with the same certificate and preserves its settings.
 

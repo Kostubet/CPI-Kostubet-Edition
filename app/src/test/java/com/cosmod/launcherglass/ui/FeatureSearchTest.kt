@@ -9,7 +9,12 @@ class FeatureSearchTest {
     @Test fun indexesNativePreviewSelectorsAndCurrentMotionOptions(){
         assertTrue(R.string.ui_preview_widget in FeatureSearch.labels("PHOTO"))
         assertTrue(R.string.ui_preview_style in FeatureSearch.labels("BANNERS"))
-        assertTrue(R.string.ui_genie_trajectory in FeatureSearch.labels("MOTION"))
+        val motion=FeatureSearch.labels("MOTION")
+        assertTrue(R.string.ui_genie_trajectory in motion)
+        assertTrue(R.string.ui_ios_tilt_strength in motion)
+        assertTrue(R.string.ui_ios_deformation_strength in motion)
+        assertTrue(FeatureSearch.labels("BA31K_MOTION").isEmpty())
+        assertTrue(R.string.ui_folder_icons_blur in FeatureSearch.labels("FOLDERS"))
     }
     @Test fun iconsIndexComesFromTheFeatureRatherThanThePreview(){
         val icons=FeatureSearch.labels("ICONS")

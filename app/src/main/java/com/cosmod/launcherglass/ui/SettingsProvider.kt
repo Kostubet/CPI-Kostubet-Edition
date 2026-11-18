@@ -140,8 +140,6 @@ class SettingsProvider : ContentProvider() {
                 bundle.putInt(KEY_GLYPH_STROKE_OPACITY, prefs.getInt(KEY_GLYPH_STROKE_OPACITY, SettingsDefaults.integer(KEY_GLYPH_STROKE_OPACITY)))
                 bundle.putBoolean(KEY_ICON_STROKE, prefs.getBoolean(KEY_ICON_STROKE, SettingsDefaults.boolean(KEY_ICON_STROKE)))
                 bundle.putInt(KEY_STROKE_OPACITY, prefs.getInt(KEY_STROKE_OPACITY, SettingsDefaults.integer(KEY_STROKE_OPACITY)))
-                bundle.putBoolean(KEY_GLYPH_SHADOW, prefs.getBoolean(KEY_GLYPH_SHADOW, SettingsDefaults.boolean(KEY_GLYPH_SHADOW)))
-                bundle.putInt(KEY_SHADOW_OPACITY, prefs.getInt(KEY_SHADOW_OPACITY, SettingsDefaults.integer(KEY_SHADOW_OPACITY)))
                 bundle.putInt(KEY_GRADIENT_OPACITY, prefs.getInt(KEY_GRADIENT_OPACITY, SettingsDefaults.integer(KEY_GRADIENT_OPACITY)))
                 bundle.putBoolean(KEY_DESIGN_ENABLED, prefs.getBoolean(KEY_DESIGN_ENABLED, SettingsDefaults.boolean(KEY_DESIGN_ENABLED)))
                 bundle.putBoolean(KEY_VOLUME_ENABLED, prefs.getBoolean(KEY_VOLUME_ENABLED, SettingsDefaults.boolean(KEY_VOLUME_ENABLED)))
@@ -223,8 +221,6 @@ class SettingsProvider : ContentProvider() {
                     if (b.containsKey(KEY_GLYPH_STROKE_OPACITY)) editor.putInt(KEY_GLYPH_STROKE_OPACITY, b.getInt(KEY_GLYPH_STROKE_OPACITY))
                     if (b.containsKey(KEY_ICON_STROKE)) editor.putBoolean(KEY_ICON_STROKE, b.getBoolean(KEY_ICON_STROKE))
                     if (b.containsKey(KEY_STROKE_OPACITY)) editor.putInt(KEY_STROKE_OPACITY, b.getInt(KEY_STROKE_OPACITY))
-                    if (b.containsKey(KEY_GLYPH_SHADOW)) editor.putBoolean(KEY_GLYPH_SHADOW, b.getBoolean(KEY_GLYPH_SHADOW))
-                    if (b.containsKey(KEY_SHADOW_OPACITY)) editor.putInt(KEY_SHADOW_OPACITY, b.getInt(KEY_SHADOW_OPACITY))
                     if (b.containsKey(KEY_GRADIENT_OPACITY)) editor.putInt(KEY_GRADIENT_OPACITY, b.getInt(KEY_GRADIENT_OPACITY))
                     if (b.containsKey(KEY_DESIGN_ENABLED)) editor.putBoolean(KEY_DESIGN_ENABLED, b.getBoolean(KEY_DESIGN_ENABLED))
                     if (b.containsKey(KEY_VOLUME_ENABLED)) editor.putBoolean(KEY_VOLUME_ENABLED, b.getBoolean(KEY_VOLUME_ENABLED))
@@ -340,8 +336,6 @@ class SettingsProvider : ContentProvider() {
         const val KEY_GLYPH_STROKE_OPACITY = "glyph_stroke_opacity"
         const val KEY_ICON_STROKE = "icon_stroke"
         const val KEY_STROKE_OPACITY = "stroke_opacity"
-        const val KEY_GLYPH_SHADOW = "glyph_shadow"
-        const val KEY_SHADOW_OPACITY = "shadow_opacity"
         const val KEY_GRADIENT_OPACITY = "gradient_opacity"
         const val KEY_DESIGN_ENABLED = "design_enabled"
         const val KEY_VOLUME_ENABLED = "volume_enabled"

@@ -15,6 +15,9 @@ import android.os.Build
 import android.view.View
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.ShadeGlassSettings.Component
@@ -25,9 +28,16 @@ import io.github.suqi8.coui.kmp.basic.TabRowWithContour
 
 internal class ShadeGlassTabs(context:Context,dark:Boolean,accent:Int,labels:List<String>,
     selected:Int,choose:(Int)->Unit) : CouiControl(context,dark,accent) {
+    private var selection by mutableIntStateOf(selected)
+
     init {
         content {
-            TabRowWithContour(labels,selected,choose,modifier=Modifier.fillMaxWidth(),height=46.dp)
+            TabRowWithContour(labels,selection,{ index->
+                if(selection!=index){
+                    selection=index
+                    choose(index)
+                }
+            },modifier=Modifier.fillMaxWidth(),height=46.dp,dragToSelect=true)
         }
     }
 }

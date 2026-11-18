@@ -4,11 +4,8 @@ import android.animation.ValueAnimator
 import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.RectF
-import android.os.Bundle
 import android.view.SurfaceControl
 import android.view.View
-import com.cosmod.launcherglass.util.AppGenieMotion
-import com.cosmod.launcherglass.util.AppWindowDeformation
 import com.cosmod.launcherglass.util.AppGenieTrajectory
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
@@ -16,48 +13,23 @@ import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import java.util.Collections
 import java.util.WeakHashMap
-import java.util.concurrent.atomic.AtomicLong
-import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.min
 
 /** Shapes the app surface on the native ColorOS transition timeline. */
 internal object AppGenieTransition {
-    private data class Config(
-        val enabled: Boolean = false, val opening: Boolean = true, val closing: Boolean = true,
-        val strength: Double = 1.0, val openResponse: Double = .240, val closeResponse: Double = .336,
-        val droplet: Boolean = true, val trajectory: Boolean = false
-    )
-    @Volatile private var config = Config()
     private var attempted = false
     private var installed = false
     private data class Source(val x: Float, val y: Float, val width: Float)
-    private data class RadiusTiming(val opening:Boolean,val start:Long,var last:Long)
     private data class Frame(
         val native: Matrix, val crop: Rect, val screen: RectF, val leash: SurfaceControl, val transaction: Any,
         val record: Any?, val minimized: Double, val iconLeft: Double,
-        val iconWidth: Double, val row: Double, val width: Float, val height: Float,
-        val opening: Boolean, val damping: Double, val time: Long, val config: Config,
-        val droplet: Float, val widget: Boolean, val swipe: Boolean,
-        val alternative: Ba31kAppTransitions.Config?, val nativeAlpha: Float,
+        val iconWidth: Double, val row: Double,
+        val opening: Boolean, val time: Long,
+        val droplet: Float, val swipe: Boolean,
+        val config: Ba31kAppTransitions.Config, val nativeAlpha: Float,
         var radiusTarget: Any? = null, var replayMatrix: FloatArray? = null
     )
     private val warped = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<SurfaceControl, Boolean>()))
-    private val motions = Collections.synchronizedMap(WeakHashMap<Any, AppGenieMotion>())
-    private val radiusTiming=WeakHashMap<Any,RadiusTiming>()
-    private fun droplet(owner:Any,progress:Float,opening:Boolean,time:Long,config:Config):Float {
-        val phase=if(opening)progress else 1f-progress
-        if(phase<=.001f || phase>=.999f)return 0f
-        val elapsed=synchronized(radiusTiming){
-            val previous=radiusTiming[owner]
-            val running=previous?.takeIf {it.opening==opening && time-it.last<250_000_000L}
-                ?: RadiusTiming(opening,time,time).also {radiusTiming[owner]=it}
-            running.last=time
-            (time-running.start)*.000001f
-        }
-        val speed=(if(opening).240/config.openResponse else .336/config.closeResponse).toFloat()
-        return AppWindowDeformation.droplet(progress,opening,elapsed,speed)
-    }
     private val frame = ThreadLocal<Frame>()
     private val pendingSource = ThreadLocal<Source>()
     private val sources = Collections.synchronizedMap(WeakHashMap<Any, Source>())
@@ -73,8 +45,6 @@ internal object AppGenieTransition {
         this[10] = 1f
         this[15] = 1f
     }
-    private val openFrames = AtomicLong()
-    private val closeFrames = AtomicLong()
     private var speedInstalled = false
     private var cornersInstalled = false
     private var launcherContract = "unresolved"
@@ -85,30 +55,14 @@ internal object AppGenieTransition {
     private val closingTypes = setOf("REMOTE_CLOSE_TO_HOME", "PREDICTIVE_BACK_TO_HOME",
         "SWIPE_TO_HOME", "SWIPE_TO_CLIENT_HOME")
 
-    fun update(prefs: Bundle) {
-        config = Config(
-            enabled = prefs.getBoolean("app_tilt_enabled", false),
-            opening = prefs.getBoolean("app_tilt_open", true),
-            closing = prefs.getBoolean("app_tilt_close", true),
-            strength = prefs.getInt("app_tilt_reference_strength", 100).coerceIn(0, 200) * .01,
-            openResponse = .240 / (prefs.getInt("app_genie_open_speed", 100).coerceIn(50, 160) * .01),
-            closeResponse = .336 / (prefs.getInt("app_genie_close_speed", 100).coerceIn(50, 160) * .01),
-            droplet = prefs.getBoolean("app_genie_droplet", true),
-            trajectory = prefs.getBoolean("app_genie_trajectory", false),
-        )
-    }
+    private fun active() = Ba31kAppTransitions.config != null
 
-    private fun active() = config.enabled || Ba31kAppTransitions.config != null
-
-    fun diagnostics() = "app genie enabled=${config.enabled}, ba31k=${Ba31kAppTransitions.config != null}, installed=$installed, legacyCompatible=$legacyCompatible, speed=$speedInstalled, corners=$cornersInstalled, icon=" + (layers?.iconInstalled == true) + ", iconFrames=${layers?.projectedFrames() ?: 0}, replay=" + (layers?.replayInstalled == true) + ", open=${openFrames.get()}, close=${closeFrames.get()}, contract=$launcherContract"
+    fun diagnostics() = "iOS motion enabled=${active()}, installed=$installed, colorOs16=$legacyCompatible, speed=$speedInstalled, corners=$cornersInstalled, icon=" + (layers?.iconInstalled == true) + ", iconFrames=${layers?.projectedFrames() ?: 0}, replay=" + (layers?.replayInstalled == true) + ", contract=$launcherContract"
 
     fun usesProjectedIcon(): Boolean {
-        val values = config
-        val alternative = Ba31kAppTransitions.config
-        val projecting = if (alternative == null)
-            values.enabled && values.strength > 0.0 && (values.opening || values.closing)
-        else alternative.strength > 0.0 && (alternative.opening || alternative.closing)
-        return installed && layers?.iconInstalled == true && projecting && ValueAnimator.areAnimatorsEnabled()
+        val config = Ba31kAppTransitions.config ?: return false
+        return installed && layers?.iconInstalled == true && config.projectsWindow &&
+            (config.opening || config.closing) && ValueAnimator.areAnimatorsEnabled()
     }
 
     fun install(loader: ClassLoader) {
@@ -213,9 +167,8 @@ internal object AppGenieTransition {
                 override fun beforeHookedMethod(p: MethodHookParam) {
                     p.setObjectExtra("cpiGeniePrevious", frame.get())
                     frame.remove()
-                    val values = config
-                    val alternative = Ba31kAppTransitions.config
-                    if (!PrefsHelper.enabled || (!values.enabled && alternative == null) || !ValueAnimator.areAnimatorsEnabled()) return
+                    val config = Ba31kAppTransitions.config ?: return
+                    if (!PrefsHelper.enabled || !ValueAnimator.areAnimatorsEnabled()) return
                     try {
                         val widget = widgetTransition.get() == true || p.thisObject in widgetHelpers
                         val parameters = p.args[0]
@@ -225,8 +178,8 @@ internal object AppGenieTransition {
                             in closingTypes -> false
                             else -> return
                         }
-                        if (alternative != null && (widget || name == "LAUNCH_FROM_RECENTS")) return
-                        if (!(if (opening) alternative?.opening ?: values.opening else alternative?.closing ?: values.closing)) return
+                        if (widget || name == "LAUNCH_FROM_RECENTS") return
+                        if (!(if (opening) config.opening else config.closing)) return
                         if ((if(java.lang.reflect.Modifier.isStatic(rotating.modifiers))rotating.invoke(null,parameters) else rotating.invoke(parameters)) == true) return
                         val appTargets = p.args[1] as Array<*>
                         val mode = p.args[2] as Int
@@ -246,8 +199,8 @@ internal object AppGenieTransition {
                         val ratio = rect.height() / bounds.height()
                         val progress = ((ratio - anchor) / (1f - anchor)).coerceIn(0f, 1f)
                         val remaining = (1f - ratio).coerceAtLeast(.2f)
-                        val source = (if (alternative != null) ba31kIconBounds.get()
-                            ?.let { Source(it.centerX(),it.centerY(),it.width()) } else null)
+                        val source = ba31kIconBounds.get()
+                            ?.let { Source(it.centerX(),it.centerY(),it.width()) }
                             ?: sources[p.thisObject]
                         val fromX = 2f * ((source?.x ?: rect.centerX()) - bounds.exactCenterX()) /
                             (bounds.width() * if (source == null) remaining else 1f)
@@ -257,22 +210,16 @@ internal object AppGenieTransition {
                         val iconWidth = (source?.width ?: anchor * bounds.height()) / bounds.width()
                         val swipe = name == "SWIPE_TO_HOME" || name == "SWIPE_TO_CLIENT_HOME"
                         val time=System.nanoTime()
-                        if (alternative?.backdrop == true) {
+                        if (config.backdrop) {
                             Ba31kTransitionBackdrop.publish(progress.toDouble(),opening,time)
                         }
-                        val droplet = if (alternative != null)
-                            com.cosmod.launcherglass.util.Ba31kGenieMotion.droplet(progress.toDouble(), opening, alternative.droplet)
-                        else if (values.droplet && !widget)
-                            droplet(p.args[4] ?: primary,progress,opening,time,values) else 0f
-                        if ((alternative?.strength ?: values.strength) == 0.0 && droplet == 0f) return
-                        val row = if (alternative == null && !opening && source == null) {
-                            fromY + .24f * (1f - abs(fromY)).coerceAtLeast(0f)
-                        } else fromY
+                        val droplet = com.cosmod.launcherglass.util.Ba31kGenieMotion
+                            .droplet(progress.toDouble(), opening, config.droplet)
+                        if (!config.projectsWindow && droplet == 0f) return
                         frame.set(Frame(matrix.get(p.thisObject) as Matrix, crop.get(p.thisObject) as Rect,
                             RectF(rect), primary, p.args[3], p.args[4], 1.0 - progress, (fromX + 1.0 - iconWidth) * .5,
-                            iconWidth.toDouble(), row.toDouble(), rect.width(), rect.height(), opening,
-                            if (swipe) 1.1 else 1.0, time, values, droplet, widget, swipe, alternative,
-                            if (alternative == null) Float.NaN else windowAlpha?.getFloat(parameters) ?: Float.NaN))
+                            iconWidth.toDouble(), fromY.toDouble(), opening, time, droplet, swipe, config,
+                            windowAlpha?.getFloat(parameters) ?: Float.NaN))
                     } catch (error: Throwable) {
                         GlassLogger.limited("AppGenieTransition", "frame") { "Native transition retained: $error" }
                     }
@@ -300,30 +247,15 @@ internal object AppGenieTransition {
                         current.radiusTarget = p.thisObject
                         // The record survives changes to the underlying app surface on fast reversals.
                         val owner = current.record ?: leash
-                        val alternative = current.alternative
-                        val fullEdge = current.minimized / .13
-                        val iconEdge = (1.0 - current.minimized) / if (current.swipe) .24 else .13
-                        val edge = min(fullEdge, iconEdge).coerceIn(0.0, 1.0)
-                        val intensity = current.config.strength * edge * edge * (3.0 - 2 * edge) *
-                            if (current.widget) .55 else 1.0
-                        val pose = alternative?.let {
-                            Ba31kAppTransitions.deformation(owner, it, 1 - current.minimized,
-                                current.iconLeft, current.iconWidth, current.row, current.opening, current.swipe, current.time)
-                        }
-                        val visible = if (alternative == null) {
-                            val motion = synchronized(motions) { motions.getOrPut(owner) { AppGenieMotion() } }
-                            motion.update(current.minimized, current.iconLeft, current.iconWidth,
-                                current.row, intensity, current.opening, current.config.openResponse,
-                                current.config.closeResponse, current.damping, current.time)
-                                ?.takeIf { it.isVisible(current.width, current.height) }
-                        } else null
+                        val pose = Ba31kAppTransitions.deformation(owner, current.config, 1 - current.minimized,
+                            current.iconLeft, current.iconWidth, current.row, current.opening, current.swipe, current.time)
                         val bounds = current.crop
                         val out = scratch.get()!!
                         val left = bounds.left.toFloat()
                         val top = bounds.top.toFloat()
                         val width = bounds.width().toFloat()
                         val height = bounds.height().toFloat()
-                        val perspective = (pose ?: visible)?.let { deformation ->
+                        val perspective = pose?.let { deformation ->
                             out.also { deformation.writeMatrix(it,left,top,width,height) }.takeIf { it.all(Float::isFinite) }
                         }
                         if (perspective == null) {
@@ -338,24 +270,13 @@ internal object AppGenieTransition {
                                 current.replayMatrix = perspective.copyOf()
                             }
                         }
-                        if (!current.widget) {
-                            val shared = if (alternative != null && perspective != null && current.minimized > .20) {
-                                val appMatrix = FloatArray(9).also(current.native::getValues)
-                                GenieTransitionLayers.SharedProjection(perspective.copyOf(), appMatrix,
-                                    1 - current.minimized, current.nativeAlpha)
-                            } else null
-                            transitionLayers.stageWindow(current.transaction, current.screen,
-                                if (perspective != null) visible else null, current.time,
-                                shared)
-                        }
-                        if (perspective == null) return
-                        if (alternative != null) {
-                            Ba31kAppTransitions.recordFrame(current.opening)
-                            return
-                        }
-                        val count = (if (current.opening) openFrames else closeFrames).incrementAndGet()
-                        if (count == 1L) GlassLogger.i("AppGenieTransition",
-                            "CherryPick 0.3.20 genie active, opening="+current.opening)
+                        val shared = if (perspective != null && current.minimized > .20) {
+                            val appMatrix = FloatArray(9).also(current.native::getValues)
+                            GenieTransitionLayers.SharedProjection(perspective.copyOf(), appMatrix,
+                                1 - current.minimized, current.nativeAlpha)
+                        } else null
+                        transitionLayers.stageWindow(current.transaction, current.screen, current.time, shared)
+                        if (perspective != null) Ba31kAppTransitions.recordFrame(current.opening)
                     } catch (error: Throwable) {
                         GlassLogger.limited("AppGenieTransition", "matrix") { "Native matrix retained: $error" }
                     }
@@ -410,15 +331,15 @@ internal object AppGenieTransition {
                     p.setObjectExtra("cpiPreviousDirection", animationDirection.get())
                     widgetTransition.set(widget.getBoolean(p.thisObject))
                     animationDirection.set(opening)
-                    val values = config
-                    if (Ba31kAppTransitions.config != null) {
+                    val config = Ba31kAppTransitions.config
+                    if (config != null) {
                         p.setObjectExtra("cpiBa31kIconScope",true)
                         p.setObjectExtra("cpiBa31kPreviousIcon",ba31kIconBounds.get())
                         val icon = (iconRect?.get(p.thisObject) as? RectF)?.takeUnless { it.isEmpty }
                         if (icon == null) ba31kIconBounds.remove() else ba31kIconBounds.set(icon)
                     }
-                    if (PrefsHelper.enabled && Ba31kAppTransitions.config == null && values.enabled && values.trajectory &&
-                        (if (opening) values.opening else values.closing) &&
+                    if (PrefsHelper.enabled && config?.trajectory == true &&
+                        (if (opening) config.opening else config.closing) &&
                         widget.getBoolean(p.thisObject) == false && ValueAnimator.areAnimatorsEnabled()) {
                         val current = p.args[0] as? RectF
                         val icon = iconRect?.get(p.thisObject) as? RectF
@@ -498,28 +419,16 @@ internal object AppGenieTransition {
         hooks += XposedBridge.hookAllConstructors(spring, sourceCapture)
         hooks += XposedBridge.hookMethod(setter, object : XC_MethodHook() {
             override fun beforeHookedMethod(p: MethodHookParam) {
-                val values = config
-                val alternative = Ba31kAppTransitions.config
-                if (!PrefsHelper.enabled || (!values.enabled && alternative == null) || !ValueAnimator.areAnimatorsEnabled() ||
+                val config = Ba31kAppTransitions.config ?: return
+                if (!PrefsHelper.enabled || !ValueAnimator.areAnimatorsEnabled() ||
                     widgetTransition.get() == true || p.thisObject in widgetHelpers) return
                 val name = (kind.get(p.thisObject) as? Enum<*>)?.name ?: return
+                if (name == "LAUNCH_FROM_RECENTS") return
                 val swipe = name == "SWIPE_TO_HOME" || name == "SWIPE_TO_CLIENT_HOME"
-                if ((swipe && alternative == null) || (alternative != null && name == "LAUNCH_FROM_RECENTS")) return
-                if (alternative != null) {
-                    if (name in openingTypes && alternative.opening)
-                        Ba31kAppTransitions.tuneSpring(p.args,alternative,opening=true,swipe=false)
-                    else if (name in closingTypes && alternative.closing)
-                        Ba31kAppTransitions.tuneSpring(p.args,alternative,opening=false,swipe=swipe)
-                    return
-                }
-                val response = when {
-                    name in openingTypes && values.opening -> values.openResponse
-                    name in closingTypes && values.closing -> values.closeResponse
-                    else -> return
-                }
-                val frequency = 2 * PI / response
-                p.args[1] = (frequency * frequency).toFloat()
-                p.args[2] = 1f
+                if (name in openingTypes && config.opening)
+                    Ba31kAppTransitions.tuneSpring(p.args,config,opening=true,swipe=false)
+                else if (name in closingTypes && config.closing)
+                    Ba31kAppTransitions.tuneSpring(p.args,config,opening=false,swipe=swipe)
             }
         })
         return true

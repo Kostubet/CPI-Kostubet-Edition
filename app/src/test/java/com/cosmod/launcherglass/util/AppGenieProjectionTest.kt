@@ -8,16 +8,6 @@ import org.junit.Test
 
 class AppGenieProjectionTest {
     @Test
-    fun dropletUsesShorterOpeningTimingAndSettlesAtBothEnds() {
-        val opening=AppWindowDeformation.droplet(.35f,true,90f,1f)
-        val closing=AppWindowDeformation.droplet(.65f,false,90f,1f)
-        assertTrue(opening in 0f..<closing)
-        assertEquals(0f,AppWindowDeformation.droplet(.35f,true,130f,1f),0f)
-        assertEquals(0f,AppWindowDeformation.droplet(0f,false,90f,1f),0f)
-        assertEquals(0f,AppWindowDeformation.droplet(1f,true,90f,1f),0f)
-    }
-
-    @Test
     fun projectedIconKeepsItsAnchorEvenWithAnOffsetCrop() {
         val deformation = AppWindowDeformation(.14f, .08f, .72f, 1.16f, .38f, .57f)
         val matrix = FloatArray(16)

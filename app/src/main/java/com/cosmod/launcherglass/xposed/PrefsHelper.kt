@@ -72,8 +72,6 @@ object PrefsHelper {
     @Volatile var glyphStrokeOpacity = 40
     @Volatile var glyphStrokeWidth = 35
     @Volatile var glyphStrokeBrightness = 45
-    @Volatile var glyphShadow: Boolean = SettingsDefaults.boolean(SettingsProvider.KEY_GLYPH_SHADOW)
-    @Volatile var shadowOpacity: Int = SettingsDefaults.integer(SettingsProvider.KEY_SHADOW_OPACITY)
     @Volatile var gradientOpacity: Int = SettingsDefaults.integer(SettingsProvider.KEY_GRADIENT_OPACITY)
 
     @Volatile var iconPalette = com.cosmod.launcherglass.util.IconPalette.from(0, 0, 0, 0)
@@ -154,7 +152,6 @@ object PrefsHelper {
             val performanceChanged=com.cosmod.launcherglass.util.PerformancePolicy.update(context,bundle)
             Ba31kAppTransitions.update(bundle)
             Ba31kShadeMotion.update(bundle)
-            AppGenieTransition.update(bundle)
             DockMaterial.updateUnlock(bundle)
             launcherIconSize=bundle.getInt("launcher_icon_size",100).coerceIn(70,130)
             val newEnabled = bundle.getBoolean(SettingsProvider.KEY_ENABLED, SettingsDefaults.boolean(SettingsProvider.KEY_ENABLED))
@@ -218,8 +215,6 @@ object PrefsHelper {
             val newGlyphStrokeBrightness = bundle.getInt(SettingsProvider.KEY_GLYPH_STROKE_BRIGHTNESS,45).coerceIn(0,100)
             val glyphOutlineChanged = newGlyphStroke != glyphStroke || newGlyphStrokeOpacity != glyphStrokeOpacity ||
                 newGlyphStrokeWidth != glyphStrokeWidth || newGlyphStrokeBrightness != glyphStrokeBrightness
-            val newGlyphShadow = designEnabled && bundle.getBoolean(SettingsProvider.KEY_GLYPH_SHADOW, SettingsDefaults.boolean(SettingsProvider.KEY_GLYPH_SHADOW))
-            val newShadowOpacity = bundle.getInt(SettingsProvider.KEY_SHADOW_OPACITY, SettingsDefaults.integer(SettingsProvider.KEY_SHADOW_OPACITY))
             val newGradientOpacity = if (designEnabled && bundle.getBoolean(SettingsProvider.KEY_VOLUME_ENABLED, SettingsDefaults.boolean(SettingsProvider.KEY_VOLUME_ENABLED)))
                 bundle.getInt(SettingsProvider.KEY_GRADIENT_OPACITY, SettingsDefaults.integer(SettingsProvider.KEY_GRADIENT_OPACITY)) else 0
             val configuration = android.content.res.Configuration(context.resources.configuration)
@@ -266,7 +261,6 @@ object PrefsHelper {
 
             if (newBgOpacity != bgOpacity || newEnabled != enabled) {
                 IconBitmapProcessor.clearCache()
-                com.cosmod.launcherglass.util.GlyphShadowHelper.clearCache()
             }
             val blurRadiusChanged=newBlurRadius!=blurRadius
             val blurModeChanged=newBlurMode!=blurMode
@@ -276,7 +270,6 @@ object PrefsHelper {
             val materialChanged=iconsSectionChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
                 newFolderBlurEnabled!=folderBlurEnabled || newFolderIconsBlurEnabled!=folderIconsBlurEnabled || newDrawerBlurEnabled!=drawerBlurEnabled ||
                 newIconStroke != iconStroke || newStrokeOpacity != strokeOpacity ||
-                newGlyphShadow != glyphShadow || newShadowOpacity != shadowOpacity ||
                 newGradientOpacity != gradientOpacity || glyphOutlineChanged || paletteChanged ||
                 blurColorsChanged || blurStyleChanged || blurRadiusChanged || geometryChanged || vibrancyChanged || widgetChanged || widgetElementsChanged || tintChanged || depthChanged || glowChanged || newDisableEdgeOptimization!=disableEdgeOptimization || newOptimizeMiniIcons!=optimizeMiniIcons || newLiftedBackdrop!=liftedBackdrop
 
@@ -325,8 +318,6 @@ object PrefsHelper {
             glyphStrokeOpacity = newGlyphStrokeOpacity
             glyphStrokeWidth = newGlyphStrokeWidth
             glyphStrokeBrightness = newGlyphStrokeBrightness
-            glyphShadow = newGlyphShadow
-            shadowOpacity = newShadowOpacity
             gradientOpacity = newGradientOpacity
             val folderChanged=FolderSettings.update(bundle)
             WallpaperHelper.onProcessingSettingsChanged()
@@ -376,7 +367,7 @@ object PrefsHelper {
 
             GlassLogger.i(
                 "PrefsHelper",
-                "Preferences loaded: enabled=$enabled, bgOpacity=$bgOpacity%, blur=$blurEnabled(mode=$blurMode, fps=$liveFps, idlePause=$idlePause, r=$blurRadius), stroke=$iconStroke($strokeOpacity%), glyphShadow=$glyphShadow($shadowOpacity%), gradient=$gradientOpacity%, palette=$iconPalette"
+                "Preferences loaded: enabled=$enabled, bgOpacity=$bgOpacity%, blur=$blurEnabled(mode=$blurMode, fps=$liveFps, idlePause=$idlePause, r=$blurRadius), stroke=$iconStroke($strokeOpacity%), gradient=$gradientOpacity%, palette=$iconPalette"
             )
         } catch (t: Throwable) {
             GlassLogger.e("PrefsHelper", "Failed to load preferences", t)

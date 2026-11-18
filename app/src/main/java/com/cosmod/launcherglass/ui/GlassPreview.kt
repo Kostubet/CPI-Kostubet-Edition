@@ -75,10 +75,10 @@ internal class GlassPreview(context: Context, private val dark: Boolean, useDevi
         largeFolderMaterial = profile
         invalidate()
     }
-    fun configure(bundle:android.os.Bundle,scope:Int){
+    fun configure(bundle:android.os.Bundle,scope:Int,opticsOverride:GlassEngineSettings.Optics?=null){
         edgeScope=scope
         newEngine=com.cosmod.launcherglass.xposed.KyantGlassEngine.enabled(scope,bundle)
-        engineOptics=com.cosmod.launcherglass.xposed.KyantGlassEngine.optics(scope,bundle)
+        engineOptics=opticsOverride ?: com.cosmod.launcherglass.xposed.KyantGlassEngine.optics(scope,bundle)
         largeFolderEngine=bundle.getBoolean(GlassEngineSettings.LARGE_FOLDERS,false)
         largeFolderOptics=GlassEngineSettings.optics(bundle,GlassEngineSettings.LARGE_FOLDERS)
         com.cosmod.launcherglass.xposed.EdgeLight.update(bundle)

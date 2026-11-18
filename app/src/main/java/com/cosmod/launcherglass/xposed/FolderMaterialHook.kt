@@ -3,7 +3,6 @@ package com.cosmod.launcherglass.xposed
 import android.content.Context
 import android.graphics.*
 import android.graphics.drawable.Drawable
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -68,29 +67,45 @@ internal object FolderMaterialHook {
     private val backgrounds=WeakHashMap<Any,State>()
     private val panels=WeakHashMap<ImageView,Drawable?>()
     private val openPanels=WeakHashMap<View,List<WeakReference<ImageView>>>()
-    private val panelNodes=WeakHashMap<View,RenderNode>()
+    private class PanelFrame(val node:RenderNode, var time:Long=Long.MIN_VALUE)
+    private val panelFrames=WeakHashMap<ImageView,PanelFrame>()
     private val panelTransform=Matrix()
 
-    fun backdrop(icon:View,crop:RectF):RenderNode? {
+    private fun openFolderPanels(icon:View):List<WeakReference<ImageView>>? {
         var ancestor=icon.parent as? View
         while(ancestor!=null){
-            val registered=openPanels[ancestor]
-            if(registered!=null){
-                for(reference in registered){
-                    val panel=reference.get() ?: continue
-                    val node=panelNodes[panel] ?: continue
-                    if(!panel.isShown || panel.alpha<=.01f || !node.hasDisplayList())continue
-                    panelTransform.reset()
-                    icon.transformMatrixToGlobal(panelTransform)
-                    panel.transformMatrixToLocal(panelTransform)
-                    panelTransform.mapRect(crop)
-                    return node
-                }
-                return null
-            }
+            openPanels[ancestor]?.let {return it}
             ancestor=ancestor.parent as? View
         }
         return null
+    }
+
+    fun ownsBackdrop(icon:View)=openFolderPanels(icon)!=null
+
+    @androidx.annotation.RequiresApi(33)
+    fun backdrop(icon:View,crop:RectF):RenderNode? {
+        var panel:ImageView?=null
+        for(reference in openFolderPanels(icon) ?: return null){
+            val candidate=reference.get() ?: continue
+            if(!candidate.isShown || !candidate.isHardwareAccelerated || candidate.width<=0 ||
+                candidate.height<=0 || candidate.alpha<=.01f || (candidate.background==null && candidate.drawable==null))continue
+            if(candidate.alpha>(panel?.alpha ?: 0f))panel=candidate
+        }
+        panel ?: return null
+        panelTransform.reset()
+        icon.transformMatrixToGlobal(panelTransform)
+        panel.transformMatrixToLocal(panelTransform)
+        panelTransform.mapRect(crop)
+        val frame=panelFrames.getOrPut(panel){PanelFrame(RenderNode("CherryPick.openFolderBackdrop"))}
+        val node=frame.node
+        val time=android.view.animation.AnimationUtils.currentAnimationTimeMillis()
+        if(frame.time!=time || !node.hasDisplayList() || node.width!=panel.width || node.height!=panel.height){
+            node.setPosition(0,0,panel.width,panel.height)
+            val target=node.beginRecording()
+            try {panel.draw(target)}finally{node.endRecording()}
+            frame.time=time
+        }
+        return node
     }
     private val main=Handler(Looper.getMainLooper())
     private val converted=WeakHashMap<Any,Boolean>()
@@ -192,23 +207,7 @@ internal object FolderMaterialHook {
                     fallback?.bounds=bounds;fallback?.draw(target)
                 }
             }
-            if(Build.VERSION.SDK_INT>=33 && owner==null && panels.containsKey(view) && PrefsHelper.folderIconsBlurEnabled &&
-                canvas.isHardwareAccelerated && view.width>0 && view.height>0){
-                val node=panelNodes.getOrPut(view){RenderNode("CherryPick.openFolderBackdrop")}
-                node.setPosition(0,0,view.width,view.height)
-                try {
-                    val target=node.beginRecording()
-                    try {drawPanel(target)}finally{node.endRecording()}
-                    canvas.drawRenderNode(node)
-                }catch(error:RuntimeException){
-                    panelNodes.remove(view)
-                    GlassLogger.limited("FolderMaterial","openBackdrop") {"Folder backdrop unavailable: $error"}
-                    drawPanel(canvas)
-                }
-            }else{
-                panelNodes.remove(view)
-                drawPanel(canvas)
-            }
+            drawPanel(canvas)
         }
         override fun setAlpha(alpha:Int){if(opacity!=alpha){opacity=alpha;invalidateSelf()}}
         override fun getAlpha()=opacity

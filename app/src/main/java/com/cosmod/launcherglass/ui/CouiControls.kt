@@ -153,6 +153,26 @@ internal class CouiButton(context: Context, dark: Boolean, accent: Int, foregrou
     }
 }
 
+internal class CouiDisclosure(context:Context,dark:Boolean,accent:Int,title:String,
+    onExpand:(Boolean)->Unit) : CouiControl(context,dark,accent) {
+    private var expanded by mutableStateOf(false)
+
+    init {
+        content {
+            BasicComponent(
+                title=title,
+                onClick={
+                    expanded=!expanded
+                    performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                    onExpand(expanded)
+                },
+                endActions={ SettingsExpandArrow(expanded) },
+                enabled=controlEnabled,
+            )
+        }
+    }
+}
+
 internal class CouiSwitchRow(
     context: Context,
     dark: Boolean,

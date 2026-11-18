@@ -10,6 +10,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Indication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,6 +53,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
@@ -65,7 +68,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import io.github.suqi8.coui.kmp.theme.COUITheme
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -170,6 +175,7 @@ fun TabRowWithContour(
     listState: LazyListState? = null,
     interactionSource: MutableInteractionSource? = null,
     indication: Indication? = null,
+    dragToSelect: Boolean = false,
 ) {
     SegmentButtonRow(
         tabs = tabs,
@@ -187,6 +193,7 @@ fun TabRowWithContour(
         listState = listState,
         interactionSource = interactionSource,
         indication = indication,
+        dragToSelect = dragToSelect,
     )
 }
 
@@ -210,6 +217,7 @@ private fun SegmentButtonRow(
     interactionSource: MutableInteractionSource?,
     indication: Indication?,
     modifier: Modifier = Modifier,
+    dragToSelect: Boolean = false,
 ) {
     val currentOnTabSelected by rememberUpdatedState(onTabSelected)
     val isDarkTheme = COUITheme.colorScheme.background.luminance() < 0.5f
@@ -279,22 +287,26 @@ private fun SegmentButtonRow(
             Animatable(if (segmentWidthsPx.isEmpty()) 0f else segmentWidthsPx[index].toFloat())
         }
         val indicatorScale = remember { Animatable(1f) }
+        var dragging by remember { mutableStateOf(false) }
+        val gestureScope = rememberCoroutineScope()
         var selectedSegmentPressed by remember { mutableStateOf(false) }
         var lastSettledSelectedTabIndex by remember(resolvedListState) { mutableIntStateOf(-1) }
 
         // COUI animateIndicatorToPosition: independent position and width springs.
+        var lastIndicatorIndex by remember { mutableIntStateOf(-1) }
         LaunchedEffect(selectedTabIndex, segmentWidthsPx, segmentLeftsPx) {
             if (segmentWidthsPx.isEmpty()) return@LaunchedEffect
             val index = selectedTabIndex.coerceIn(0, segmentWidthsPx.lastIndex)
             val targetWidth = segmentWidthsPx[index].toFloat()
             val targetCenter = segmentLeftsPx[index] + targetWidth / 2f
-            if (lastSettledSelectedTabIndex < 0 || lastSettledSelectedTabIndex == selectedTabIndex) {
+            if (lastIndicatorIndex < 0 || lastIndicatorIndex == selectedTabIndex) {
                 indicatorCenterX.snapTo(targetCenter)
                 indicatorWidth.snapTo(targetWidth)
             } else {
                 launch { indicatorCenterX.animateTo(targetCenter, SegmentButtonSpring) }
                 launch { indicatorWidth.animateTo(targetWidth, SegmentButtonSpring) }
             }
+            lastIndicatorIndex = selectedTabIndex
         }
 
         // Keep the selected tab visible when the row overflows and scrolls.
@@ -312,8 +324,8 @@ private fun SegmentButtonRow(
         }
 
         // COUIPressFeedbackHelper: pressing the selected segment scales the indicator around its center.
-        LaunchedEffect(selectedSegmentPressed, selectedTabIndex, segmentWidthsPx, height, contourPadding) {
-            val target = if (selectedSegmentPressed && segmentWidthsPx.isNotEmpty()) {
+        LaunchedEffect(selectedSegmentPressed, dragging, selectedTabIndex, segmentWidthsPx, height, contourPadding) {
+            val target = if ((selectedSegmentPressed || dragging) && segmentWidthsPx.isNotEmpty()) {
                 val index = selectedTabIndex.coerceIn(0, segmentWidthsPx.lastIndex)
                 with(density) {
                     pressedScaleEndRatio(
@@ -332,6 +344,43 @@ private fun SegmentButtonRow(
                 (segmentLeftsPx.getOrElse(firstIndex) { 0 } + resolvedListState.firstVisibleItemScrollOffset).toFloat()
             }
         }
+        val centers = remember(segmentLeftsPx, segmentWidthsPx) {
+            segmentLeftsPx.mapIndexed { index, left -> left + segmentWidthsPx[index] / 2f }
+        }
+        val canDrag = dragToSelect && centers.size > 1 &&
+            segmentLeftsPx.last() + segmentWidthsPx.last() <= viewportPx + 1f
+        val dragGesture = if (canDrag) {
+            Modifier.pointerInput(centers, segmentWidthsPx, contourPadding, selectedTabIndex) {
+                val padding = contourPadding.toPx()
+                fun follow(x: Float) {
+                    val center = (x - padding + scrollOffset).coerceIn(centers.first(), centers.last())
+                    val upper = (1..centers.lastIndex).first { center <= centers[it] }
+                    val lower = upper - 1
+                    val progress = (center - centers[lower]) / (centers[upper] - centers[lower])
+                    val width = segmentWidthsPx[lower] + (segmentWidthsPx[upper] - segmentWidthsPx[lower]) * progress
+                    gestureScope.launch(start = CoroutineStart.UNDISPATCHED) { indicatorCenterX.snapTo(center) }
+                    gestureScope.launch(start = CoroutineStart.UNDISPATCHED) { indicatorWidth.snapTo(width) }
+                }
+                fun settle(index: Int) {
+                    dragging = false
+                    if (index != selectedTabIndex) {
+                        currentOnTabSelected(index)
+                    } else {
+                        gestureScope.launch { indicatorCenterX.animateTo(centers[index], SegmentButtonSpring) }
+                        gestureScope.launch { indicatorWidth.animateTo(segmentWidthsPx[index].toFloat(), SegmentButtonSpring) }
+                    }
+                }
+                detectHorizontalDragGestures(
+                    onDragStart = { dragging = true; follow(it.x) },
+                    onDragEnd = {
+                        val nearest = centers.indices.minBy { abs(centers[it] - indicatorCenterX.value) }
+                        settle(nearest)
+                    },
+                    onDragCancel = { settle(selectedTabIndex.coerceIn(centers.indices)) },
+                    onHorizontalDrag = { change, _ -> follow(change.position.x) },
+                )
+            }
+        } else Modifier
         val onSelectedPressedChange: (Boolean) -> Unit = remember { { pressed -> selectedSegmentPressed = pressed } }
         val containerPath = remember { Path() }
         val indicatorPath = remember { Path() }
@@ -339,6 +388,7 @@ private fun SegmentButtonRow(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .then(dragGesture)
                 .drawBehind {
                     // 1. Container capsule (COUISegmentButtonLayout.drawButtonBackground).
                     val containerRadius = min((cornerRadius + contourPadding).toPx(), size.height / 2f)
@@ -398,6 +448,7 @@ private fun SegmentButtonRow(
             // 4. Labels, composed on top of the canvas.
             LazyRow(
                 state = resolvedListState,
+                userScrollEnabled = !canDrag,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(contourPadding),
