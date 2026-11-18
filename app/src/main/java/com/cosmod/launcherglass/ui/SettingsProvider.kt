@@ -24,6 +24,14 @@ class SettingsProvider : ContentProvider() {
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
         val bundle = Bundle()
         when (method) {
+            com.cosmod.launcherglass.haptic.HapticRingStore.READ,
+            com.cosmod.launcherglass.haptic.HapticRingStore.REPORT -> {
+                if (Binder.getCallingUid() != Process.SYSTEM_UID) throw SecurityException("Telecom requires the system UID")
+                val ctx = requireNotNull(context)
+                val store = com.cosmod.launcherglass.haptic.HapticRingStore
+                if (method == store.READ) return store.read(ctx, prefs.getBoolean(KEY_ENABLED, SettingsDefaults.boolean(KEY_ENABLED)))
+                arg?.let { store.report(ctx, it) }
+            }
             METHOD_REPORT_RUNTIME -> {
                 val source=callingPackage
                 val valid=when(arg){

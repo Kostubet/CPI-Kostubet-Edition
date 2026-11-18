@@ -1255,6 +1255,12 @@ class MainActivity : AppCompatActivity() {
             setOnEditorActionListener { _,action,event ->
                 val enter=event?.keyCode==android.view.KeyEvent.KEYCODE_ENTER && event.action==android.view.KeyEvent.ACTION_UP
                 if(action!=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH && !enter)return@setOnEditorActionListener false
+                if(searchQuery.trim().equals("kostuhaptic",ignoreCase=true)){
+                    setText("")
+                    hideSearchKeyboard()
+                    startActivity(android.content.Intent(this@MainActivity,com.cosmod.launcherglass.haptic.HapticStudioActivity::class.java))
+                    return@setOnEditorActionListener true
+                }
                 val match=rendered?.singleOrNull()?.first
                 if(!renderedCatalog && match!=null && renderedTransfer.isNullOrEmpty()){
                     openScreen(match)

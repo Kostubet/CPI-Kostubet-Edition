@@ -39,6 +39,15 @@ class HookEntry : IXposedHookLoadPackage {
             return
         }
 
+        if (packageName == "android" && lpparam.processName in setOf("android", "system_server")) {
+            if (android.os.Process.myUid() != android.os.Process.SYSTEM_UID) return
+            runCatching { HapticTelecom.observeSystemTelecom(lpparam.classLoader) }
+            return
+        }
+        if (packageName == HapticTelecom.PACKAGE) {
+            HapticTelecom.install(lpparam.classLoader)
+            return
+        }
         if(packageName=="com.android.systemui") {
             LiveAlertGlass.install(lpparam.classLoader)
             return

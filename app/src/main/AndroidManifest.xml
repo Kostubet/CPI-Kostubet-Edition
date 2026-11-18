@@ -54,6 +54,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".haptic.HapticStudioActivity"
+            android:exported="false"
+            android:enableOnBackInvokedCallback="true" />
+
         <receiver
             android:name=".util.BootRestartReceiver"
             android:exported="true">
