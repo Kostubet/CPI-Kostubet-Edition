@@ -91,4 +91,32 @@ class HapticCoreTest {
         assertTrue(points.zipWithNext().all { (a, b) -> a[0] < b[0] && a[2] <= b[2] })
         assertNull(richTapPayload(HapticPattern.empty("silence"), 0, 900, 121, 13))
     }
+
+    @Test fun tapRhythmStrengthAndPulseWidthAreIndependent() {
+        val train = HapticTapTrain(count = 4, spacing = 160, delay = 100, swing = 25,
+            firstStrength = 25, lastStrength = 85, customPulse = true, pulseWidth = 20)
+        val pattern = HapticPattern("taps", train.length, train.points())
+        val peaks = pattern.points.filter { it.tap }
+        assertEquals(listOf(104, 304, 424, 624), peaks.map { it.ms })
+        assertEquals(.25f, peaks.first().amplitude, .0001f)
+        assertEquals(.85f, peaks.last().amplitude, .0001f)
+        assertEquals(0f, pattern.at(95).amplitude, 0f)
+        assertEquals(0f, pattern.at(120).amplitude, 0f)
+        assertNull(pattern.nativeTaps(0, pattern.length))
+        val systemClicks = pattern.copy(points = train.copy(customPulse = false).points())
+        assertEquals(peaks.map { it.ms }, systemClicks.nativeTaps(0, pattern.length)?.map { it.time })
+    }
+
+    @Test fun resettingVibrationKeepsSourceAndTimeline() {
+        val pattern = HapticPattern("song", 800, HapticTapTrain(count = 2, spacing = 400).points(),
+            audio = "content://audio/1", intensity = 50, offset = 120, fadeIn = 100, repeat = true)
+        val reset = pattern.resetVibration()
+        assertEquals(pattern.name, reset.name)
+        assertEquals(pattern.audio, reset.audio)
+        assertEquals(pattern.length, reset.length)
+        assertEquals(listOf(HapticPoint(0, 0f), HapticPoint(800, 0f)), reset.points)
+        assertEquals(100, reset.intensity)
+        assertEquals(0, reset.offset)
+        assertTrue(!reset.repeat)
+    }
 }

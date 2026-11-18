@@ -25,6 +25,7 @@ internal class HapticMotor(context: Context) {
     val frequency get() = envelope?.frequency
     private val vendor = if (present) RichTapHaptics.discover() else null
     val richTap get() = vendor != null
+    private var richTapActive = false
 
     data class Envelope(val minimum: Int, val maximum: Int, val points: Int, val duration: Int,
         val frequency: ClosedFloatingPointRange<Float>?, val resonant: Float)
@@ -44,24 +45,26 @@ internal class HapticMotor(context: Context) {
         ).takeIf { it.minimum > 0 && it.maximum >= it.minimum && it.points >= 2 && it.duration > 0 }
     }.getOrNull()
 
-    fun effect(pattern: HapticPattern, start: Int, end: Int): VibrationEffect? {
+    private data class PreviewEffect(val effect: VibrationEffect, val richTap: Boolean = false)
+
+    private fun previewEffect(pattern: HapticPattern, start: Int, end: Int): PreviewEffect? {
         if (!present || end <= start) return null
         val useFrequency = frequency != null && pattern.points.any { it.hz > 0f }
         val useRichTap = vendor != null && pattern.points.any { it.pitch != 0f }
         if (pattern.hasTapPoints && !useFrequency && !useRichTap) {
             pattern.nativeTaps(start, end)?.let { taps ->
-                clickEffect(taps)?.let { return it }
-                vendor?.tapEffect(taps, end - start)?.let { return it }
+                clickEffect(taps)?.let { return PreviewEffect(it) }
+                vendor?.tapEffect(taps, end - start)?.let { return PreviewEffect(it, richTap = true) }
             }
-            return HapticWaveform.sample(pattern, start, end, amplitude).effect(false)
+            return HapticWaveform.sample(pattern, start, end, amplitude).effect(false)?.let(::PreviewEffect)
         }
-        if (useRichTap) vendor.effect(pattern, start, end)?.let { return it }
+        if (useRichTap) vendor.effect(pattern, start, end)?.let { return PreviewEffect(it, richTap = true) }
         if (Build.VERSION.SDK_INT >= 36 && envelope != null) {
             val effect = nativeEnvelope(pattern, start, end, envelope, useFrequency)
-            if (effect != null) return effect
+            if (effect != null) return PreviewEffect(effect)
         }
-        if (!useRichTap && end - start <= 5000) vendor?.effect(pattern, start, end)?.let { return it }
-        return HapticWaveform.sample(pattern, start, end, amplitude).effect(false)
+        if (!useRichTap && end - start <= 5000) vendor?.effect(pattern, start, end)?.let { return PreviewEffect(it, richTap = true) }
+        return HapticWaveform.sample(pattern, start, end, amplitude).effect(false)?.let(::PreviewEffect)
     }
 
     private fun clickEffect(taps: List<HapticClick>): VibrationEffect? = runCatching {
@@ -130,8 +133,11 @@ internal class HapticMotor(context: Context) {
     }.getOrNull()
 
     fun prepare(pattern: HapticPattern, start: Int, end: Int): (() -> Unit)? {
-        val effect = effect(pattern, start, end) ?: return null
-        return { play(effect) }
+        val preview = previewEffect(pattern, start, end) ?: return null
+        return {
+            richTapActive = preview.richTap
+            play(preview.effect)
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -139,7 +145,12 @@ internal class HapticMotor(context: Context) {
         vibrator?.vibrate(effect, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())
     }
 
-    fun stop() { vibrator?.cancel() }
+    fun stop() {
+        val wasRichTap = richTapActive
+        richTapActive = false
+        runCatching { vibrator?.cancel() }
+        if (wasRichTap) vendor?.stopEffect()?.let { effect -> runCatching { play(effect) } }
+    }
 }
 
 internal class HapticWaveform(val times: LongArray, val levels: IntArray) {

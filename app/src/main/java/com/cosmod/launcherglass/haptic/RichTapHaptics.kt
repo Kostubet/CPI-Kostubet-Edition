@@ -8,7 +8,7 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /** ColorOS RichTap HE 2.0, discovered through the installed framework. Frequencies use the OEM relative scale. */
-internal class RichTapHaptics private constructor(private val createPattern: Method) {
+internal class RichTapHaptics private constructor(private val createPattern: Method, private val setParameter: Method?) {
     fun effect(pattern: HapticPattern, start: Int, end: Int, repeating: Boolean = false): VibrationEffect? = runCatching {
         val payload = richTapPayload(pattern, start, end, Process.myPid(), sequence.incrementAndGet()) ?: return null
         createPattern.invoke(null, payload, if (repeating) Int.MAX_VALUE else 1, 0, 255, 0) as? VibrationEffect
@@ -20,6 +20,11 @@ internal class RichTapHaptics private constructor(private val createPattern: Met
         createPattern.invoke(null, payload, 1, 0, 255, 0) as? VibrationEffect
     }.getOrNull()
 
+    // ColorOS HapticPlayer.stop sends a zero parameter packet to the RichTap engine.
+    fun stopEffect(): VibrationEffect? = runCatching {
+        setParameter?.invoke(null, 0, 0, 0) as? VibrationEffect
+    }.getOrNull()
+
     companion object {
         private val sequence = AtomicInteger()
         fun discover(): RichTapHaptics? = runCatching {
@@ -29,7 +34,8 @@ internal class RichTapHaptics private constructor(private val createPattern: Met
             val int = Int::class.javaPrimitiveType
             val method = api.getMethod("createPatternHeWithParam", IntArray::class.java, int, int, int, int)
             if (!VibrationEffect::class.java.isAssignableFrom(method.returnType)) return null
-            RichTapHaptics(method)
+            val setParameter = runCatching { api.getMethod("createPatternHeParameter", int, int, int) }.getOrNull()
+            RichTapHaptics(method, setParameter)
         }.getOrNull()
     }
 }

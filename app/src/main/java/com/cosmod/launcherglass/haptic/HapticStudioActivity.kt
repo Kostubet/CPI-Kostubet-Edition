@@ -79,6 +79,7 @@ class HapticStudioActivity : AppCompatActivity() {
     private var regionStart = 0
     private var regionEnd: Int? = null
     private var compare = false
+    private var previewAudio = true
     private var channel = HapticChannel.AMPLITUDE
     private var drawCurve = false
     private var graph: HapticTimeline? = null
@@ -104,9 +105,12 @@ class HapticStudioActivity : AppCompatActivity() {
     private var labFrequency = 50
     private var labFrequencyEnd = 80
     private var labDensity = 3
-    private var labTaps = 3
-    private var tapSpacing = 220
-    private val labLength get() = if (slide == HapticSlide.TAPS) labTaps * tapSpacing else labDuration
+    private var taps = HapticTapTrain()
+    private var labLeadIn = 0
+    private var labTail = 0
+    private var repeatLab = false
+    private val labLength get() = if (slide == HapticSlide.TAPS) taps.length + labTail
+        else labLeadIn + labDuration + labTail
     private var dark = false
     private val canvasColor get() = ContextCompat.getColor(this, R.color.cpi_ui_background)
     private val surface get() = ContextCompat.getColor(this, R.color.cpi_ui_panel)
@@ -382,6 +386,7 @@ class HapticStudioActivity : AppCompatActivity() {
                 channel = channels[it]; show(preserveScroll = true)
             }
             toggle(box, t("Draw control points", "Рисовать точки"), drawCurve) {
+                player.stop()
                 drawCurve = it
                 graph?.drawCurve = it
             }
@@ -428,6 +433,8 @@ class HapticStudioActivity : AppCompatActivity() {
                     show(preserveScroll = true)
                 }
             }
+            divider(box)
+            link(box, t("Reset pattern", "Сбросить паттерн"), icon = R.drawable.ic_restart) { confirmPatternReset() }
         }
     }
 
@@ -464,7 +471,7 @@ class HapticStudioActivity : AppCompatActivity() {
                 (it != HapticSlide.SHARPNESS || motor.envelope != null)
         }
         card(body, t("Effect preview", "Предпросмотр эффекта")) { box ->
-            option(box, "Haptic Slide", types.indexOf(slide).coerceAtLeast(0), types.map(::slideName)) {
+            option(box, t("Effect", "Эффект"), types.indexOf(slide).coerceAtLeast(0), types.map(::slideName)) {
                 player.stop()
                 labCursor = 0
                 slide = types[it]
@@ -473,8 +480,14 @@ class HapticStudioActivity : AppCompatActivity() {
             addGraph(box, labPattern(), false)
             playbackBar(box, labLength, labCursor, ::seekLab) {
                 val project = labPattern()
-                player.play(project, null, labCursor.takeIf { it < project.length } ?: 0, project.length, false)
+                player.play(project, null, labCursor.takeIf { it < project.length } ?: 0, project.length, repeatLab, 0)
             }
+            divider(box)
+            toggle(box, t("Repeat preview", "Повторять предпросмотр"), repeatLab) {
+                player.stop()
+                repeatLab = it
+            }
+            divider(box)
             box.addView(button(t("Insert at cursor", "Вставить в дорожку"), primary = true) {
                 val project = labPattern()
                 if (cursor + project.length <= MAX_TRACK_MS) {
@@ -491,52 +504,108 @@ class HapticStudioActivity : AppCompatActivity() {
             }, actionMargin())
         }
         card(body, t("Effect settings", "Настройки эффекта")) { box ->
-            fun control(title: String, min: Int, max: Int, initial: Int, set: (Int) -> Unit) {
-                slider(box, title, min, max, initial) { value ->
-                    if (player.playing) player.stop()
+            fun control(title: String, min: Int, max: Int, initial: Int, suffix: String, set: (Int) -> Unit) {
+                slider(box, title, min, max, initial, suffix) { value ->
+                    player.stop()
                     set(value)
                     graph?.pattern = labPattern()
                     playback?.duration = labLength
                     seekLab(labCursor)
                 }
             }
-            control(t("Amplitude", "Амплитуда"), 0, 100, labStrength) { labStrength = it }
             if (slide == HapticSlide.TAPS) {
-                control(t("Number of taps", "Количество постукиваний"), 1, 8, labTaps) { labTaps = it }
-                control(t("Interval · ms", "Интервал · мс"), 80, 700, tapSpacing) { tapSpacing = it }
-                return@card
+                option(box, t("Tap output", "Тип постукивания"), if (taps.customPulse) 1 else 0,
+                    listOf(t("System click", "Штатный щелчок"), t("Custom pulse", "Настраиваемый импульс"))) {
+                    player.stop()
+                    taps = taps.copy(customPulse = it == 1)
+                    show(preserveScroll = true)
+                }
+                control(t("Number of taps", "Количество ударов"), 1, 16, taps.count, "") {
+                    val showLast = (taps.count > 1) != (it > 1)
+                    taps = taps.copy(count = it)
+                    if (showLast) show(preserveScroll = true)
+                }
+                control(t("First tap strength", "Сила первого удара"), 0, 100, taps.firstStrength, "%") {
+                    taps = taps.copy(firstStrength = it)
+                }
+                if (taps.count > 1) control(t("Last tap strength", "Сила последнего удара"), 0, 100, taps.lastStrength, "%") {
+                    taps = taps.copy(lastStrength = it)
+                }
+                val ms = t(" ms", " мс")
+                control(t("Interval", "Интервал"), 80, 900, taps.spacing, ms) { taps = taps.copy(spacing = it) }
+                control(t("Start delay", "Пауза перед первым ударом"), 0, 1500, taps.delay, ms) { taps = taps.copy(delay = it) }
+                control(t("Alternating intervals", "Чередование интервалов"), 0, 35, taps.swing, "%") { taps = taps.copy(swing = it) }
+                if (taps.customPulse) control(t("Pulse width", "Длительность удара"), 12, 44, taps.pulseWidth, ms) {
+                    taps = taps.copy(pulseWidth = it)
+                }
+            } else {
+                val ms = t(" ms", " мс")
+                control(t("Amplitude", "Амплитуда"), 0, 100, labStrength, "%") { labStrength = it }
+                control(t("Duration", "Длительность"), 80, 5000, labDuration, ms) { labDuration = it }
+                control(t("Start delay", "Пауза перед эффектом"), 0, 1500, labLeadIn, ms) { labLeadIn = it }
+                control(t("Attack", "Нарастание"), 1, 2000, adsr.attack, ms) { adsr = adsr.copy(attack = it) }
+                control(t("Decay", "Начальное затухание"), 1, 2000, adsr.decay, ms) { adsr = adsr.copy(decay = it) }
+                control(t("Sustain", "Уровень удержания"), 0, 100, adsr.sustain, "%") { adsr = adsr.copy(sustain = it) }
+                control(t("Release", "Окончательное затухание"), 1, 2000, adsr.release, ms) { adsr = adsr.copy(release = it) }
+                if (slide == HapticSlide.WAVE || slide == HapticSlide.PULSE_FLOW) {
+                    control(t("Rhythm density", "Плотность ритма"), 1, 8, labDensity, "") { labDensity = it }
+                }
+                if (motor.envelope != null) control(t("Sharpness", "Резкость"), 0, 100, labSharpness, "%") { labSharpness = it }
+                if (motor.richTap || motor.frequency != null) {
+                    control(t("Start frequency position", "Начальная позиция частоты"), 0, 100, labFrequency, "%") { labFrequency = it }
+                    if (slide == HapticSlide.FREQUENCY)
+                        control(t("End frequency position", "Конечная позиция частоты"), 0, 100, labFrequencyEnd, "%") { labFrequencyEnd = it }
+                }
+                option(box, t("Transition smoothing", "Плавность перехода"), curve.ordinal, HapticCurve.entries.map(::curveName)) {
+                    player.stop()
+                    curve = HapticCurve.entries[it]
+                    show(preserveScroll = true)
+                }
             }
-            control(t("Duration · ms", "Длительность · мс"), 80, 5000, labDuration) { labDuration = it }
-            control(t("Attack · ms", "Нарастание · мс"), 1, 2000, adsr.attack) { adsr = adsr.copy(attack = it) }
-            control(t("Decay · ms", "Начальное затухание · мс"), 1, 2000, adsr.decay) { adsr = adsr.copy(decay = it) }
-            control(t("Sustain", "Уровень удержания"), 0, 100, adsr.sustain) { adsr = adsr.copy(sustain = it) }
-            control(t("Release · ms", "Окончательное затухание · мс"), 1, 2000, adsr.release) { adsr = adsr.copy(release = it) }
-            if (slide == HapticSlide.WAVE || slide == HapticSlide.PULSE_FLOW) {
-                control(t("Rhythm density", "Плотность ритма"), 1, 8, labDensity) { labDensity = it }
-            }
-            if (motor.envelope != null) control(t("Sharpness", "Резкость"), 0, 100, labSharpness) { labSharpness = it }
-            if (motor.richTap || motor.frequency != null) {
-                control(t("Start frequency position", "Начальная позиция частоты"), 0, 100, labFrequency) { labFrequency = it }
-                if (slide == HapticSlide.FREQUENCY)
-                    control(t("End frequency position", "Конечная позиция частоты"), 0, 100, labFrequencyEnd) { labFrequencyEnd = it }
-            }
-            option(box, t("Transition smoothing", "Плавность перехода"), curve.ordinal, HapticCurve.entries.map(::curveName)) {
-                curve = HapticCurve.entries[it]; show(preserveScroll = true)
-            }
+            control(t("End pause", "Пауза после эффекта"), 0, 2000, labTail, t(" ms", " мс")) { labTail = it }
+            divider(box)
+            link(box, t("Reset effect settings", "Сбросить настройки эффекта")) { resetLab() }
         }
     }
 
     private fun labPattern(): HapticPattern {
+        if (slide == HapticSlide.TAPS) {
+            val points = taps.points()
+            return HapticPattern(slideName(slide), labLength,
+                if (labTail == 0) points else points + HapticPoint(labLength, 0f))
+        }
         val hz = motor.frequency
         fun absolute(value: Int) = if (hz == null) 0f else hz.start + (hz.endInclusive - hz.start) * value / 100f
-        val raw = slidePoints(slide, 0, labLength, labStrength * .01f, labSharpness * .01f,
-            absolute(labFrequency), absolute(labFrequencyEnd), if (slide == HapticSlide.TAPS) labTaps else labDensity, adsr, curve)
-        val points = if (hz == null && motor.richTap && slide != HapticSlide.TAPS) raw.map {
+        val raw = slidePoints(slide, labLeadIn, labDuration, labStrength * .01f, labSharpness * .01f,
+            absolute(labFrequency), absolute(labFrequencyEnd), labDensity, adsr, curve)
+        val points = if (hz == null && motor.richTap) raw.map {
             val from = (labFrequency - 50) * 2f
             val to = if (slide == HapticSlide.FREQUENCY) (labFrequencyEnd - 50) * 2f else from
-            it.copy(pitch = from + (to - from) * it.ms / labDuration)
+            it.copy(pitch = from + (to - from) * (it.ms - labLeadIn) / labDuration)
         } else raw
-        return HapticPattern(slideName(slide), labLength, points)
+        return HapticPattern(slideName(slide), labLength, buildList {
+            if (labLeadIn > 0) add(points.first().copy(ms = 0))
+            addAll(points)
+            if (labTail > 0) add(points.last().copy(ms = labLength))
+        })
+    }
+
+    private fun resetLab() {
+        player.stop()
+        taps = HapticTapTrain()
+        curve = HapticCurve.SMOOTH_STEP
+        adsr = HapticAdsr()
+        labDuration = 900
+        labStrength = 70
+        labSharpness = 65
+        labFrequency = 50
+        labFrequencyEnd = 80
+        labDensity = 3
+        labLeadIn = 0
+        labTail = 0
+        repeatLab = false
+        labCursor = 0
+        show(preserveScroll = true)
     }
 
     private fun library() {
@@ -620,21 +689,28 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun previewControls(box: LinearLayout) {
-        playbackBar(box, pattern.length, cursor, ::seek, regionStart) { play(false) }
+        playbackBar(box, pattern.length, cursor, ::seek, regionStart, ::play)
         divider(box)
-        link(box, t("Haptics only", "Только вибрация")) { play(true) }
+        if (pattern.audio != null || original?.audio != null) {
+            toggle(box, t("Play audio with vibration", "Воспроизводить звук вместе с вибрацией"), previewAudio) {
+                player.stop()
+                previewAudio = it
+            }
+        }
         toggle(box, t("Loop fragment", "Зациклить фрагмент"), pattern.repeat) { changePattern(pattern.copy(repeat = it)) }
-        if (original != null) toggle(box, t("Compare with original", "Сравнить с оригиналом"), compare) { compare = it }
+        if (original != null) toggle(box, t("Compare with original", "Сравнить с оригиналом"), compare) {
+            player.stop()
+            compare = it
+        }
     }
 
     private fun playbackBar(box: LinearLayout, duration: Int, position: Int, seek: (Int) -> Unit, start: Int = 0, play: () -> Unit) {
         val bar = HapticPlaybackBar(this, dark, accent, t("Play", "Воспроизвести"), t("Pause", "Пауза"), t("Stop", "Остановить"),
             toggle = {
                 if (player.playing) {
-                    val pausedAt = player.position
-                    player.stop()
-                    seek(pausedAt)
-                } else play()
+                    player.pause()
+                    if (page == Page.LAB) labCursor = player.position else cursor = player.position
+                } else if (!player.resume()) play()
             },
             stop = { player.stop(); seek(start) },
         )
@@ -645,18 +721,18 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun seekLab(position: Int) {
-        if (player.playing) player.stop()
+        player.stop()
         labCursor = position.coerceIn(0, labLength)
         graph?.cursor = labCursor
         playback?.update(labCursor, false)
     }
 
-    private fun play(silent: Boolean) {
+    private fun play() {
         val project = if (compare) original ?: pattern else pattern
         val end = minOf(regionEnd ?: project.length, project.length)
         val lower = regionStart.coerceAtMost(end - 1)
         val start = cursor.takeIf { it in lower until end } ?: lower
-        player.play(project, if (silent) null else project.audio?.let(Uri::parse), start, end, pattern.repeat, lower)
+        player.play(project, if (previewAudio) project.audio?.let(Uri::parse) else null, start, end, pattern.repeat, lower)
     }
 
     private fun analyze(uri: Uri, generate: Boolean) {
@@ -750,7 +826,7 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun seek(ms: Int) {
-        if (player.playing) player.stop()
+        player.stop()
         cursor = ms.coerceIn(0, pattern.length)
         val previous = selected
         val nearest = pattern.points.minByOrNull { abs(it.ms - cursor) }
@@ -818,8 +894,28 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun resetSelection() { regionStart = 0; regionEnd = null; selected = null }
+    private fun confirmPatternReset() {
+        showDialog(t("Reset pattern?", "Сбросить паттерн?")) { box, dialog ->
+            box.addView(summary(t(
+                "The vibration track and its adjustments will be cleared. The audio source and length will be kept.",
+                "Дорожка вибрации и её настройки будут сброшены. Звук и длительность сохранятся.",
+            )))
+            buttons(box, t("Cancel", "Отмена"), t("Reset", "Сбросить"), { dialog.dismiss() }, {
+                dialog.dismiss()
+                compare = false
+                changePattern(pattern.resetVibration())
+                resetSelection()
+                cursor = 0
+                style = HapticStyle.BALANCED
+                generator = style.options()
+                show(preserveScroll = true)
+            })
+        }
+    }
+
     private fun changePattern(next: HapticPattern) {
         if (pattern == next) return
+        player.stop()
         record(pattern)
         pattern = next
         graph?.pattern = next

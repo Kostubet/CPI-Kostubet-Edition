@@ -26,6 +26,7 @@ internal enum class HapticCurve {
 
 internal enum class HapticSlide { INTENSITY, FREQUENCY, RISE, FALL, WAVE, PULSE_FLOW, SHARPNESS, CUSTOM, TAPS }
 internal enum class HapticChannel { AMPLITUDE, FREQUENCY, RICHTAP, SHARPNESS }
+internal enum class HapticTap { NONE, NATIVE, PULSE }
 
 internal data class HapticPoint(
     val ms: Int,
@@ -36,8 +37,9 @@ internal data class HapticPoint(
     val bezierIn: Float = .25f,
     val bezierOut: Float = .75f,
     val pitch: Float = 0f,
-    val tap: Boolean = false,
+    val tapKind: HapticTap = HapticTap.NONE,
 ) {
+    val tap get() = tapKind != HapticTap.NONE
     init {
         require(ms in 0..MAX_TRACK_MS && amplitude in 0f..1f && hz in 0f..2000f &&
             sharpness in 0f..1f && bezierIn in 0f..1f && bezierOut in 0f..1f && pitch in -100f..100f)
@@ -96,13 +98,16 @@ internal data class HapticPattern(
     val hasTapPoints get() = points.any { it.tap && it.amplitude > 0f }
 
     fun nativeTaps(start: Int, end: Int): List<HapticClick>? {
-        if (points.any { !it.tap && it.amplitude > 0f }) return null
+        if (points.any { it.tapKind != HapticTap.NATIVE && it.amplitude > 0f }) return null
         return points.mapNotNull { point ->
             val time = point.ms + offset
             if (!point.tap || time !in start until end) return@mapNotNull null
             at(time).amplitude.takeIf { it > 0f }?.let { HapticClick(time - start, it) }
         }.takeIf { it.isNotEmpty() }
     }
+
+    fun resetVibration(): HapticPattern = HapticPattern(name, length,
+        listOf(HapticPoint(0, 0f), HapticPoint(length, 0f)), audio = audio)
 
     companion object {
         fun empty(name: String) = HapticPattern(name, 2_000, listOf(HapticPoint(0, 0f), HapticPoint(2_000, 0f)))
@@ -112,14 +117,37 @@ internal data class HapticPattern(
 internal data class HapticAdsr(val attack: Int = 160, val decay: Int = 200, val sustain: Int = 55, val release: Int = 220)
 internal data class HapticClick(val time: Int, val strength: Float)
 
-internal fun tapPoints(length: Int, clicks: List<HapticClick>): List<HapticPoint> = buildList {
+internal data class HapticTapTrain(
+    val count: Int = 3,
+    val spacing: Int = 220,
+    val delay: Int = 0,
+    val swing: Int = 0,
+    val firstStrength: Int = 70,
+    val lastStrength: Int = 70,
+    val customPulse: Boolean = false,
+    val pulseWidth: Int = 28,
+) {
+    val length get() = delay + count * spacing
+
+    fun points(): List<HapticPoint> {
+        val clicks = List(count) { index ->
+            val time = delay + index * spacing + (index % 2) * spacing * swing / 100
+            val fraction = index.toFloat() / (count - 1).coerceAtLeast(1)
+            HapticClick(time, lerp(firstStrength * .01f, lastStrength * .01f, fraction))
+        }
+        return tapPoints(length, clicks, pulseWidth.takeIf { customPulse })
+    }
+}
+
+internal fun tapPoints(length: Int, clicks: List<HapticClick>, pulseWidth: Int? = null): List<HapticPoint> = buildList {
+    val kind = if (pulseWidth == null) HapticTap.NATIVE else HapticTap.PULSE
     add(HapticPoint(0, 0f))
     for (click in clicks) {
         val start = maxOf(last().ms, click.time)
-        val end = minOf(start + 32, length)
+        val end = minOf(start + (pulseWidth ?: 32), length)
         if (end - start < 12 || click.strength <= 0f) continue
         if (last().ms != start) add(HapticPoint(start, 0f))
-        add(HapticPoint(start + 4, click.strength, tap = true))
+        add(HapticPoint(start + 4, click.strength, tapKind = kind))
         add(HapticPoint(end, 0f, curve = HapticCurve.EASE_OUT))
     }
     if (last().ms < length) add(HapticPoint(length, 0f))
@@ -137,11 +165,6 @@ internal fun slidePoints(
     adsr: HapticAdsr,
     curve: HapticCurve,
 ): List<HapticPoint> {
-    if (type == HapticSlide.TAPS) {
-        val count = minOf(density, duration / 64).coerceAtLeast(1)
-        return tapPoints(duration, List(count) { HapticClick(duration * it / count, amplitude) })
-            .map { it.copy(ms = it.ms + start) }
-    }
     val attack = adsr.attack.coerceIn(1, duration / 2)
     val decay = adsr.decay.coerceIn(1, duration - attack - 1)
     val release = adsr.release.coerceIn(1, duration - attack - decay)
