@@ -47,9 +47,9 @@ import com.cosmod.launcherglass.ui.CouiSlot
 import com.cosmod.launcherglass.ui.CouiSwitchRow
 import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.ui.UiLanguage
-import com.cosmod.launcherglass.ui.onextbox.ColorOs17Button
+import com.cosmod.launcherglass.ui.CouiAction
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
-import com.cosmod.launcherglass.ui.onextbox.SettingsDivider
+import io.github.suqi8.coui.kmp.basic.HorizontalDivider
 import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.theme.COUITheme
@@ -253,7 +253,7 @@ class HapticStudioActivity : AppCompatActivity() {
             LinearLayout.LayoutParams(dp(46), dp(46)))
         toolbarView.addView(CouiSlot(this, dark, accent) {
             Text(title(next), Modifier.padding(start = 6.dp).semantics { heading() },
-                style = COUITheme.textStyles.title4, color = COUITheme.colorScheme.onBackground,
+                style = COUITheme.textStyles.headlineXS, color = COUITheme.colorScheme.labelPrimary,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }, LinearLayout.LayoutParams(0, -2, 1f))
         toolbar = toolbarView
@@ -1041,11 +1041,11 @@ class HapticStudioActivity : AppCompatActivity() {
     }
     private fun summary(value: String) = CouiSlot(this, dark, accent) {
         Text(value, Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            style = COUITheme.textStyles.body2, color = COUITheme.colorScheme.onSurfaceVariantSummary)
+            style = COUITheme.textStyles.bodyM, color = COUITheme.colorScheme.labelSecondary)
     }
     private fun message(value: String) { Toast.makeText(this, value, Toast.LENGTH_SHORT).show() }
     private fun button(title: String, primary: Boolean = false, enabled: Boolean = true, action: () -> Unit) = CouiSlot(this, dark, accent) {
-        ColorOs17Button(title, primary, onClick = action, enabled = enabled, modifier = Modifier.fillMaxWidth(),
+        CouiAction(title, primary, onClick = action, enabled = enabled, modifier = Modifier.fillMaxWidth(),
             minimumHeight = 44.dp)
     }
     private fun actionMargin() = LinearLayout.LayoutParams(-1, -2).apply {
@@ -1097,7 +1097,7 @@ class HapticStudioActivity : AppCompatActivity() {
         })
     }
     private fun divider(parent: LinearLayout, position: Int = parent.childCount) {
-        parent.addView(CouiSlot(this, dark, accent) { SettingsDivider() }, position)
+        parent.addView(CouiSlot(this, dark, accent) { HorizontalDivider() }, position)
     }
     private fun card(parent: LinearLayout, title: String? = null, divided: Boolean = false, content: (LinearLayout) -> Unit) {
         if (title != null) parent.addView(CouiSlot(this, dark, accent) {
@@ -1138,8 +1138,8 @@ class HapticStudioActivity : AppCompatActivity() {
         val close = CouiIconButton(this, dark, accent, ink, surface, R.drawable.ic_close, t("Close", "Закрыть"), effects)
         dialogHeader.addView(close, LinearLayout.LayoutParams(dp(42), dp(42)))
         dialogHeader.addView(CouiSlot(this, dark, accent) {
-            Text(title, Modifier.padding(start = 8.dp).semantics { heading() }, style = COUITheme.textStyles.title4,
-                color = COUITheme.colorScheme.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(title, Modifier.padding(start = 8.dp).semantics { heading() }, style = COUITheme.textStyles.headlineXS,
+                color = COUITheme.colorScheme.labelPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }, LinearLayout.LayoutParams(0, -2, 1f))
         panel.addView(dialogHeader, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
         val effect = RenderEffect.createBlurEffect(dp(11).toFloat(), dp(11).toFloat(), Shader.TileMode.CLAMP)

@@ -47,7 +47,7 @@
 
 ### Сборка и публикация
 
-Понадобятся JDK 21 и Android SDK API 37. Укажите SDK через `ANDROID_HOME` или `local.properties`.
+Понадобятся JDK 21 и Android SDK API 37. Укажите SDK через `ANDROID_HOME` или `local.properties`. Интерфейс настроек использует официальные библиотеки COUI 2.0.0 из Maven Central. [Исходники COUI](https://github.com/suqi8/coui/tree/v2.0.0)
 
 ~~~sh
 ./gradlew :app:assembleRelease :app:lintRelease :app:testDebugUnitTest
@@ -96,6 +96,8 @@ Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-
 To test smooth zoom, add stock Camera to the LSPosed scope and reopen it. In CPI, open **Camera → iOS Smooth Video Zoom**, turn it on, and select the controls to smooth. The graph updates with manual adjustments and scales its time axis to the trajectory. Compare saved recordings at 1080p and 4K, at 30 and 60 FPS, while zooming within one lens range and changing direction mid-zoom. Lens switches use the stock camera path.
 
 ### Build and release
+
+The settings interface uses the official COUI 2.0.0 Android libraries from Maven Central. [COUI source](https://github.com/suqi8/coui/tree/v2.0.0)
 
 Use JDK 21 and Android SDK API 37. Run `./gradlew :app:assembleRelease :app:lintRelease :app:testDebugUnitTest` or use `gradlew.bat` on Windows. [GitHub Actions](https://github.com/Kostubet/CPI-Kostubet-Edition/actions) runs these checks and uploads a test APK. A tag of the form `v<versionName>-build<versionCode>` publishes a signed prerelease and SHA-256 checksum after the checks pass.
 

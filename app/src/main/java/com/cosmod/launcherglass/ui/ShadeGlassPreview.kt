@@ -37,7 +37,7 @@ internal class ShadeGlassTabs(context:Context,dark:Boolean,accent:Int,labels:Lis
                     selection=index
                     choose(index)
                 }
-            },modifier=Modifier.fillMaxWidth(),height=46.dp,dragToSelect=true)
+            },modifier=Modifier.fillMaxWidth(),height=46.dp)
         }
     }
 }

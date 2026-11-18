@@ -24,7 +24,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.doOnPreDraw
-import androidx.core.widget.doAfterTextChanged
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
@@ -32,15 +31,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.res.painterResource
-import com.cosmod.launcherglass.ui.onextbox.ColorOs17ConfirmDialog
-import com.cosmod.launcherglass.ui.onextbox.ColorOs17Button
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
-import com.cosmod.launcherglass.ui.onextbox.ColorOsTopBarButton
-import com.cosmod.launcherglass.ui.onextbox.ColorOsWindowDropdownPreference
-import com.cosmod.launcherglass.ui.onextbox.SettingsCardRow
-import com.cosmod.launcherglass.ui.onextbox.SettingsDivider
-import com.cosmod.launcherglass.ui.onextbox.SettingsGroup
-import com.cosmod.launcherglass.ui.onextbox.SettingsSection
+import io.github.suqi8.coui.kmp.preference.WindowDropdownPreference
+import io.github.suqi8.coui.kmp.basic.BasicComponent
+
+
+import io.github.suqi8.coui.kmp.basic.SmallTitle
 import io.github.suqi8.coui.kmp.basic.Icon
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color as ComposeColor
@@ -176,14 +172,14 @@ class MainActivity : AppCompatActivity() {
     private var shadePanel=ShadeGlassSettings.Panel.CONTROL
     private var shadeComponent=0
     private var shadePreview:ShadeGlassPreview?=null
-    private var rootNavigationAppearance:Pair<Boolean,Int>?=null
+    private var rootNavigationAppearance: Triple<Boolean, Int, Boolean>? = null
     private val rootNavigationIndex=mutableIntStateOf(0)
     private val floatingTitles=java.util.WeakHashMap<TextView,java.lang.ref.WeakReference<TextView>>()
     private var screen=Screen.OVERVIEW
     private var detailParent=Screen.HOME
     private val tabScroll=mutableMapOf<Screen,Int>()
     private var searchQuery = ""
-    private var searchInput: EditText? = null
+    private var searchInput: CouiSearchHost? = null
     private var glowExpanded = false
     private var islandExpanded = false
     private var bannerExpanded = false
@@ -308,8 +304,8 @@ class MainActivity : AppCompatActivity() {
                 else if (menuOverlay!=null) closeChoicePopup()
                 else if(screen !in rootTabs)backToCatalog()
                 else if(screen==Screen.TOOLS)openTab(Screen.OVERVIEW)
-                else if (screen==Screen.HOME && (searchQuery.isNotEmpty() || searchInput?.hasFocus()==true)) {
-                    searchInput?.setText("")
+                else if (screen==Screen.HOME && (searchQuery.isNotEmpty() || searchInput?.isInputFocused()==true)) {
+                    searchInput?.setQuery("")
                     hideSearchKeyboard()
                     page.requestFocus()
                 } else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
@@ -410,7 +406,7 @@ class MainActivity : AppCompatActivity() {
     private fun text(value: String, size: Float = 16f, muted: Boolean = false, bold: Boolean = false) = TextView(this).apply {
         text = value; textSize = size
         setTextColor(if (muted) secondaryText else onSurface)
-        val style = if (bold) couiTextStyles.headline1 else if (muted) couiTextStyles.body2 else couiTextStyles.body1
+        val style = if (bold) couiTextStyles.headlineL else if (muted) couiTextStyles.bodyM else couiTextStyles.bodyL
         val weight = style.fontWeight?.weight ?: if (bold) 500 else 400
         typeface = Typeface.create(Typeface.DEFAULT, weight, false)
         if (style.letterSpacing.isEm) letterSpacing = style.letterSpacing.value
@@ -749,9 +745,9 @@ class MainActivity : AppCompatActivity() {
             confirm.setOnCancelListener {reopen()}
             add(buttons,CouiSlot(this,darkUi,primary){
                 androidx.compose.foundation.layout.Column(verticalArrangement=Arrangement.spacedBy(8.couiDp)){
-                    ColorOs17Button(getString(R.string.ui_saved_settings_save_apply),primary=true,
+                    CouiAction(getString(R.string.ui_saved_settings_save_apply),primary=true,
                         modifier=Modifier.fillMaxWidth(),onClick={confirm.close {saveCurrent {applySavedSettings(keys,values)}}})
-                    ColorOs17Button(getString(R.string.ui_saved_settings_apply_without),primary=false,
+                    CouiAction(getString(R.string.ui_saved_settings_apply_without),primary=false,
                         modifier=Modifier.fillMaxWidth(),onClick={confirm.close {applySavedSettings(keys,values)}})
                 }
             })
@@ -888,12 +884,7 @@ class MainActivity : AppCompatActivity() {
         if (destination != null) pageLayer?.doOnPreDraw { page.removeView(destination) }
     }
 
-    private fun hideSearchKeyboard(){
-        searchInput?.let { input ->
-            getSystemService(android.view.inputmethod.InputMethodManager::class.java)
-                ?.hideSoftInputFromWindow(input.windowToken,0)
-        }
-    }
+    private fun hideSearchKeyboard() = searchInput?.closeKeyboard()
 
     private val pageEase=android.view.animation.PathInterpolator(.22f,.68f,.24f,1f)
 
@@ -935,29 +926,12 @@ class MainActivity : AppCompatActivity() {
         val body=column().apply { clipChildren=false;clipToPadding=false;setPadding(dp(16),0,dp(16),dp(12)) }
         currentScroll=scroll
         headerBody=body
-        var pinnedToolbar:View?=null
-        if(screen !in rootTabs){
-            val toolbar = row()
-            val back = if (bool("coloros_ui_effects")) {
-                CouiSlot(this, darkUi, primary, fill = true) {
-                    ColorOsTopBarButton(onClick = { haptic(toolbar); backToCatalog() }) {
-                        Icon(painterResource(R.drawable.ic_arrow_back), getString(R.string.ui_back),tint=ComposeColor(onSurface))
-                    }
-                }
-            } else smallIcon(R.drawable.ic_arrow_back, getString(R.string.ui_back)) { backToCatalog() }
-            toolbar.addView(back, LinearLayout.LayoutParams(dp(46), dp(46)))
-            val compact=text(getString(screen.title),18f,bold=true).apply {
-                maxLines=1
-                ellipsize=android.text.TextUtils.TruncateAt.END
-                setPadding(dp(5),0,0,0)
-                alpha=1f
-                importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES
-                ViewCompat.setAccessibilityHeading(this,true)
+        val pinnedToolbar = if (screen !in rootTabs) {
+            space(body, 62)
+            CouiDetailToolbar(this, darkUi, primary, getString(screen.title), getString(R.string.ui_back)) {
+                backToCatalog()
             }
-            toolbar.addView(compact,LinearLayout.LayoutParams(0,-2,1f))
-            pinnedToolbar=toolbar
-            space(body,62)
-        }
+        } else null
         val catalog=screen==Screen.HOME
         val heading=text(getString(screen.title),32f,bold=true).apply {
             minHeight=dp(if(catalog)64 else if(pinnedToolbar!=null)47 else 104)
@@ -1010,7 +984,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         pinnedToolbar?.let {
-            layer.addView(it,FrameLayout.LayoutParams(-1,dp(54),Gravity.TOP).apply {
+            layer.addView(it,FrameLayout.LayoutParams(-1,dp(58),Gravity.TOP).apply {
                 setMargins(dp(16),topInset+dp(2),dp(16),0)
             })
         }
@@ -1026,7 +1000,7 @@ class MainActivity : AppCompatActivity() {
             else->buildFeaturePage(body,screen)
         }
         if(screen in rootTabs)space(body,136)
-        addFeatureRestarts(pinnedToolbar as? LinearLayout)
+        pinnedToolbar?.actions = featureRestartActions()
         if(screen!=Screen.HOME){
             fun updateHeader(y:Int){
                 headerBlur?.updateAppearance(darkUi,background,(y/dp(30).toFloat()).coerceIn(0f,1f))
@@ -1103,7 +1077,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addRootTabs(body:LinearLayout,scene:android.graphics.drawable.Drawable?):Pair<View,ColorosHeaderBlur?> {
-        val appearance=darkUi to primary
+        val appearance = Triple(darkUi, primary, bool("coloros_ui_effects"))
         if(rootNavigationAppearance!=appearance){
             rootNavigation?.let(page::removeView)
             rootNavigation=null
@@ -1227,81 +1201,36 @@ class MainActivity : AppCompatActivity() {
                 gravity=Gravity.CENTER;setPadding(0,dp(36),0,0)
             })
         }
-        val searchBar=row().apply {
-            setPadding(dp(13),0,dp(3),0)
-        }
-        val magnifier=AppCompatImageView(this).apply {
-            setImageResource(R.drawable.ic_catalog_search);imageTintList=ColorStateList.valueOf(secondaryText)
-            importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
-        searchBar.addView(magnifier,LinearLayout.LayoutParams(dp(19),dp(19)))
-        val input=androidx.appcompat.widget.AppCompatEditText(this).apply {
-            hint=getString(R.string.ui_catalog_search)
-            textSize=15f
-            setTextColor(onSurface);setHintTextColor(secondaryText)
-            inputType=android.text.InputType.TYPE_CLASS_TEXT
-            setSingleLine(true)
-            gravity=Gravity.CENTER_VERTICAL
-            includeFontPadding=false
-            background=null
-            setPadding(dp(9),0,dp(8),0)
-            imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            setText(searchQuery)
-            setSelection(length())
-            setOnEditorActionListener { _,action,event ->
-                val enter=event?.keyCode==android.view.KeyEvent.KEYCODE_ENTER && event.action==android.view.KeyEvent.ACTION_UP
-                if(action!=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH && !enter)return@setOnEditorActionListener false
-                if(searchQuery.trim().equals("kostuhaptic",ignoreCase=true)){
-                    setText("")
-                    hideSearchKeyboard()
-                    startActivity(android.content.Intent(this@MainActivity,com.cosmod.launcherglass.haptic.HapticStudioActivity::class.java))
-                    return@setOnEditorActionListener true
-                }
-                val match=rendered?.singleOrNull()?.first
-                if(!renderedCatalog && match!=null && renderedTransfer.isNullOrEmpty()){
-                    openScreen(match)
-                    return@setOnEditorActionListener true
-                }
-                if(!renderedCatalog && rendered.isNullOrEmpty()){
-                    val row=renderedTransfer?.singleOrNull()?.let(configRows::get)
-                    if(row!=null){
+        var syncSearchMode: (() -> Unit)? = null
+        val searchPanel = CouiSearchHost(this, darkUi, primary, getString(R.string.ui_catalog_search), searchQuery,
+            onQueryChanged = { query ->
+                searchQuery = query
+                renderResults()
+                syncSearchMode?.invoke()
+            },
+            onSearch = {
+                val match = rendered?.singleOrNull()?.first
+                val transfer = renderedTransfer?.singleOrNull()?.let(configRows::get)
+                when {
+                    searchQuery.trim().equals("kostuhaptic", ignoreCase = true) -> {
+                        searchInput?.setQuery("")
                         hideSearchKeyboard()
-                        row.performClick()
-                        return@setOnEditorActionListener true
+                        startActivity(Intent(this, com.cosmod.launcherglass.haptic.HapticStudioActivity::class.java))
+                    }
+                    !renderedCatalog && match != null && renderedTransfer.isNullOrEmpty() -> openScreen(match)
+                    !renderedCatalog && rendered.isNullOrEmpty() && transfer != null -> {
+                        hideSearchKeyboard()
+                        transfer.performClick()
+                    }
+                    else -> {
+                        hideSearchKeyboard()
+                        page.requestFocus()
                     }
                 }
-                hideSearchKeyboard()
-                page.requestFocus()
-                true
-            }
-        }
-        searchInput=input
-        magnifier.setOnClickListener {
-            input.requestFocus()
-            getSystemService(android.view.inputmethod.InputMethodManager::class.java)
-                ?.showSoftInput(input,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-        }
-        searchBar.addView(input,LinearLayout.LayoutParams(0,-1,1f))
-        val clear=OnextImageButton(this,bool("coloros_ui_effects")).apply {
-            setImageResource(R.drawable.ic_close)
-            imageTintList=ColorStateList.valueOf(onSurface)
-            contentDescription=getString(R.string.ui_close)
-            scaleType=ImageView.ScaleType.CENTER
-            background=null
-            setOnClickListener {haptic(it);input.setText("")}
-        }
-        clear.visibility=if(searchQuery.isEmpty())View.GONE else View.VISIBLE
-        searchBar.addView(clear,LinearLayout.LayoutParams(dp(39),-1))
-        var syncSearchMode:(()->Unit)?=null
-        input.doAfterTextChanged {
-            searchQuery=it.toString()
-            clear.visibility=if(searchQuery.isEmpty())View.GONE else View.VISIBLE
-            renderResults()
-            syncSearchMode?.invoke()
-        }
-        val searchPanel=CouiSearchHost(this,darkUi,primary,panel,searchBar,input).apply {
-            translationY=(topInset+dp(64)).toFloat()
-        }
+            },
+            onFocusChanged = { syncSearchMode?.invoke() },
+        ).apply { translationY = (topInset + dp(64)).toFloat() }
+        searchInput = searchPanel
         layer.addView(searchPanel,FrameLayout.LayoutParams(-1,dp(45),Gravity.TOP or Gravity.START).apply {
             marginStart=dp(16)
         })
@@ -1321,7 +1250,7 @@ class MainActivity : AppCompatActivity() {
                 android.graphics.RenderEffect.createBlurEffect(radius,radius,
                     android.graphics.Shader.TileMode.DECAL).also {searchEffects[step]=it}
             }
-            searchBar.setRenderEffect(effect)
+            searchPanel.setRenderEffect(effect)
         }
         fun placeSearch(){
             val expanded=maxOf(dp(64),heading.bottom).toFloat()
@@ -1367,7 +1296,7 @@ class MainActivity : AppCompatActivity() {
             override fun onViewDetachedFromWindow(view:View){searchMotion.cancel()}
         })
         fun positionSearch(y:Int){
-            val searching=input.hasFocus() || searchQuery.isNotEmpty()
+            val searching=searchPanel.isInputFocused() || searchQuery.isNotEmpty()
             fadeRootTitle(heading,if(searching)0 else y)
             val expanded=maxOf(dp(64),heading.bottom).toFloat()
             val target=if(searching)1f else (y/expanded).coerceIn(0f,1f)
@@ -1385,14 +1314,13 @@ class MainActivity : AppCompatActivity() {
             }else layoutSearch(searchProgress)
         }
         val updateSearchMode={
-            val searching=input.hasFocus() || searchQuery.isNotEmpty()
+            val searching=searchPanel.isInputFocused() || searchQuery.isNotEmpty()
             heading.visibility=if(searching)View.GONE else View.VISIBLE
-            if(pageLayer===layer)navigation?.first?.visibility=if(input.hasFocus())View.INVISIBLE else View.VISIBLE
-            if(searching && searchPositionReady && pageLayer===layer && input.hasFocus())scroll.scrollTo(0,0)
+            if(pageLayer===layer)navigation?.first?.visibility=if(searchPanel.isInputFocused())View.INVISIBLE else View.VISIBLE
+            if(searching && searchPositionReady && pageLayer===layer && searchPanel.isInputFocused())scroll.scrollTo(0,0)
             positionSearch(scroll.scrollY)
         }
         syncSearchMode=updateSearchMode
-        input.setOnFocusChangeListener { _,_->updateSearchMode() }
         val updateInset=applyHeaderInset
         applyHeaderInset={inset->updateInset?.invoke(inset);positionSearch(scroll.scrollY)}
         heading.addOnLayoutChangeListener { _,_,_,_,_,_,_,_,_ ->positionSearch(scroll.scrollY)}
@@ -1759,12 +1687,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun editShadeColor(anchor:View,title:Int,key:String,initial:String) {
         val form=column()
-        val input=androidx.appcompat.widget.AppCompatEditText(this).apply {
-            setSingleLine(true)
-            setTextColor(primary)
-            setText(initial)
-            selectAll()
-        }
+        val input = CouiField(this, darkUi, primary, getString(R.string.shade_glass_hex),
+            initial, onSurface, maxLength = 7, autofocus = false)
         add(form,input,bottom=8)
         val swatches=LinearLayout(this)
         for(value in listOf(0x252938,0x4f70ac,0x667d58,0xd99985,0xffffff)){
@@ -1773,7 +1697,7 @@ class MainActivity : AppCompatActivity() {
                 text="●"
                 contentDescription=hex
                 setTextColor(value or 0xff000000.toInt())
-                setOnClickListener {input.setText(hex)}
+                setOnClickListener { input.replaceText(hex) }
             }
             swatches.addView(swatch,LinearLayout.LayoutParams(0,dp(44),1f))
         }
@@ -1782,7 +1706,7 @@ class MainActivity : AppCompatActivity() {
         add(form,apply)
         val dialog=savedSettingsDialog(getString(title),form,anchor)
         apply.setOnClickListener {
-            val digits=input.text.toString().trim().removePrefix("#")
+            val digits = input.value.trim().removePrefix("#")
             val value=digits.takeIf { it.length==6 }?.toIntOrNull(16)
             if(value==null || value !in 0..0xffffff) input.error=getString(R.string.shade_glass_hex)
             else {
@@ -1849,7 +1773,7 @@ class MainActivity : AppCompatActivity() {
                 val headerBlur=ColorOsAppBarBlurView(this@MainActivity,darkUi,panel,tintOverlay=false,maxRadius=22f).apply {
                     updateAppearance(darkUi,panel,0f)
                 }
-                addView(headerBlur,FrameLayout.LayoutParams(-1,dp(54),Gravity.TOP))
+                addView(headerBlur,FrameLayout.LayoutParams(-1,dp(58),Gravity.TOP))
                 scroll.setOnScrollChangeListener(androidx.core.widget.NestedScrollView.OnScrollChangeListener {_,_,y,_,_->
                     headerBlur.updateAppearance(darkUi,panel,(y/dp(36).toFloat()).coerceIn(0f,1f))
                 })
@@ -1984,7 +1908,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun buildModule(body:LinearLayout){
-        // ONextBox's SettingsGroup already supplies the page-side 16dp inset.
+        // COUI groups already supply the page-side inset.
         val about=CouiAboutPage(this,darkUi,primary,master(),
             onEnabled={save(SettingsProvider.KEY_ENABLED,it)},
             onSettings={openScreen(Screen.SETTINGS)},
@@ -1997,19 +1921,19 @@ class MainActivity : AppCompatActivity() {
         val testers = listOf("espcode", "encoren", "тима", "Foby", "Амбассадор Табуретки")
         val people = CouiSlot(this, darkUi, primary) {
             androidx.compose.foundation.layout.Column {
-                SettingsGroup {
-                    SettingsCardRow(getString(R.string.ui_cpi_edition), "Kostubet Topics")
-                    SettingsDivider()
-                    SettingsCardRow(getString(R.string.ui_contributor_help), "@anime_killer2009")
-                    SettingsDivider()
-                    SettingsCardRow(getString(R.string.ui_contributor_sources), "Mahmud0808 · MiToverG422")
+                CouiGroup {
+                    BasicComponent(title = getString(R.string.ui_cpi_edition), summary = "Kostubet Topics")
+                    HorizontalDivider()
+                    BasicComponent(title = getString(R.string.ui_contributor_help), summary = "@anime_killer2009")
+                    HorizontalDivider()
+                    BasicComponent(title = getString(R.string.ui_contributor_sources), summary = "Mahmud0808 · MiToverG422")
                 }
-                SettingsGroup {
-                    SettingsCardRow(title=getString(R.string.ui_contributor_beta),summary=testers.joinToString(", "))
+                CouiGroup {
+                    BasicComponent(title=getString(R.string.ui_contributor_beta),summary=testers.joinToString(", "))
                 }
             }
         }
-        // The ONextBox groups already include the screen's horizontal inset.
+        // COUI groups already supply the page-side inset.
         body.addView(people, LinearLayout.LayoutParams(-1, -2).apply {
             marginStart = -dp(16)
             marginEnd = -dp(16)
@@ -2197,7 +2121,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun lockscreenSection(body:LinearLayout,general:LinearLayout,colors:LinearLayout){
         fun heading(title:Int){
-            body.addView(CouiSlot(this,darkUi,primary){SettingsSection(getString(title))},
+            body.addView(CouiSlot(this,darkUi,primary){SmallTitle(getString(title))},
                 LinearLayout.LayoutParams(-1,-2).apply {marginStart=-dp(16);marginEnd=-dp(16)})
         }
         add(body,card(informationRow(R.string.ui_lock_setup,getString(R.string.lock_glass_hint))),bottom=6)
@@ -2342,22 +2266,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-    private fun addFeatureRestarts(toolbar:LinearLayout?){
+    private fun featureRestartActions(): List<View> {
         val launcher=screen in setOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.MOTION)
         val systemUi=screen in setOf(Screen.BANNERS,Screen.LIVE,Screen.VOLUME,Screen.LOCKSCREEN,Screen.SHADE)
-        if(toolbar==null || !launcher && !systemUi)return
+        if (!launcher && !systemUi) return emptyList()
+        val actions = mutableListOf<View>()
         if(screen==Screen.BANNERS){
             val test=smallIcon(R.drawable.ic_catalog_bell,getString(R.string.ui_banner_test_short)){
                 if(Build.VERSION.SDK_INT>=33 && !BannerTestNotification.hasPermission(this))
                     bannerPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
                 else BannerTestNotification.post(this)
             }
-            toolbar.addView(test,LinearLayout.LayoutParams(dp(46),dp(46)).apply {marginEnd=dp(6)})
+            actions.add(test)
             gate(test){master() && bool("banner_glass_enabled")}
         }
         val label=getString(if(launcher)R.string.ui_restart_launcher else R.string.ui_restart_systemui)
         val control=smallIcon(R.drawable.ic_restart,label,if(launcher)::confirmLauncherRestart else ::restartSystemUi).apply {tooltipText=label}
-        toolbar.addView(control,LinearLayout.LayoutParams(dp(46),dp(46)))
+        actions.add(control)
+        return actions
     }
 
     private fun bannerSection(body:LinearLayout,general:LinearLayout,colors:LinearLayout){
@@ -2661,7 +2587,7 @@ class MainActivity : AppCompatActivity() {
                 onClose={dialog.dismiss()})
         },bottom=12)
         add(form,CouiSlot(this,darkUi,primary){
-            ColorOs17Button(getString(R.string.ui_config_pick_file),primary=true,modifier=Modifier.fillMaxWidth(),
+            CouiAction(getString(R.string.ui_config_pick_file),primary=true,modifier=Modifier.fillMaxWidth(),
                 onClick={
                     pendingConfigImport=ImportRequest(anchor,dialog)
                     openConfigPicker {importSettings.launch(arrayOf("application/json","text/plain","application/octet-stream"))}
@@ -2711,13 +2637,13 @@ class MainActivity : AppCompatActivity() {
         },LinearLayout.LayoutParams(-1,-2,1f))
         add(form,CouiSlot(this,darkUi,primary){
             androidx.compose.foundation.layout.Column(verticalArrangement=Arrangement.spacedBy(8.couiDp)){
-                ColorOs17Button(getString(R.string.ui_config_save_file),primary=false,modifier=Modifier.fillMaxWidth(),
+                CouiAction(getString(R.string.ui_config_save_file),primary=false,modifier=Modifier.fillMaxWidth(),
                     onClick={
                         val data=metadata()
                         pendingConfigExport=SettingsTransfer.withMetadata(snapshot,data)
                         openConfigPicker {exportSettings.launch(configFilename(data.title))}
                     })
-                ColorOs17Button(getString(R.string.ui_share_settings),primary=true,modifier=Modifier.fillMaxWidth(),
+                CouiAction(getString(R.string.ui_share_settings),primary=true,modifier=Modifier.fillMaxWidth(),
                     onClick={val data=metadata();shareSettings(SettingsTransfer.withMetadata(snapshot,data),data.title)})
             }
         },top=12)
@@ -2740,7 +2666,7 @@ class MainActivity : AppCompatActivity() {
             androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().padding(vertical=4.couiDp)){
                 val colors=io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme
                 details.forEachIndexed {index,(label,value)->
-                    if(index>0)SettingsDivider()
+                    if(index>0)HorizontalDivider()
                     androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()
                         .padding(horizontal=16.couiDp,vertical=12.couiDp),
                         horizontalArrangement=Arrangement.spacedBy(12.couiDp),
@@ -2749,12 +2675,12 @@ class MainActivity : AppCompatActivity() {
                         val content=value.ifBlank {"—"}
                         io.github.suqi8.coui.kmp.basic.Text(heading,
                             modifier=Modifier.weight(.42f),
-                            color=colors.onSurfaceVariantSummary,
-                            style=couiTextStyles.body2)
+                            color=colors.labelSecondary,
+                            style=couiTextStyles.bodyM)
                         io.github.suqi8.coui.kmp.basic.Text(content,
                             modifier=Modifier.weight(.58f),
                             color=ComposeColor(onSurface),
-                            style=couiTextStyles.body2,textAlign=androidx.compose.ui.text.style.TextAlign.End)
+                            style=couiTextStyles.bodyM,textAlign=androidx.compose.ui.text.style.TextAlign.End)
                     }
                 }
             }
@@ -2763,8 +2689,8 @@ class MainActivity : AppCompatActivity() {
         config.addView(ScrollView(this).apply {addView(body)},LinearLayout.LayoutParams(-1,-2,1f))
         add(config,CouiSlot(this,darkUi,primary){
             androidx.compose.foundation.layout.Row(horizontalArrangement=Arrangement.spacedBy(8.couiDp)){
-                ColorOs17Button(getString(android.R.string.cancel),primary=false,modifier=Modifier.weight(1f),onClick=::cancel)
-                ColorOs17Button(getString(R.string.ui_config_apply),primary=true,modifier=Modifier.weight(1f),
+                CouiAction(getString(android.R.string.cancel),primary=false,modifier=Modifier.weight(1f),onClick=::cancel)
+                CouiAction(getString(R.string.ui_config_apply),primary=true,modifier=Modifier.weight(1f),
                     enabled=returnToExport==null,onClick={dialog.close {applyConfig(document)}})
             }
         },top=12)
@@ -2869,7 +2795,7 @@ class MainActivity : AppCompatActivity() {
         val sampleCard=column().apply {setPadding(dp(10),0,dp(10),dp(10))}
         add(sampleCard,CouiSlot(this,darkUi,primary){
             val option=remember {mutableIntStateOf(0)}
-            ColorOsWindowDropdownPreference(labels,option.intValue,labels[option.intValue],
+            WindowDropdownPreference(labels,option.intValue,labels[option.intValue],
                 dropdownColors=DropdownDefaults.dropdownColors(),maxHeight=260.couiDp,showValue=false,
                 onSelectedIndexChange={index->
                     option.intValue=index
@@ -2883,7 +2809,7 @@ class MainActivity : AppCompatActivity() {
                 sceneStatus.value?.let {label->
                     io.github.suqi8.coui.kmp.basic.Text(getString(label),
                         modifier=Modifier.fillMaxWidth().padding(horizontal=12.couiDp),
-                        color=ComposeColor(onSurface),style=couiTextStyles.body2,
+                        color=ComposeColor(onSurface),style=couiTextStyles.bodyM,
                         textAlign=androidx.compose.ui.text.style.TextAlign.Center)
                 }
             },FrameLayout.LayoutParams(-1,-2,Gravity.CENTER))
@@ -2892,11 +2818,11 @@ class MainActivity : AppCompatActivity() {
         add(sampleCard,CouiSlot(this,darkUi,primary){
             note.value?.let {label->
                 io.github.suqi8.coui.kmp.basic.Text(getString(label),modifier=Modifier.padding(top=6.couiDp),
-                    color=io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme.onSurfaceVariantSummary,
-                    style=couiTextStyles.body2)
+                    color=io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme.labelSecondary,
+                    style=couiTextStyles.bodyM)
             }
         })
-        add(body,CouiSlot(this,darkUi,primary){SettingsSection(getString(R.string.ui_config_local_preview))},bottom=3)
+        add(body,CouiSlot(this,darkUi,primary){SmallTitle(getString(R.string.ui_config_local_preview))},bottom=3)
         add(body,card(sampleCard))
         watchPreviewWallpaper(preview) {frame->
             val hadWallpaper=wallpaper!=null
@@ -3767,7 +3693,7 @@ class MainActivity : AppCompatActivity() {
         val hueTrack=key==WidgetSettings.HUE || key=="banner_plate_hue"
         val lightnessTrack=key.endsWith("lightness")
         fun updatePalette(){
-            if(hueTrack)control.palette=HUE_TRACK
+            control.hueTrack = hueTrack
             if(lightnessTrack){
                 val prefix=key.removeSuffix("lightness")
                 val color=when {
@@ -3775,7 +3701,7 @@ class MainActivity : AppCompatActivity() {
                     key.startsWith("surface_")->Color.HSVToColor(floatArrayOf(number(prefix+"hue").toFloat(),number(prefix+"saturation")/100f,number(prefix+"brightness")/100f))
                     else -> Color.HSVToColor(floatArrayOf(number("banner_plate_hue").toFloat(),number("banner_plate_saturation")/100f,number("banner_plate_brightness")/100f))
                 }
-                control.palette=intArrayOf(Color.BLACK,color,Color.WHITE)
+                control.brightnessColor = color
             }
         }
         updatePalette()
@@ -4234,7 +4160,7 @@ class MainActivity : AppCompatActivity() {
         closeChoicePopup(immediate = true)
         lateinit var overlay: CouiSlot
         overlay = CouiSlot(this, darkUi, primary) {
-            ColorOs17ConfirmDialog(
+            CouiConfirmation(
                 show = restartDialogVisible.value,
                 title = getString(titleId),
                 summary = getString(messageId),
@@ -4274,10 +4200,6 @@ class MainActivity : AppCompatActivity() {
             view.isEnabled=true
             Toast.makeText(this,R.string.ui_systemui_restart_unavailable,Toast.LENGTH_LONG).show()
         }
-    }
-    /** Replaced by the LSPosed activation hook. */
-    private companion object {
-        val HUE_TRACK=IntArray(7){Color.HSVToColor(floatArrayOf((it*60%360).toFloat(),.86f,.96f))}
     }
 
     @Keep fun isModuleActive(): Boolean = false

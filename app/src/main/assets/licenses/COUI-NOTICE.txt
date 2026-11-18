@@ -1,7 +1,8 @@
 # COUI
 
-Imported from MiToverG422/ONextBox third_party/coui at 64ad446594d5d864537b90a03864aafa4b59e822.
-Original upstream https://github.com/suqi8/coui, Apache-2.0.
+COUI v2.0.0 by suqi8 and compose-coui-ui contributors, Apache-2.0.
+https://github.com/suqi8/coui/tree/v2.0.0
+Source revision 57682cb2092c00c9085a0b9a6795c21bf7b355e2.
 
-CPI compiles the core, shader, squircle, UI, and preference modules from their local sources.
-The separate ONextBox UI components are GPL-3.0. See third_party/ONextBox-NOTICE.md in the source distribution.
+CPI uses the unmodified Maven Central Android artifacts for COUI UI, Preference and Icons.
+The separate ONextBox Android compositor adapters are GPL-3.0. See third_party/ONextBox-NOTICE.md.

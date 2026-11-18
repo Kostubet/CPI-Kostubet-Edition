@@ -1,0 +1,73 @@
+package com.cosmod.launcherglass.ui
+
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import io.github.suqi8.coui.kmp.basic.ButtonDefaults
+import io.github.suqi8.coui.kmp.basic.Card
+import io.github.suqi8.coui.kmp.basic.TextButton
+import io.github.suqi8.coui.kmp.layout.DialogButtonBar
+import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
+import io.github.suqi8.coui.kmp.effect.LocalCOUIMaterialEffectEnabled
+import io.github.suqi8.coui.kmp.window.WindowDialog
+
+@Composable
+internal fun CouiGroup(content: @Composable ColumnScope.() -> Unit) {
+    Card(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+        insideMargin = PaddingValues(0.dp), content = content)
+}
+
+@Composable
+internal fun CouiAction(
+    text: String,
+    primary: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    minimumHeight: Dp = ButtonDefaults.MinHeight,
+    enabled: Boolean = true,
+) {
+    TextButton(
+        text = text,
+        onClick = onClick,
+        modifier = modifier,
+        enabled = enabled,
+        minHeight = minimumHeight,
+        minWidth = 0.dp,
+        colors = if (primary) ButtonDefaults.textButtonColorsPrimary() else ButtonDefaults.textButtonColors(),
+        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+internal fun CouiConfirmation(
+    show: Boolean,
+    title: String,
+    summary: String,
+    negativeText: String,
+    positiveText: String,
+    onDismissRequest: () -> Unit,
+    onNegative: () -> Unit,
+    onPositive: () -> Unit,
+    onDismissFinished: () -> Unit,
+    content: (@Composable () -> Unit)?,
+) {
+    WindowDialog(
+        show = show,
+        title = title,
+        summary = summary,
+        onDismissRequest = onDismissRequest,
+        onDismissFinished = onDismissFinished,
+        materialStroke = LocalCOUIMaterialEffectEnabled.current,
+        customContent = content,
+    ) {
+        DialogButtonBar(
+            negative = DialogButtonBarAction(negativeText, onClick = onNegative),
+            positive = DialogButtonBarAction(positiveText, recommended = true, onClick = onPositive),
+        )
+    }
+}

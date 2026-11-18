@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 413
+
+- Интерфейс настроек CPI переведён на COUI 2.0. Обновлены панели навигации, поиск, карточки, переключатели, ползунки, меню выбора и диалоги, включая импорт, экспорт и «Ваши настройки».
+- Раздел «О модуле», выбор приложений для предпросмотра и управление воспроизведением в Haptic Studio используют компоненты COUI 2.0.
+
 ### Сборка 412
 
 - Сглаживание видеозума соблюдает максимальную скорость и мягче тормозит у цели. При остановке кадров управление возвращается штатной камере до следующего кадра. График обновляется при движении ползунков и показывает всю траекторию.
@@ -70,6 +75,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 413
+
+- Migrated the CPI settings interface to COUI 2.0. Updated navigation bars, search, cards, switches, sliders, selection menus and dialogs, including import, export and saved settings.
+- The About screen, preview app picker and Haptic Studio playback controls use COUI 2.0 components.
 
 ### Build 412
 

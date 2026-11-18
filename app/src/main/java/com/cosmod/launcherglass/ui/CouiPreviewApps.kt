@@ -13,8 +13,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import com.cosmod.launcherglass.R
-import com.cosmod.launcherglass.ui.onextbox.ColorOs17ConfirmDialog
-import com.cosmod.launcherglass.ui.onextbox.ColorOsDialogChoice
+import io.github.suqi8.coui.kmp.basic.BasicComponent
+import io.github.suqi8.coui.kmp.preference.CheckboxPreference
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextField
 import io.github.suqi8.coui.kmp.basic.TextFieldMode
@@ -42,7 +42,7 @@ internal class CouiPreviewApps(context:Context,dark:Boolean,accent:Int,initial:L
                         .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER){it.label})
                 }
             }
-            ColorOs17ConfirmDialog(showing,context.getString(R.string.ui_preview_apps),
+            CouiConfirmation(showing,context.getString(R.string.ui_preview_apps),
                 context.getString(R.string.ui_preview_apps_hint)+" (${selection.size}/3)",
                 context.getString(android.R.string.cancel),context.getString(android.R.string.ok),
                 onDismissRequest={showing=false},onNegative={showing=false},
@@ -50,7 +50,7 @@ internal class CouiPreviewApps(context:Context,dark:Boolean,accent:Int,initial:L
                     TextField(value=query,onValueChange={query=it},modifier=Modifier.fillMaxWidth(),
                         backgroundMode=TextFieldMode.Rectangle,cornerRadius=16.dp,
                         label=context.getString(R.string.ui_preview_apps_search),singleLine=true)
-                    ColorOsDialogChoice(context.getString(R.string.ui_preview_apps_reset),"") {selection=emptyList()}
+                    BasicComponent(title = context.getString(R.string.ui_preview_apps_reset), onClick = { selection = emptyList() })
                     val visible=remember(entries,query.text){entries?.filter {
                         it.label.contains(query.text,true) || it.pkg.contains(query.text,true)
                     }}
@@ -65,10 +65,13 @@ internal class CouiPreviewApps(context:Context,dark:Boolean,accent:Int,initial:L
                                 }
                                 bitmap?.let {Image(it.asImageBitmap(),null,Modifier.padding(end=10.dp).size(32.dp))}
                                 Box(Modifier.weight(1f)){
-                                    ColorOsDialogChoice((if(entry.pkg in selection)"✓  "else "")+entry.label,entry.pkg){
-                                        selection=if(entry.pkg in selection)selection-entry.pkg
-                                            else if(selection.size<3)selection+entry.pkg else selection
-                                    }
+                                    CheckboxPreference(title = entry.label, summary = entry.pkg,
+                                        checked = entry.pkg in selection,
+                                        enabled = entry.pkg in selection || selection.size < 3,
+                                        onCheckedChange = { checked ->
+                                            selection = if (checked) selection + entry.pkg else selection - entry.pkg
+                                        },
+                                    )
                                 }
                             }
                         }

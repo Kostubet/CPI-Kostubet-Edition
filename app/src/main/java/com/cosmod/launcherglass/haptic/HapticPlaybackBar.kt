@@ -22,6 +22,9 @@ import io.github.suqi8.coui.kmp.basic.Button
 import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.Text
+import io.github.suqi8.coui.kmp.icon.COUIIcons
+import io.github.suqi8.coui.kmp.icon.extended.Pause
+import io.github.suqi8.coui.kmp.icon.extended.Play
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import java.util.Locale
 
@@ -49,8 +52,8 @@ internal class HapticPlaybackBar(
             ) {
                 Text(
                     "${time(elapsedTenths)} / ${time(duration / 100)}",
-                    style = COUITheme.textStyles.footnote1.copy(fontFeatureSettings = "tnum"),
-                    color = colors.onSurfaceVariantSummary,
+                    style = COUITheme.textStyles.caption.copy(fontFeatureSettings = "tnum"),
+                    color = colors.labelSecondary,
                     maxLines = 1,
                 )
                 Row(
@@ -67,10 +70,10 @@ internal class HapticPlaybackBar(
                         insideMargin = PaddingValues(horizontal = 12.dp),
                         colors = ButtonDefaults.buttonColors(color = colors.primary, contentColor = colors.onPrimary),
                     ) {
-                        val symbol = if (playing) R.drawable.ic_haptic_pause else R.drawable.ic_haptic_play
-                        Icon(painterResource(symbol), null, Modifier.size(21.dp), tint = colors.onPrimary)
+                        val symbol = if (playing) COUIIcons.Pause else COUIIcons.Play
+                        Icon(symbol, null, Modifier.size(21.dp), tint = colors.onPrimary)
                         Text(if (playing) pauseLabel else playLabel, Modifier.padding(start = 7.dp),
-                            color = colors.onPrimary, style = COUITheme.textStyles.body1, maxLines = 1)
+                            color = colors.onPrimary, style = COUITheme.textStyles.bodyL, maxLines = 1)
                     }
                     Button(
                         onClick = stop,
@@ -78,9 +81,9 @@ internal class HapticPlaybackBar(
                         minHeight = 48.dp,
                         cornerRadius = 24.dp,
                         insideMargin = PaddingValues(0.dp),
-                        colors = ButtonDefaults.buttonColors(color = colors.surfaceContainerHigh, contentColor = colors.onSurface),
+                        colors = ButtonDefaults.buttonColors(color = colors.container16, contentColor = colors.labelPrimary),
                     ) {
-                        Icon(painterResource(R.drawable.ic_haptic_stop), stopLabel, Modifier.size(20.dp), tint = colors.onSurface)
+                        Icon(painterResource(R.drawable.ic_haptic_stop), stopLabel, Modifier.size(20.dp), tint = colors.labelPrimary)
                     }
                 }
             }

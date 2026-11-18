@@ -53,9 +53,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
-import com.cosmod.launcherglass.ui.onextbox.ColorOs17Button
-import com.cosmod.launcherglass.ui.onextbox.ColorOsTopBarButton
-import com.cosmod.launcherglass.ui.onextbox.SettingsDivider
+import io.github.suqi8.coui.kmp.basic.IconButton
+import io.github.suqi8.coui.kmp.basic.HorizontalDivider
 import io.github.suqi8.coui.kmp.basic.Checkbox
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Icon
@@ -73,11 +72,11 @@ internal fun FloatingDialogHeader(title:String,foreground:Color,onClose:()->Unit
             .align(Alignment.Center).semantics {heading()},
             color=foreground,fontSize=17.sp,fontWeight=FontWeight.SemiBold,textAlign=TextAlign.Center,
             maxLines=2,overflow=TextOverflow.Ellipsis,lineHeight=20.sp)
-        ColorOsTopBarButton(onClick=onClose,modifier=Modifier.align(Alignment.CenterStart),overMaterial=true){
+        IconButton(onClick=onClose,modifier=Modifier.align(Alignment.CenterStart)){
             Icon(painterResource(R.drawable.ic_close),stringResource(R.string.ui_floating_close),
                 Modifier.size(19.dp),tint=foreground)
         }
-        if(onEdit!=null)ColorOsTopBarButton(onClick=onEdit,modifier=Modifier.align(Alignment.CenterEnd),overMaterial=true){
+        if(onEdit!=null)IconButton(onClick=onEdit,modifier=Modifier.align(Alignment.CenterEnd)){
             Crossfade(editing,animationSpec=tween(190),label="profileEditIcon"){isEditing->
                 Icon(painterResource(if(isEditing)R.drawable.ic_check else R.drawable.ic_cpi_edit),
                     stringResource(if(isEditing)R.string.ui_saved_settings_done else R.string.ui_saved_settings_edit),
@@ -85,7 +84,7 @@ internal fun FloatingDialogHeader(title:String,foreground:Color,onClose:()->Unit
             }
         }
         if(onAction!=null && actionIcon!=null)
-            ColorOsTopBarButton(onClick=onAction,modifier=Modifier.align(Alignment.CenterEnd),overMaterial=true){
+            IconButton(onClick=onAction,modifier=Modifier.align(Alignment.CenterEnd)){
                 Icon(painterResource(actionIcon),actionDescription,Modifier.size(19.dp),tint=foreground)
             }
     }
@@ -202,7 +201,7 @@ internal fun SavedProfileList(
                       }
                     }
                 }
-                if(name!=order.last())SettingsDivider()
+                if(name!=order.last())HorizontalDivider()
             }
           }
           if(blurHeader)AndroidView(
@@ -214,9 +213,9 @@ internal fun SavedProfileList(
               },
           )
         }
-        ColorOs17Button(stringResource(if(editing)R.string.ui_saved_settings_delete_action else R.string.ui_saved_settings_save_action),
+        CouiAction(stringResource(if(editing)R.string.ui_saved_settings_delete_action else R.string.ui_saved_settings_save_action),
             primary=true,modifier=Modifier.fillMaxWidth(),enabled=!editing || selected.isNotEmpty(),
-            minimumHeight=46.dp,animateLabel=true,
+            minimumHeight=46.dp,
             onClick={
                 if(editing){onOrder(order);onDelete(selected)}else onSave()
             })

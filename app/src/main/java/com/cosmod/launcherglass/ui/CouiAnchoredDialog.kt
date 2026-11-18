@@ -30,9 +30,6 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnPreDraw
-import com.cosmod.launcherglass.ui.onextbox.ColorOsPopupMaterialView
-import com.cosmod.launcherglass.ui.onextbox.applyOplusPopupBlur
-import com.cosmod.launcherglass.ui.onextbox.colorOsPopupFallback
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot
@@ -534,7 +531,7 @@ internal class CouiAnchoredDialog(
 
     private class Panel(context:Context,val content:View,private val dark:Boolean):FrameLayout(context) {
         private val density=resources.displayMetrics.density
-        private val material=ColorOsPopupMaterialView(context,dark)
+        private val material=CouiPopupBackground(context,dark)
         private val shade=View(context).apply {
             background=CouiCardEdgeShade(dark,density)
             outlineProvider=material.outlineProvider
@@ -628,7 +625,7 @@ internal class CouiAnchoredDialog(
 
         fun presentContext(next:ContextMenuMotion.Frame){
             contextMotion=next
-            material.updateTransition(next.materialAlpha,1f,1f)
+            material.renderProgress(next.materialAlpha)
             shade.alpha=next.materialAlpha
             content.alpha=next.contentAlpha
             replica.alpha=sourceAlpha*next.rowAlpha
@@ -645,7 +642,7 @@ internal class CouiAnchoredDialog(
             this.frame=frame
             this.dragOffset=dragOffset
             this.dragScale=dragScale
-            material.updateTransition(opacity,1f,1f)
+            material.renderProgress(opacity)
             shade.alpha=opacity
             content.alpha=opacity
             if(frame!=null){
@@ -749,14 +746,6 @@ internal class CouiAnchoredDialog(
             view.scaleY=sy
         }
 
-        override fun onAttachedToWindow(){
-            super.onAttachedToWindow()
-            material.background=ColorDrawable(colorOsPopupFallback(dark))
-            material.syncTransitionAlpha()
-            material.doOnPreDraw {
-                applyOplusPopupBlur(material,dark,density)
-            }
-        }
     }
 
     private class RowReplica(context:Context):View(context) {

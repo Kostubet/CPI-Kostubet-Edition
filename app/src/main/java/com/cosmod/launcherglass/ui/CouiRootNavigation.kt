@@ -8,8 +8,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
-import com.cosmod.launcherglass.ui.onextbox.ColorOs17BottomNavigationBar
-import io.github.suqi8.coui.kmp.basic.NavigationItem
+import io.github.suqi8.coui.kmp.basic.FloatingNavigationBar
+import io.github.suqi8.coui.kmp.basic.FloatingNavigationBarItem
 
 /** Persistent upstream COUI navigation; restart actions live in the page toolbar. */
 internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
@@ -20,11 +20,17 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
         composition.clipChildren=false;composition.clipToPadding=false
         content {
             Box(Modifier.fillMaxSize(),contentAlignment=Alignment.BottomCenter){
-                ColorOs17BottomNavigationBar(
-                    items=labels.mapIndexed {index,label->NavigationItem(label,ImageVector.vectorResource(icons[index]))},
-                    selectedIndex=selected.intValue,onItemSelected=onSelected,
-                    modifier=Modifier.fillMaxWidth().height(88.dp),
-                    unselectedIcons=outlineIcons.map {ImageVector.vectorResource(it)})
+                FloatingNavigationBar(defaultWindowInsetsPadding = false) {
+                    labels.forEachIndexed { index, label ->
+                        val active = selected.intValue == index
+                        FloatingNavigationBarItem(
+                            selected = active,
+                            onClick = { onSelected(index) },
+                            icon = ImageVector.vectorResource(if (active) icons[index] else outlineIcons[index]),
+                            label = label,
+                        )
+                    }
+                }
             }
         }
     }
