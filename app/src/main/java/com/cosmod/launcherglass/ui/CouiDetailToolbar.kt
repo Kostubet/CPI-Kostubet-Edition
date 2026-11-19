@@ -23,7 +23,7 @@ import io.github.suqi8.coui.kmp.icon.COUIIcons
 import io.github.suqi8.coui.kmp.icon.extended.Back
 
 internal class CouiDetailToolbar(
-    context: Context, dark: Boolean, accent: Int, title: String, backLabel: String, onBack: () -> Unit,
+    context: Context, dark: Boolean, accent: Int, foreground: Int, title: String, backLabel: String, onBack: () -> Unit,
 ) : CouiControl(context, dark, accent) {
     var actions by mutableStateOf(emptyList<View>())
 
@@ -41,7 +41,7 @@ internal class CouiDetailToolbar(
                 titlePadding = 6.dp,
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.size(46.dp), cornerRadius = 23.dp) {
-                        Icon(COUIIcons.Back, backLabel, Modifier.size(22.dp))
+                        Icon(COUIIcons.Back, backLabel, Modifier.size(22.dp), tint = Color(foreground))
                     }
                 },
                 actions = {

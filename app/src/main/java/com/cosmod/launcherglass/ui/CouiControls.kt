@@ -502,13 +502,17 @@ internal class CouiPreference(context: Context, dark: Boolean, accent: Int, titl
 }
 
 internal class CouiIconButton(context: Context, dark: Boolean, accent: Int, foreground: Int, surface: Int,
-    private val icon: Int, private val label: String, effects: Boolean) : CouiControl(context, dark, accent) {
+    private val icon: Int, private val label: String, effects: Boolean, chrome: Boolean = false) : CouiControl(context, dark, accent) {
     init {
         composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
             IconButton(
                 onClick={performClick()}, modifier=Modifier.fillMaxSize(), enabled=controlEnabled,
-                material=effects, backgroundColor=if (effects) Color.Unspecified else Color(surface),
+                material=effects, backgroundColor=when {
+                    !effects -> Color(surface)
+                    chrome -> Color(surface).copy(alpha = .55f)
+                    else -> Color.Unspecified
+                },
                 cornerRadius=50.dp, minHeight=0.dp, minWidth=0.dp) {
                 Icon(painterResource(icon),label,Modifier.size(22.dp),tint=Color(foreground))
             }

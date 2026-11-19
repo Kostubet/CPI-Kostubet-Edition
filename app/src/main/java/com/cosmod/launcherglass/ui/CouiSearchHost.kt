@@ -19,6 +19,7 @@ internal class CouiSearchHost(
     dark: Boolean,
     accent: Int,
     private val surface: Int,
+    foreground: Int,
     label: String,
     initialQuery: String,
     private val onQueryChanged: (String) -> Unit,
@@ -50,7 +51,10 @@ internal class CouiSearchHost(
                 label = label,
                 material = false,
                 colors = SearchBarDefaults.searchBarColors(
-                    backgroundColor = if (hardwareBackdrop) Color.Transparent else Color(surface),
+                    backgroundColor = Color(surface).copy(alpha = if (hardwareBackdrop) .55f else 1f),
+                    labelColor = Color(foreground).copy(alpha = .74f),
+                    iconColor = Color(foreground).copy(alpha = .8f),
+                    clearIconColor = Color(foreground),
                 ),
                 modifier = Modifier.fillMaxSize().onFocusChanged {
                     if (inputFocused != it.hasFocus) {

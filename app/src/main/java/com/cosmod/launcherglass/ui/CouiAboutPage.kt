@@ -20,10 +20,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
-import io.github.suqi8.coui.kmp.basic.Badge
 import io.github.suqi8.coui.kmp.basic.CardListGroup
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.SmallTitle
+import io.github.suqi8.coui.kmp.basic.TagView
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.preference.ArrowPreference
 import io.github.suqi8.coui.kmp.preference.SwitchPreference
@@ -49,7 +49,7 @@ internal class CouiAboutPage(
                             textAlign = TextAlign.Center)
                         Text(context.getString(R.string.ui_about_version, BuildConfig.VERSION_NAME),
                             style = COUITheme.textStyles.bodyM, color = COUITheme.colorScheme.labelSecondary)
-                        Badge(context.getString(R.string.ui_release_badge))
+                        TagView(context.getString(R.string.ui_release_badge))
                         Text(context.getString(R.string.ui_module_description),
                             style = COUITheme.textStyles.bodyM, color = COUITheme.colorScheme.labelSecondary,
                             textAlign = TextAlign.Center)

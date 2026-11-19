@@ -50,6 +50,7 @@ object IconGlassHook {
     private val floatingMaterials=WeakHashMap<View,FloatingMaterial>()
     private val hosts=WeakHashMap<Drawable,WeakReference<View>>()
     private val liveViews=WeakHashMap<View,Boolean>()
+    private val pendingIconBackdrops=WeakHashMap<View,Boolean>()
     private var liveSnapshot=emptyList<WeakReference<View>>()
     private var liveSnapshotDirty=true
     internal fun registeredViews():List<WeakReference<View>> {
@@ -120,18 +121,31 @@ object IconGlassHook {
         liveRoots.clear()
         for(reference in registeredViews())reference.get()?.invalidate()
         liveViews.clear();liveSnapshot=emptyList();liveSnapshotDirty=true
+        pendingIconBackdrops.clear()
         ForeignDraw.reset()
         IconMaterialRenderer.clear();DynamicIconForeground.clear()
     }
     internal fun recoverDiscardedIcons(root:View):Int {
         var recovered=0
+        val wallpaper=if(pendingIconBackdrops.isNotEmpty() && PrefsHelper.blurEnabled)
+            WallpaperHelper.getBlurredWallpaper(appContext)else null
+        val visible=Rect()
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
             if(view.rootView!==root || !view.isAttachedToWindow || !view.isShown)continue
             if(LiveBlurEngine.drawerOccludesWorkspace && !isDrawerIcon(view))continue
-            if(IconMaterialRenderer.restoreDiscardedSamples(view)){view.invalidate();recovered++}
+            val restored=IconMaterialRenderer.restoreDiscardedSamples(view)
+            if(recoverIconBackdrop(view,wallpaper,visible) || restored){view.invalidate();recovered++}
         }
         return recovered
+    }
+
+    private fun recoverIconBackdrop(view:View,wallpaper:Bitmap?,visible:Rect):Boolean {
+        if(wallpaper==null || !pendingIconBackdrops.containsKey(view) ||
+            NativeSurfaceLive.ownsSource(view) || !view.getGlobalVisibleRect(visible))return false
+        pendingIconBackdrops.remove(view)
+        GlassLogger.limited("IconMaterial","lateBackdrop"){"Re-recorded icon once its wallpaper became available"}
+        return true
     }
     fun requestLiveFrame(immediate:Boolean=false){
         if(!LiveBlurEngine.isMoving)idleFrameRequests++
@@ -270,6 +284,11 @@ object IconGlassHook {
             // frame forever and pinned LTPO displays at 60 Hz.
             val forceEdge=edge && !paging && PrefsHelper.disableEdgeOptimization && LiveBlurEngine.hasRecentMotion
             if(offscreen && !forceEdge)continue
+            if(recoverIconBackdrop(view,wallpaper,visible)){
+                repaintStamps.remove(view)
+                view.invalidate()
+                continue
+            }
             if(onlyChangedDrawerSamples && !forceEdge && IconMaterialRenderer.hasBindings(view)){
                 if(IconMaterialRenderer.updateSamplers(view,wallpaper,world)){
                     if(beforeDraw==null)roots.add(view.rootView)
@@ -487,10 +506,16 @@ object IconGlassHook {
             val save=canvas.save()
             canvas.translate(bounds.left.toFloat(),bounds.top.toFloat())
             canvas.scale(bounds.width().toFloat()/width,bounds.height().toFloat()/height)
-            try {render(canvas,Rect(0,0,width,height),parts,a,wallpaper)}finally{canvas.restoreToCount(save)}
+            try {render(canvas,Rect(0,0,width,height),parts,a,wallpaper,binding)}finally{canvas.restoreToCount(save)}
             return
         }
         val compatible=wallpaper?.takeUnless {it.isRecycled}?.let {WallpaperHelper.forCanvas(it,canvas)}
+        // A flat fallback can be recorded while a newer wallpaper is loading.
+        // Existing samplers may still belong to the previous display list.
+        if(compatible==null && binding!=null && !binding.foreign && samplesWallpaper(a) &&
+            Looper.myLooper()==Looper.getMainLooper()){
+            pendingIconBackdrops[binding.view]=true
+        }
         val plateMask=if(compatible!=null && PrefsHelper.liquidGlass)
             GlassGeometry.refinedMask(parts.plateMaskBitmap) else parts.plateMaskBitmap
         // Native surface capture enlarges a 210px icon to e.g. 1200px.
@@ -525,13 +550,12 @@ object IconGlassHook {
             GlyphMaterialRenderer.draw(target,local,parts.glyphBitmap,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
         }
     }
-    private fun wallpaper(a:Anchor?):Bitmap? {
-        if(!PrefsHelper.blurEnabled)return null
-        if(a?.folder==true && !PrefsHelper.folderIconsBlurEnabled)return null
-        if(a?.drawer==true && !PrefsHelper.drawerBlurEnabled)return null
-        if(a?.openFolder==true)return null
-        return WallpaperHelper.getBlurredWallpaper(appContext)
-    }
+    private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled &&
+        (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) &&
+        (a?.drawer!=true || PrefsHelper.drawerBlurEnabled) && a?.openFolder!=true
+
+    private fun wallpaper(a:Anchor?):Bitmap? =
+        if(samplesWallpaper(a))WallpaperHelper.getBlurredWallpaper(appContext)else null
     /** Live complete material for one native animation. No global last-app state. */
     private fun snapshot(original:Drawable,backgroundOnly:Boolean=false,explicitHost:View?=null):Drawable? {
         if(!PrefsHelper.iconsFeatureEnabled)return null

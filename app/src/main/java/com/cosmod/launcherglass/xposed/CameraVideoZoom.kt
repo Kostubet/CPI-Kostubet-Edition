@@ -204,6 +204,7 @@ internal object CameraVideoZoom {
                         val host = param.thisObject
                         val waiting = stalledPresenter?.get() === host
                         if (failed || movement == null && !waiting && (!config.diagnostics || now - lastStatus < 500)) return
+                        if (movement != null && movement.presenter.get() !== host && !waiting) return
                         val data = param.args[0] ?: return
                         if (runCatching { stage.getInt(data) }.getOrNull() != 1) return
                         if (!frameQueued.compareAndSet(false, true)) return

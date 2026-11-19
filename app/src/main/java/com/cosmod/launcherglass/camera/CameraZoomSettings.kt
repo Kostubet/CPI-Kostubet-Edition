@@ -41,10 +41,10 @@ internal object CameraZoomSettings {
     val booleans = listOf(ENABLED, DIAGNOSTICS, PINCH, SLIDER, STEPS).associateWith { false }
     data class Knob(val key: String, val default: Int, val range: IntRange)
     val controls = listOf(
-        Knob(IN, 105, 15..350), Knob(OUT, 115, 15..350), Knob(MAX_SPEED, 140, 15..400),
-        Knob(SMOOTHING, 60, 10..160), Knob(ACCELERATION, 45, 5..160),
-        Knob(BRAKING, 60, 5..180), Knob(JERK, 27, 2..100),
-        Knob(INERTIA, 80, 20..280), Knob(RESPONSE, 40, 5..250),
+        Knob(IN, 220, 15..350), Knob(OUT, 245, 15..350), Knob(MAX_SPEED, 280, 15..400),
+        Knob(SMOOTHING, 100, 10..160), Knob(ACCELERATION, 105, 5..160),
+        Knob(BRAKING, 150, 5..180), Knob(JERK, 80, 2..100),
+        Knob(INERTIA, 45, 20..280), Knob(RESPONSE, 22, 5..250),
         Knob(SENSITIVITY, 100, 20..200), Knob(BEZIER_FIRST, 20, 0..100),
         Knob(BEZIER_SECOND, 85, 0..100),
     )

@@ -32,7 +32,9 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
             Box(Modifier.fillMaxSize(),contentAlignment=Alignment.BottomCenter){
                 FloatingNavigationBar(
                     defaultWindowInsetsPadding = false,
-                    color = if (hardwareBackdrop) Color.Transparent else Color(surface),
+                    materialEffect = false,
+                    showDivider = true,
+                    color = Color(surface).copy(alpha = if (hardwareBackdrop) .63f else 1f),
                     backgroundModifier = Modifier.onGloballyPositioned { coordinates ->
                         val bounds = coordinates.boundsInRoot()
                         capsuleBounds.set(bounds.left.roundToInt(), bounds.top.roundToInt(),

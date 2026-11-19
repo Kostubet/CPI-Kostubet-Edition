@@ -111,4 +111,19 @@ class ZoomSmoothingTest {
         assertTrue(after(60, ZoomMode.RESPONSIVE) > after(60, ZoomMode.CINEMATIC))
         assertEquals(after(30, ZoomMode.IPHONE), after(60, ZoomMode.IPHONE), .025)
     }
+
+    @Test fun defaultZoomRespondsQuicklyWithoutCatchingUpInOneFrameAfterAStall() {
+        val tuning = ZoomTuning()
+        for (fps in listOf(24, 30, 60)) {
+            val zoom = ZoomSmoothing(1.0)
+            zoom.aim(2.0, 0.0, true)
+            for (frame in 1..fps / 2) zoom.step(frame.toDouble() / fps, tuning)
+            val beforeStall = zoom.ratio
+            assertTrue("slow response at ${fps} fps", beforeStall > 1.55)
+            val resumed = zoom.step(.72, tuning)
+            assertTrue("jump after stall at ${fps} fps", ln(resumed / beforeStall) <= tuning.maxSpeed * .05)
+            for (frame in fps..fps * 2) zoom.step(frame.toDouble() / fps, tuning)
+            assertEquals(2.0, zoom.ratio, .000001)
+        }
+    }
 }

@@ -27,15 +27,15 @@ internal enum class ZoomCurve {
 internal enum class ZoomMode { IPHONE, CINEMATIC, RESPONSIVE, ADAPTIVE, CUSTOM }
 
 internal data class ZoomTuning(
-    val speedIn: Double = 1.05,
-    val speedOut: Double = 1.15,
-    val maxSpeed: Double = 1.4,
-    val smoothing: Double = 6.0,
-    val acceleration: Double = 4.5,
-    val braking: Double = 6.0,
-    val jerk: Double = 27.0,
-    val inertia: Double = .08,
-    val response: Double = .04,
+    val speedIn: Double = 2.2,
+    val speedOut: Double = 2.45,
+    val maxSpeed: Double = 2.8,
+    val smoothing: Double = 10.0,
+    val acceleration: Double = 10.5,
+    val braking: Double = 15.0,
+    val jerk: Double = 80.0,
+    val inertia: Double = .045,
+    val response: Double = .022,
     val sensitivity: Double = 1.0,
     val curve: ZoomCurve = ZoomCurve.S_CURVE,
     val bezier: Pair<Double, Double> = .2 to .85,
@@ -46,8 +46,8 @@ internal data class ZoomTuning(
             ZoomMode.IPHONE -> ZoomTuning()
             ZoomMode.CINEMATIC -> ZoomTuning(speedIn = .55, speedOut = .62, maxSpeed = .7, acceleration = 2.5,
                 braking = 3.0, jerk = 10.0, smoothing = 4.0, response = .08)
-            ZoomMode.RESPONSIVE -> ZoomTuning(speedIn = 1.8, speedOut = 2.0, maxSpeed = 2.5, acceleration = 9.0,
-                braking = 12.0, jerk = 55.0, smoothing = 10.0, inertia = .04, response = .02)
+            ZoomMode.RESPONSIVE -> ZoomTuning(speedIn = 3.0, speedOut = 3.3, maxSpeed = 3.6, acceleration = 14.0,
+                braking = 17.0, jerk = 95.0, smoothing = 13.0, inertia = .032, response = .016)
             ZoomMode.ADAPTIVE -> ZoomTuning(adaptive = true)
             ZoomMode.CUSTOM -> custom
         }
@@ -95,7 +95,9 @@ internal class ZoomSmoothing(initial: Double) {
         val elapsed = now - lastFrameTime
         if (!elapsed.isFinite() || elapsed <= 0) return ratio
         lastFrameTime = now
-        var remaining = elapsed.coerceAtMost(.1)
+        // A resumed preview should accelerate again from the last delivered ratio.
+        // Do not present a long stretch of missing motion in one camera frame.
+        var remaining = elapsed.coerceAtMost(.05)
         while (remaining > 0 && active) {
             val dt = remaining.coerceAtMost(.008)
             remaining -= dt

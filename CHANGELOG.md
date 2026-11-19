@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 415
+
+- Иконки обновляют стекло после загрузки кадра обоев. Растянутые иконки сохраняют привязку стекла при перерисовке.
+- Поиск и кнопка перезапуска стали контрастнее, стрелка «Назад» читается в обеих темах. В нижней панели три вкладки. Камера доступна в «Функциях», а метка Open-Beta снова отображается текстом.
+- Меню выбора завершает анимацию COUI перед применением настройки.
+- Видеозум быстрее набирает скорость и плавнее продолжает движение после пропущенного кадра. Переключение объективов ведёт штатная камера.
+
 ### Сборка 414
 
 - Поиск и нижняя панель используют системное размытие ColorOS, когда композитор его предоставляет. Запасная заливка соответствует теме CPI.
@@ -81,6 +88,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 415
+
+- Icon glass refreshes when a wallpaper frame becomes available. Stretched icons keep their live backdrop binding across redraws.
+- Search and restart controls have clearer contrast. The back arrow is readable in both themes, the bottom bar has three tabs, and Camera remains in Features. About shows the Open-Beta label in full.
+- Choice menus complete their COUI transition before applying the selection.
+- Video zoom responds sooner and resumes more smoothly after a skipped frame. Lens switches remain under the stock camera's control.
 
 ### Build 414
 

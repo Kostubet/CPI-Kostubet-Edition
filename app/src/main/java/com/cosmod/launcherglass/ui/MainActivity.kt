@@ -160,7 +160,6 @@ class MainActivity : AppCompatActivity() {
         LOCKSCREEN(R.string.lock_glass_title, R.drawable.ic_catalog_lock, 0x7665EF, R.string.lock_glass_keywords),
         LIGHT(R.string.ui_catalog_light, R.drawable.ic_nav_light, 0xE5AA27, R.string.ui_catalog_keywords_light),
         MOTION(R.string.ui_ba31k_title, R.drawable.ic_catalog_motion, 0x55A4ED, R.string.ui_catalog_keywords_motion),
-        CAMERA(R.string.camera_tab, R.drawable.ic_cpi_camera, 0, 0),
         CAMERA_ZOOM(R.string.camera_zoom_title, R.drawable.ic_cpi_camera, 0x6793F2, R.string.camera_zoom_keywords),
         PERFORMANCE(R.string.ui_performance, R.drawable.ic_catalog_speed, 0x31B881, R.string.ui_catalog_keywords_performance),
         TOOLS(R.string.ui_about_module, R.drawable.ic_cpi_module, 0, 0),
@@ -211,7 +210,7 @@ class MainActivity : AppCompatActivity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
     private val darkUi get()=androidx.core.graphics.ColorUtils.calculateLuminance(background)<.5
     private val coloredFeatures get()=sectionScreen==Screen.HOME && bool("coloros_ui_effects") && number("coloros_feature_background")!=0
-    private val rootTabs=listOf(Screen.OVERVIEW,Screen.HOME,Screen.CAMERA,Screen.TOOLS)
+    private val rootTabs=listOf(Screen.OVERVIEW,Screen.HOME,Screen.TOOLS)
     private var menuOverlay:CouiPopup?=null
     private var restartOverlay: View? = null
     private val restartDialogVisible = mutableStateOf(false)
@@ -436,7 +435,10 @@ class MainActivity : AppCompatActivity() {
         return CouiCardHost(this,color,radius,content)
     }
 
-    private fun chromeSurface() = if (bool("coloros_ui_effects")) withAlpha(panel, 224) else panel
+    private fun chromeSurface() = when {
+        coloredFeatures -> androidx.core.graphics.ColorUtils.blendARGB(panel, primary, if(darkUi) .15f else .07f)
+        else -> panel
+    }
 
     private fun button():CouiButton {
         val fill=androidx.core.graphics.ColorUtils.compositeColors(withAlpha(primary,22),panel)
@@ -796,8 +798,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun smallIcon(icon:Int,label:String,action:(View)->Unit): CouiIconButton =
-        CouiIconButton(this,darkUi,primary,onSurface,panel,icon,label,bool("coloros_ui_effects")).apply {
+    private fun smallIcon(icon:Int,label:String,chrome:Boolean=false,action:(View)->Unit): CouiIconButton =
+        CouiIconButton(this,darkUi,primary,onSurface,if(chrome)chromeSurface() else panel,
+            icon,label,bool("coloros_ui_effects"),chrome).apply {
             contentDescription=label
             layoutParams=LinearLayout.LayoutParams(dp(46),dp(48))
             setOnClickListener { haptic(it);action(it) }
@@ -929,7 +932,7 @@ class MainActivity : AppCompatActivity() {
         headerBody=body
         val pinnedToolbar = if (screen !in rootTabs) {
             space(body, 62)
-            CouiDetailToolbar(this, darkUi, primary, getString(screen.title), getString(R.string.ui_back)) {
+            CouiDetailToolbar(this, darkUi, primary, onSurface, getString(screen.title), getString(R.string.ui_back)) {
                 backToCatalog()
             }
         } else null
@@ -994,7 +997,6 @@ class MainActivity : AppCompatActivity() {
         when(screen){
             Screen.OVERVIEW->buildOverview(body)
             Screen.HOME->buildCatalog(body,scroll,heading,headerBlur,layer,navigation)
-            Screen.CAMERA->buildCameraCatalog(body)
             Screen.TOOLS->buildModule(body)
             Screen.DEVICE->buildDeviceDetails(body)
             Screen.CONTRIBUTORS->buildContributors(body)
@@ -1091,9 +1093,9 @@ class MainActivity : AppCompatActivity() {
             rootNavigation=frame;rootNavigationAppearance=appearance
             val content=CouiRootNavigation(this,darkUi,primary,
                 rootTabs.map {it.icon},listOf(R.drawable.ic_cpi_home_outline,R.drawable.ic_cpi_features_outline,
-                    R.drawable.ic_cpi_camera_outline,R.drawable.ic_cpi_module_outline),
+                    R.drawable.ic_cpi_module_outline),
                 rootTabs.map {getString(if(it==Screen.TOOLS)R.string.ui_cpi_module else it.title)},
-                rootNavigationIndex,chromeSurface()){index->haptic(page);openTab(rootTabs[index])}
+                rootNavigationIndex,panel){index->haptic(page);openTab(rootTabs[index])}
             frame.addView(content,FrameLayout.LayoutParams(-1,-1))
             page.addView(frame,FrameLayout.LayoutParams(-1,dp(176),Gravity.BOTTOM))
         }
@@ -1104,7 +1106,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addRootRestart(layer:FrameLayout){
-        val control=smallIcon(R.drawable.ic_restart,getString(R.string.ui_restart_menu)){anchor->
+        val control=smallIcon(R.drawable.ic_restart,getString(R.string.ui_restart_menu),chrome=true){anchor->
             choicePopup(anchor,listOf(0 to R.string.ui_restart_launcher,1 to R.string.ui_restart_systemui,2 to R.string.ui_soft_restart),-1){
                 when(it){0->confirmLauncherRestart(anchor);1->restartSystemUi(anchor);2->confirmSoftRestart(anchor)}
             }
@@ -1203,7 +1205,7 @@ class MainActivity : AppCompatActivity() {
             })
         }
         var syncSearchMode: (() -> Unit)? = null
-        val searchPanel = CouiSearchHost(this, darkUi, primary, chromeSurface(), getString(R.string.ui_catalog_search), searchQuery,
+        val searchPanel = CouiSearchHost(this, darkUi, primary, chromeSurface(), onSurface, getString(R.string.ui_catalog_search), searchQuery,
             onQueryChanged = { query ->
                 searchQuery = query
                 renderResults()
@@ -1336,11 +1338,6 @@ class MainActivity : AppCompatActivity() {
     private fun catalogRow(item:Screen,matchedSetting:String?=null):View =
         CouiPreference(this,darkUi,primary,getString(item.title),matchedSetting,item.icon,Color.BLACK or item.tint,
             catalog=true,onPreview={showFeaturePreview(item,it)}){haptic(it);openScreen(item)}
-
-    private fun buildCameraCatalog(body: LinearLayout) {
-        add(body, card(preferenceLink(getString(R.string.camera_zoom_title), getString(R.string.camera_zoom_description),
-            R.drawable.ic_cpi_camera, primary) { openScreen(Screen.CAMERA_ZOOM) }), bottom = 12)
-    }
 
     private fun buildCameraZoom(body: LinearLayout) {
         val zoom = com.cosmod.launcherglass.camera.CameraZoomSettings
@@ -2262,7 +2259,8 @@ class MainActivity : AppCompatActivity() {
             gate(test){master() && bool("banner_glass_enabled")}
         }
         val label=getString(if(launcher)R.string.ui_restart_launcher else R.string.ui_restart_systemui)
-        val control=smallIcon(R.drawable.ic_restart,label,if(launcher)::confirmLauncherRestart else ::restartSystemUi).apply {tooltipText=label}
+        val control=smallIcon(R.drawable.ic_restart,label,chrome=true,
+            action=if(launcher)::confirmLauncherRestart else ::restartSystemUi).apply {tooltipText=label}
         actions.add(control)
         return actions
     }
