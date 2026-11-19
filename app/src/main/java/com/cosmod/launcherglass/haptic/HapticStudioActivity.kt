@@ -43,6 +43,7 @@ import com.cosmod.launcherglass.ui.CouiInformation
 import com.cosmod.launcherglass.ui.CouiPopup
 import com.cosmod.launcherglass.ui.CouiPreference
 import com.cosmod.launcherglass.ui.CouiSelection
+import com.cosmod.launcherglass.ui.CouiSectionTabs
 import com.cosmod.launcherglass.ui.CouiSlider
 import com.cosmod.launcherglass.ui.CouiSlot
 import com.cosmod.launcherglass.ui.CouiSwitchRow
@@ -61,6 +62,7 @@ import kotlin.math.roundToInt
 
 class HapticStudioActivity : AppCompatActivity() {
     private enum class Page { HOME, GENERATOR, EDITOR, LAB, LIBRARY, HARDWARE }
+    private enum class EditorTool { POINTS, EFFECTS, RANGE, PATTERN }
     private var page = Page.HOME
     private lateinit var root: FrameLayout
     private lateinit var body: LinearLayout
@@ -94,6 +96,10 @@ class HapticStudioActivity : AppCompatActivity() {
     private var toolbar: LinearLayout? = null
     private var headerBlur: ColorOsAppBarBlurView? = null
     private var popup: CouiPopup? = null
+    private var editorTool = EditorTool.POINTS
+    private var editorTabs: View? = null
+    private var editorToolbox: LinearLayout? = null
+    private var editorViewport: HapticTimeline.Viewport? = null
     private var dragBefore: HapticPattern? = null
     private val undo = ArrayDeque<HapticPattern>()
     private val redo = ArrayDeque<HapticPattern>()
@@ -188,7 +194,10 @@ class HapticStudioActivity : AppCompatActivity() {
         store = HapticLibrary(this)
         pattern = HapticPattern.empty(t("Untitled pattern", "Новый паттерн"))
         player = HapticPreview(this, motor, { ms ->
-            graph?.cursor = ms
+            graph?.let {
+                it.cursor = ms
+                if (page == Page.EDITOR && player.playing) it.follow(ms)
+            }
             playback?.update(ms, player.playing)
         }, { message(t("Cannot play this selection", "Не удалось воспроизвести фрагмент")) })
         root = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
@@ -229,12 +238,16 @@ class HapticStudioActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun show(next: Page = page, preserveScroll: Boolean = false) {
+    private fun show(next: Page = page, preserveScroll: Boolean = false, resetViewport: Boolean = false) {
         val savedScroll = if (preserveScroll && ::scroller.isInitialized) scroller.scrollY else 0
+        if (resetViewport) editorViewport = null
+        else if (page == Page.EDITOR) graph?.let { editorViewport = it.viewport() }
         page = next
         popup = null
         root.removeAllViews()
         graph = null
+        editorTabs = null
+        editorToolbox = null
         displayPointBox = null
         playback = null
         body = column().apply { setPadding(dp(16), dp(8), dp(16), dp(10)) }
@@ -259,6 +272,10 @@ class HapticStudioActivity : AppCompatActivity() {
                 style = COUITheme.textStyles.headlineXS, color = COUITheme.colorScheme.labelPrimary,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }, LinearLayout.LayoutParams(0, -2, 1f))
+        if (next == Page.EDITOR) {
+            toolbarView.addView(button(t("Save", "Сохранить"), primary = true) { save(false) },
+                LinearLayout.LayoutParams(dp(116), -2))
+        }
         toolbar = toolbarView
         root.addView(toolbarView, FrameLayout.LayoutParams(-1, dp(54), Gravity.TOP))
         applyInsets()
@@ -273,14 +290,20 @@ class HapticStudioActivity : AppCompatActivity() {
             Page.LIBRARY -> library()
             Page.HARDWARE -> hardware()
         }
+        if (next == Page.EDITOR) applyInsets()
         if (savedScroll > 0) scroller.post { scroller.scrollTo(0, savedScroll) }
     }
 
     private fun applyInsets() {
         if (!::scroller.isInitialized) return
-        scroller.setPadding(0, topInset + dp(57), 0, bottomInset)
+        scroller.setPadding(0, topInset + dp(57), 0, bottomInset + if (editorTabs != null) dp(68) else 0)
         toolbar?.let { it.layoutParams = (it.layoutParams as FrameLayout.LayoutParams).apply { topMargin = topInset } }
         headerBlur?.let { it.layoutParams = it.layoutParams.apply { height = topInset + dp(64) } }
+        editorTabs?.let { tabs ->
+            tabs.layoutParams = (tabs.layoutParams as FrameLayout.LayoutParams).apply {
+                bottomMargin = bottomInset + dp(8)
+            }
+        }
     }
 
     private fun canAnimate() = effects && ValueAnimator.areAnimatorsEnabled()
@@ -396,49 +419,87 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun editor() {
-        card(body, t("Timeline", "Временная шкала")) { box ->
-            val channels = availableChannels()
-            option(box, t("Envelope", "Огибающая"), channels.indexOf(channel).coerceAtLeast(0), channels.map(::channelName)) {
-                channel = channels[it]; show(preserveScroll = true)
-            }
-            option(box, t("Timeline tool", "Инструмент"), drawMode.ordinal,
-                listOf(t("Navigate", "Навигация"), t("Edit points", "Перемещение точек"), t("Freehand", "Рисование кривой"))) {
-                player.stop()
-                drawMode = HapticDrawMode.entries[it]
-                show(preserveScroll = true)
-            }
-            box.addView(summary(t("Tap to place the playhead. Drag a point to edit its time and strength. Pinch to zoom.",
-                "Тап ставит курсор. Потяни точку, чтобы изменить её время и силу. Сведи или разведи два пальца для масштаба.")))
+        card(body, pattern.name) { box ->
             addGraph(box, pattern, true)
-            buttons(box, t("+ Click", "+ Щелчок"), t("+ Slide", "+ Слайд"),
-                { addQuickEffect(HapticSlide.TAPS) }, { addQuickEffect(lastContinuousSlide) })
-            buttons(box, t("Zoom out", "Уменьшить"), t("Zoom in", "Увеличить"),
+            playbackBar(box, pattern.length, cursor, ::seek, regionStart, history = HapticPlaybackBar.History(
+                t("Undo edit", "Отменить действие"), t("Redo edit", "Повторить действие"),
+                { restore(undo, redo) }, { restore(redo, undo) },
+            ), play = ::play)
+            updateHistory()
+        }
+
+        editorToolbox = column().also { body.addView(it) }
+        renderEditorTools()
+        val tabs = CouiSectionTabs(this, dark, accent, listOf(
+            t("Points", "Точки"), t("Effects", "Эффекты"), t("Range", "Фрагмент"), t("Mix", "Микс"),
+        ), editorTool.ordinal, commitOnRelease = true) { index ->
+            editorTool = EditorTool.entries[index]
+            renderEditorTools()
+        }
+        editorTabs = tabs
+        root.addView(tabs, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = dp(16)
+            rightMargin = dp(16)
+        })
+    }
+
+    private fun renderEditorTools() {
+        val tools = editorToolbox ?: return
+        tools.removeAllViews()
+        displayPointBox = null
+        when (editorTool) {
+            EditorTool.POINTS -> card(tools) { box ->
+                val channels = availableChannels()
+                if (channels.size > 1) {
+                    option(box, t("Envelope", "Огибающая"), channels.indexOf(channel).coerceAtLeast(0), channels.map(::channelName)) {
+                        channel = channels[it]
+                        graph?.channel = channel
+                        graph?.limits = channelLimits(channel)
+                        renderEditorTools()
+                    }
+                }
+                option(box, t("Timeline tool", "Инструмент"), drawMode.ordinal,
+                    listOf(t("Navigate", "Навигация"), t("Edit points", "Точки"), t("Freehand", "Рисование кривой"))) {
+                    player.stop()
+                    drawMode = HapticDrawMode.entries[it]
+                    graph?.drawMode = drawMode
+                    renderEditorTools()
+                }
+                displayPointBox = column()
+                box.addView(displayPointBox)
+                refreshPointControls()
+            }
+            EditorTool.EFFECTS -> card(tools, divided = true) { box ->
+                buttons(box, t("+ Click", "+ Щелчок"), t("+ Slide", "+ Слайд"),
+                    { addQuickEffect(HapticSlide.TAPS) }, { addQuickEffect(lastContinuousSlide) })
+                link(box, t("Record a rhythm by tapping", "Настучать свой ритм")) { recordRhythm() }
+                link(box, t("Configure a slide", "Настроить слайд")) { openLab(lastContinuousSlide) }
+                link(box, t("Configure a sequence of clicks", "Настроить серию щелчков")) { openLab(HapticSlide.TAPS) }
+                link(box, t("Sync or import a ringtone", "Автосинхронизация и импорт рингтона")) {
+                    player.stop()
+                    show(Page.GENERATOR)
+                }
+            }
+            EditorTool.RANGE -> editorRange(tools)
+            EditorTool.PATTERN -> editorMix(tools)
+        }
+    }
+
+    private fun editorRange(tools: LinearLayout) {
+        card(tools) { box ->
+            buttons(box, t("Zoom out", "Меньше"), t("Zoom in", "Крупнее"),
                 { graph?.zoomBy(.5f) }, { graph?.zoomBy(2f) })
-            previewControls(box)
-        }
-        card(body, t("Add effect at cursor", "Добавить эффект в позицию курсора"), divided = true) { box ->
-            link(box, t("Record a rhythm by tapping", "Настучать свой ритм")) { recordRhythm() }
-            link(box, t("Configure a slide", "Настроить слайд")) { openLab(lastContinuousSlide) }
-            link(box, t("Configure a sequence of clicks", "Настроить серию щелчков")) { openLab(HapticSlide.TAPS) }
-            link(box, t("Sync or import a ringtone", "Автосинхронизация и импорт рингтона")) { player.stop(); show(Page.GENERATOR) }
-        }
-        card(body, t("Control points", "Контрольные точки")) { box ->
-            displayPointBox = column()
-            box.addView(displayPointBox)
-            refreshPointControls()
-            buttons(box, t("Undo", "Отменить"), t("Redo", "Повторить"),
-                { restore(undo, redo) }, { restore(redo, undo) })
-        }
-        card(body, t("Fragment", "Фрагмент")) { box ->
             link(box, t("Set exact position", "Задать точное время"), "${cursor} ms") {
-                numberDialog(t("Position · ms", "Время · мс"), cursor, 0..pattern.length, ::seek)
+                numberDialog(t("Position · ms", "Время · мс"), cursor, 0..pattern.length) {
+                    seek(it); renderEditorTools()
+                }
             }
             buttons(box, t("Selection start", "Начало фрагмента"), t("Selection end", "Конец фрагмента"), {
                 regionStart = cursor.coerceAtMost((regionEnd ?: pattern.length) - 1)
-                show(preserveScroll = true)
+                renderEditorTools()
             }, {
                 regionEnd = cursor.coerceAtLeast(regionStart + 1).coerceAtMost(pattern.length)
-                show(preserveScroll = true)
+                renderEditorTools()
             })
             val range = regionEnd
             if (range != null) {
@@ -446,12 +507,22 @@ class HapticStudioActivity : AppCompatActivity() {
                     "${clock(regionStart)} – ${clock(range)}"))
                 buttons(box, t("Move group", "Переместить группу"), t("Copy group", "Копировать группу"),
                     { transferGroup(false) }, { transferGroup(true) })
-                link(box, t("Clear selection", "Снять выделение")) { regionStart = 0; regionEnd = null; show(preserveScroll = true) }
+                link(box, t("Clear selection", "Снять выделение")) { regionStart = 0; regionEnd = null; renderEditorTools() }
             }
         }
-        card(body, t("Pattern", "Паттерн")) { box ->
+    }
+
+    private fun editorMix(tools: LinearLayout) {
+        card(tools) { box ->
+            previewOptions(box)
+            divider(box)
             slider(box, t("Global intensity", "Общая интенсивность"), 0, 150, pattern.intensity, "%") {
                 changePattern(pattern.copy(intensity = it))
+            }
+            if (pattern.audio != null) {
+                slider(box, t("Sync offset · ms", "Сдвиг синхронизации · мс"), -1500, 1500, pattern.offset) {
+                    changePattern(pattern.copy(offset = it))
+                }
             }
             slider(box, t("Fade in · ms", "Плавное появление · мс"), 0, 5000, pattern.fadeIn) { changePattern(pattern.copy(fadeIn = it)) }
             slider(box, t("Fade out · ms", "Плавное затухание · мс"), 0, 5000, pattern.fadeOut) { changePattern(pattern.copy(fadeOut = it)) }
@@ -722,16 +793,16 @@ class HapticStudioActivity : AppCompatActivity() {
         val timeline = HapticTimeline(this, ink, accent, ::drawStroke, if (editable) ::seek else ::seekLab,
             ::cancelStroke, ::dragPoint).apply {
             pattern = project
+            editorLanes = editable
+            audioLabel = t("Audio", "Звук")
+            hapticLabel = t("Vibration", "Вибрация")
             source = if (editable && project.audio == audio?.toString()) waveform else null
             channel = if (editable) this@HapticStudioActivity.channel else HapticChannel.AMPLITUDE
-            limits = when (channel) {
-                HapticChannel.FREQUENCY -> frequencyLimits
-                HapticChannel.RICHTAP -> -100f..100f
-                else -> 0f..1f
-            }
+            limits = channelLimits(channel)
             selected = this@HapticStudioActivity.selected
             cursor = if (editable) this@HapticStudioActivity.cursor else labCursor
             drawMode = if (editable) this@HapticStudioActivity.drawMode else HapticDrawMode.NAVIGATE
+            if (editable) restoreViewport(editorViewport)
             contentDescription = t("Audio and haptic timeline", "Звуковая и тактильная дорожки")
         }
         box.addView(timeline, LinearLayout.LayoutParams(-1, dp(if (editable) 246 else 172)).apply { setMargins(dp(12), dp(7), dp(12), 0) })
@@ -739,8 +810,12 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private fun previewControls(box: LinearLayout) {
-        playbackBar(box, pattern.length, cursor, ::seek, regionStart, ::play)
+        playbackBar(box, pattern.length, cursor, ::seek, regionStart, play = ::play)
         divider(box)
+        previewOptions(box)
+    }
+
+    private fun previewOptions(box: LinearLayout) {
         if (pattern.audio != null || original?.audio != null) {
             toggle(box, t("Play audio with vibration", "Воспроизводить звук вместе с вибрацией"), previewAudio) {
                 player.stop()
@@ -754,7 +829,8 @@ class HapticStudioActivity : AppCompatActivity() {
         }
     }
 
-    private fun playbackBar(box: LinearLayout, duration: Int, position: Int, seek: (Int) -> Unit, start: Int = 0, play: () -> Unit) {
+    private fun playbackBar(box: LinearLayout, duration: Int, position: Int, seek: (Int) -> Unit,
+        start: Int = 0, history: HapticPlaybackBar.History? = null, play: () -> Unit) {
         val bar = HapticPlaybackBar(this, dark, accent, t("Play", "Воспроизвести"), t("Pause", "Пауза"), t("Stop", "Остановить"),
             toggle = {
                 if (player.playing) {
@@ -762,7 +838,8 @@ class HapticStudioActivity : AppCompatActivity() {
                     if (page == Page.LAB) labCursor = player.position else cursor = player.position
                 } else if (!player.resume()) play()
             },
-            stop = { player.stop(); seek(start) },
+            stop = { player.stop(); seek(if (page == Page.EDITOR) regionStart else start) },
+            history = history,
         )
         bar.duration = duration
         bar.update(if (player.playing) player.position else position, player.playing)
@@ -816,7 +893,7 @@ class HapticStudioActivity : AppCompatActivity() {
                 changePattern(project)
                 cursor = 0
                 resetSelection()
-                show(Page.EDITOR)
+                show(Page.EDITOR, resetViewport = snapshot.audio != uri.toString())
             } else show(preserveScroll = true)
         }
         if (page == Page.GENERATOR) show(preserveScroll = true)
@@ -851,7 +928,7 @@ class HapticStudioActivity : AppCompatActivity() {
             compare = false
             cursor = 0
             resetSelection()
-            show(Page.EDITOR)
+            show(Page.EDITOR, resetViewport = true)
             message(t("Original ringtone vibration imported", "Исходная вибрация рингтона импортирована"))
         }
         if (page == Page.GENERATOR) show(preserveScroll = true)
@@ -912,6 +989,7 @@ class HapticStudioActivity : AppCompatActivity() {
         selected = points.maxBy { it.amplitude }.ms.plus(pattern.sourceTimeAt(at))
         graph?.selected = selected
         graph?.cursor = cursor
+        graph?.follow(cursor)
         playback?.update(cursor, false)
         refreshPointControls()
     }
@@ -930,7 +1008,7 @@ class HapticStudioActivity : AppCompatActivity() {
         resetSelection()
         undo.clear()
         redo.clear()
-        show(Page.EDITOR)
+        show(Page.EDITOR, resetViewport = true)
         audio?.let { uri ->
             // Old imports used these same 20 ms envelope points without storing their source type.
             if (project.ringtoneVibration || (project.style == null && uri.authority == "media" &&
@@ -1046,6 +1124,7 @@ class HapticStudioActivity : AppCompatActivity() {
         val nearest = pattern.points.minByOrNull { abs(it.ms + pattern.offset - cursor) }
         selected = nearest?.ms?.takeIf { abs(it + pattern.offset - cursor) <= maxOf(18, pattern.length / 100) }
         graph?.cursor = cursor
+        if (page == Page.EDITOR) graph?.follow(cursor)
         graph?.selected = selected
         playback?.update(cursor, player.playing)
         if (page == Page.EDITOR && previous != selected) refreshPointControls()
@@ -1143,6 +1222,12 @@ class HapticStudioActivity : AppCompatActivity() {
         if (undo.size == 24) undo.removeFirst()
         undo.addLast(previous)
         redo.clear()
+        updateHistory()
+    }
+
+    private fun updateHistory() {
+        playback?.canUndo = undo.isNotEmpty()
+        playback?.canRedo = redo.isNotEmpty()
     }
 
     private fun restore(from: ArrayDeque<HapticPattern>, to: ArrayDeque<HapticPattern>) {
@@ -1156,6 +1241,11 @@ class HapticStudioActivity : AppCompatActivity() {
     }
 
     private val frequencyLimits get() = motor.frequency ?: (0f..1f)
+    private fun channelLimits(mode: HapticChannel): ClosedFloatingPointRange<Float> = when (mode) {
+        HapticChannel.FREQUENCY -> frequencyLimits
+        HapticChannel.RICHTAP -> -100f..100f
+        else -> 0f..1f
+    }
     private fun availableChannels() = HapticChannel.entries.filter {
         when (it) {
             HapticChannel.AMPLITUDE -> true

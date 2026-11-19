@@ -189,23 +189,29 @@ internal fun HapticPattern.usesOriginalRingtone(reference: HapticPattern): Boole
 internal fun HapticPattern.canEditRingtoneCarrier(reference: HapticPattern): Boolean {
     if (points == reference.points) return true
     return points.none { point ->
-        point.tap || point.hz != 0f || point.pitch != 0f || point.sharpness != .45f ||
-            (point.amplitude > .002f && reference.sourcePoint(point.ms).amplitude <= .002f)
+        point.tap || point.hz != 0f || point.pitch != 0f || point.sharpness != .45f
     }
 }
 
-internal fun HapticPattern.ringtoneGain(reference: HapticPattern, playbackTime: Int, sameEnvelope: Boolean): Float {
+internal data class RingtoneMix(val original: Float, val extension: Float)
+
+internal fun HapticPattern.ringtoneMix(reference: HapticPattern, playbackTime: Int, sameEnvelope: Boolean): RingtoneMix {
     val sourceTime = playbackTime - offset
-    if (sourceTime !in 0 until reference.length) return 0f
     val fadeStart = if (fadeIn == 0) 1f else (playbackTime.toFloat() / fadeIn).coerceAtMost(1f)
     val fadeEnd = if (fadeOut == 0) 1f else ((length - playbackTime).toFloat() / fadeOut).coerceIn(0f, 1f)
     val gain = intensity * .01f * fadeStart * fadeEnd
-    if (sameEnvelope) return gain
+    if (sourceTime < 0) return RingtoneMix(0f, 0f)
+    if (sameEnvelope) return RingtoneMix(if (sourceTime < reference.length) gain else 0f, 0f)
     val previous = reference.sourcePoint(sourceTime).amplitude
     val next = sourcePoint(sourceTime).amplitude
-    if (previous == next) return gain
-    // Preserve the recorded carrier rather than replacing it with a vibration at the motor's resonance.
-    return if (previous > .002f) (next / previous * gain).coerceIn(0f, 4f) else 0f
+    if (previous == next) return RingtoneMix(gain, 0f)
+    if (next < previous) return RingtoneMix(gain * next / previous, 0f)
+
+    // Boost strong carrier directly. In quiet areas, add the difference using a
+    // recorded cycle instead of multiplying codec noise into a new transient.
+    val boost = ((next - previous) / previous.coerceAtLeast(.12f)).coerceAtMost(1.5f)
+    val extension = (next - previous - boost * previous).coerceAtLeast(0f)
+    return RingtoneMix(gain * (1f + boost), gain * extension)
 }
 
 private fun HapticPoint.withValue(channel: HapticChannel, value: Float): HapticPoint = when (channel) {

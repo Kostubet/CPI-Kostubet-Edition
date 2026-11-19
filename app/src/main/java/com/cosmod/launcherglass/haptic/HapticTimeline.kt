@@ -22,6 +22,11 @@ internal class HapticTimeline(
     private val cancelChange: () -> Unit,
     private val dragPoint: (source: Int, time: Int, value: Float, finished: Boolean) -> Unit,
 ) : View(context) {
+    data class Viewport(val zoom: Float, val left: Float)
+
+    var editorLanes = false
+    var audioLabel = ""
+    var hapticLabel = ""
     var pattern: HapticPattern? = null
         set(value) {
             field = value
@@ -61,6 +66,9 @@ internal class HapticTimeline(
     private val length get() = (pattern?.length ?: 2000).toFloat()
     private val visible get() = length / zoom
     private val graphHeight get() = (height - 25 * density).coerceAtLeast(1f)
+    private val audioLane get() = if (editorLanes && source != null) minOf(64 * density, graphHeight * .35f) else 0f
+    private val graphTop get() = if (editorLanes) audioLane + 19 * density else 0f
+    private val plotHeight get() = (graphHeight - graphTop - 16 * density).coerceAtLeast(1f)
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
             finishEditing()
@@ -88,9 +96,25 @@ internal class HapticTimeline(
         val visibleStart = clampLeft(leftMs)
         val visibleEnd = visibleStart + visible
         fun x(time: Float) = (time - visibleStart) * width / visible
-        fun y(value: Float) = 8 * density +
+        fun y(value: Float) = graphTop + 8 * density +
             (1 - ((value - limits.start) / (limits.endInclusive - limits.start)).coerceIn(0f, 1f)) *
-            (graphHeight - 16 * density).coerceAtLeast(1f)
+            plotHeight
+
+        if (editorLanes) {
+            paint.style = Paint.Style.FILL
+            paint.color = ink
+            paint.alpha = 17
+            val radius = 10 * density
+            if (audioLane > 0) canvas.drawRoundRect(0f, 0f, width.toFloat(), audioLane - 3 * density, radius, radius, paint)
+            paint.color = accent
+            paint.alpha = 18
+            canvas.drawRoundRect(0f, audioLane, width.toFloat(), graphHeight, radius, radius, paint)
+            paint.color = ink
+            paint.alpha = 176
+            paint.textSize = 11 * density
+            if (audioLane > 0) canvas.drawText(audioLabel, 8 * density, 15 * density, paint)
+            canvas.drawText(hapticLabel, 8 * density, audioLane + 15 * density, paint)
+        }
 
         val interval = tickIntervals.firstOrNull { visible / it <= 6 } ?: 30_000
         paint.color = ink
@@ -101,7 +125,7 @@ internal class HapticTimeline(
             if (time < visibleStart) continue
             val tick = x(time.toFloat())
             paint.alpha = 38
-            canvas.drawLine(tick, 0f, tick, graphHeight, paint)
+            canvas.drawLine(tick, graphTop, tick, graphHeight, paint)
             paint.alpha = 155
             canvas.drawText(if (interval < 1000) "${time / 1000f}s" else "${time / 1000}s",
                 tick + 3 * density, height - 6 * density, paint)
@@ -110,12 +134,12 @@ internal class HapticTimeline(
         if (curvesDirty) {
             wave.rewind()
             source?.let { audio ->
-                val center = graphHeight * .5f
+                val center = if (editorLanes) audioLane * .59f else graphHeight * .5f
                 val first = (visibleStart.toInt() / HapticAnalysis.HOP_MS).coerceAtLeast(0)
                 val last = minOf(audio.frames.lastIndex, visibleEnd.toInt() / HapticAnalysis.HOP_MS)
                 for (index in first..last step ((last - first) / width.coerceAtLeast(1)).coerceAtLeast(1)) {
                     val rms = audio.frames[index].rms
-                    val peak = (rms * 4f).coerceAtMost(1f) * center * .88f
+                    val peak = (rms * 4f).coerceAtMost(1f) * (if (editorLanes) audioLane * .31f else center * .88f)
                     val tick = x(index * HapticAnalysis.HOP_MS.toFloat())
                     wave.moveTo(tick, center - peak)
                     wave.lineTo(tick, center + peak)
@@ -166,10 +190,10 @@ internal class HapticTimeline(
                 downX = event.x
                 downY = event.y
                 lastX = event.x
-                if (drawMode == HapticDrawMode.BRUSH && downY < graphHeight) {
+                if (drawMode == HapticDrawMode.BRUSH && downY in graphTop..<graphHeight) {
                     parent.requestDisallowInterceptTouchEvent(true)
                     sampleStroke(event.x, event.y, publish = false)
-                } else if (drawMode == HapticDrawMode.POINT && downY < graphHeight) {
+                } else if (drawMode == HapticDrawMode.POINT && downY in graphTop..<graphHeight) {
                     editTime = hitPoint(event.x, event.y)
                     editTime?.let { source ->
                         originalPointValue = value(requireNotNull(pattern).sourcePoint(source))
@@ -241,6 +265,22 @@ internal class HapticTimeline(
         curvesChanged()
     }
 
+    fun viewport() = Viewport(zoom, leftMs)
+
+    fun restoreViewport(state: Viewport?) {
+        zoom = (state?.zoom ?: (length / 8_000f)).coerceIn(1f, 64f)
+        leftMs = clampLeft(state?.left ?: 0f)
+        curvesChanged()
+    }
+
+    fun follow(position: Int) {
+        if (position < leftMs || position > leftMs + visible) {
+            leftMs = clampLeft(position - visible * .12f)
+            curvesChanged()
+        }
+        cursor = position
+    }
+
     private fun hitPoint(x: Float, y: Float): Int? {
         val project = pattern ?: return null
         val touchedTime = leftMs + visible * x / width.coerceAtLeast(1)
@@ -254,7 +294,7 @@ internal class HapticTimeline(
             if (dx > maxDistance) break
             val amplitude = if (channel == HapticChannel.AMPLITUDE) project.at(time).amplitude else value(point)
             val normalized = ((amplitude - limits.start) / (limits.endInclusive - limits.start)).coerceIn(0f, 1f)
-            val pointY = 8 * density + (1 - normalized) * (graphHeight - 16 * density).coerceAtLeast(1f)
+            val pointY = graphTop + 8 * density + (1 - normalized) * plotHeight
             val distance = kotlin.math.hypot(dx, pointY - y)
             if (distance < best) {
                 best = distance
@@ -265,14 +305,14 @@ internal class HapticTimeline(
     }
 
     private fun valueAt(y: Float): Float {
-        val normalized = (1 - (y - 8 * density) / (graphHeight - 16 * density).coerceAtLeast(1f)).coerceIn(0f, 1f)
+        val normalized = (1 - (y - graphTop - 8 * density) / plotHeight).coerceIn(0f, 1f)
         return limits.start + normalized * (limits.endInclusive - limits.start)
     }
 
     private fun movedPoint(source: Int, x: Float, y: Float): Pair<Int, Float> {
         val delta = ((x - downX) * visible / width.coerceAtLeast(1)).roundToInt()
         val at = (source + (pattern?.offset ?: 0) + delta).coerceIn(0, length.toInt())
-        val valueDelta = (downY - y) / (graphHeight - 16 * density).coerceAtLeast(1f) *
+        val valueDelta = (downY - y) / plotHeight *
             (limits.endInclusive - limits.start)
         return at to (originalPointValue + valueDelta).coerceIn(limits.start, limits.endInclusive)
     }

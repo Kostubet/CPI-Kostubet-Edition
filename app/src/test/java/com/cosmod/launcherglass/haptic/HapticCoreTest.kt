@@ -16,13 +16,59 @@ class HapticCoreTest {
         assertTrue(reference.copy(name = "Copy", repeat = true).usesOriginalRingtone(reference))
         val quieter = reference.copy(intensity = 60, offset = 20, fadeIn = 60)
         assertTrue(quieter.canEditRingtoneCarrier(reference))
-        assertEquals(.4f, quieter.ringtoneGain(reference, 40, true), .0001f)
-        assertEquals(0f, quieter.ringtoneGain(reference, 10, true), 0f)
+        assertEquals(.4f, quieter.ringtoneMix(reference, 40, true).original, .0001f)
+        assertEquals(RingtoneMix(0f, 0f), quieter.ringtoneMix(reference, 10, true))
         val local = reference.replace(HapticPoint(20, .25f))
-        assertEquals(.5f, local.ringtoneGain(reference, 20, false), .0001f)
-        assertEquals(1f, local.ringtoneGain(reference, 60, false), .0001f)
+        assertEquals(.5f, local.ringtoneMix(reference, 20, false).original, .0001f)
+        assertEquals(RingtoneMix(1f, 0f), local.ringtoneMix(reference, 60, false))
         assertTrue(!local.usesOriginalRingtone(reference))
         assertTrue(!reference.replace(HapticPoint(40, .8f, tapKind = HapticTap.NATIVE)).canEditRingtoneCarrier(reference))
+    }
+
+    @Test fun ringtonePointMovedIntoSilenceStillUsesTheCarrier() {
+        val reference = HapticPattern("Original", 300, listOf(
+            HapticPoint(0, 0f), HapticPoint(40, .6f), HapticPoint(80, 0f),
+            HapticPoint(200, 0f), HapticPoint(300, 0f),
+        ), ringtoneVibration = true)
+        val (edited, moved) = reference.movePoint(40, 160, HapticChannel.AMPLITUDE, .6f)
+        assertEquals(160, moved)
+        assertTrue(edited.canEditRingtoneCarrier(reference))
+        assertEquals(.6f, edited.ringtoneMix(reference, 160, false).extension, .0001f)
+        assertEquals(RingtoneMix(1f, 0f), edited.ringtoneMix(reference, 230, false))
+    }
+
+    @Test fun weakSectionsUseRecordedCarrierAndPeaksHaveHeadroom() {
+        val reference = HapticPattern("Original", 140, listOf(
+            HapticPoint(0, 0f), HapticPoint(40, .003f), HapticPoint(100, .95f), HapticPoint(140, 0f),
+        ), ringtoneVibration = true)
+        val edited = reference.replace(HapticPoint(40, .8f))
+        val weak = edited.ringtoneMix(reference, 40, false)
+        assertTrue(weak.original <= 2.5f)
+        assertTrue(weak.extension > .78f)
+        val loud = limitRingtoneMix(RingtoneMix(1.5f, .2f), .95f)
+        assertEquals(1f, loud.original * .95f + loud.extension, .0001f)
+        assertEquals(RingtoneMix(1f, 0f), limitRingtoneMix(RingtoneMix(1f, 0f), 1f))
+    }
+
+    @Test fun ringtoneCycleUsesTheRecordedFrequencyAndBoundedSamples() {
+        val rate = 8_000
+        val period = 64
+        val data = java.nio.ByteBuffer.allocate(rate * 4 / 5).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (frame in 0 until rate / 5) {
+            data.putShort(0)
+            data.putShort((sin(2 * PI * frame / period) * 24_000).toInt().toShort())
+        }
+        data.flip()
+        val collector = RingtonePcm.Collector()
+        collector.append(data, rate, 2, 1, 0L, android.media.AudioFormat.ENCODING_PCM_16BIT, 2)
+        val pcm = requireNotNull(collector.finish())
+        val reference = HapticPattern("Original", 200,
+            listOf(HapticPoint(0, 0f), HapticPoint(60, .7f), HapticPoint(200, 0f)))
+        val cycle = requireNotNull(pcm.recordedCycle(reference))
+        for (frame in 0..period * 3) {
+            assertEquals(cycle.sample(frame, 1), cycle.sample(frame + period, 1), .01f)
+            assertTrue(kotlin.math.abs(cycle.sample(frame, 1)) <= 32768f)
+        }
     }
 
     @Test fun ringtonePcmKeepsSignedAudioAndHapticSamplesSeparate() {

@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 420
+
+- В редакторе Haptic Studio появились отдельные дорожки звука и вибрации, кнопки отмены и повтора рядом с воспроизведением и нижняя панель инструментов.
+- Изменения огибающей и перенос точки в паузу сохраняют исходный тактильный канал рингтона. Тихие участки используют образец исходного сигнала, а усиление получает ограничение пиков с плавным переходом.
+
 ### Сборка 419
 
 - Предпросмотр штатного рингтона воспроизводит исходный тактильный канал через системное аудио. Изменения интенсивности, затухания и сдвига применяются к исходному сигналу.
@@ -108,6 +113,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 420
+
+- The Haptic Studio editor has separate audio and haptic tracks, undo and redo next to playback, and a bottom toolbar.
+- Envelope edits and points moved into a silent region keep the ringtone's native haptic channel. Quiet regions reuse a sample of the original signal, and gain boosts have smooth peak limiting.
 
 ### Build 419
 

@@ -19,6 +19,49 @@ internal class RingtonePcm private constructor(
         return samples[index / CHUNK][index % CHUNK]
     }
 
+    fun carrierPeak(first: Int, last: Int): Float {
+        var peak = 0
+        for (frame in first.coerceAtLeast(0) until last.coerceAtMost(frames)) {
+            for (channel in audibleChannels until channels) {
+                peak = maxOf(peak, kotlin.math.abs(sample(frame, channel).toInt()))
+            }
+        }
+        return peak / 32768f
+    }
+
+    fun recordedCycle(reference: HapticPattern): RecordedRingtoneCycle? {
+        val strongest = reference.points.maxByOrNull { it.amplitude } ?: return null
+        val earliest = frameAt(strongest.ms)
+        val minimumPeriod = rate / 310
+        val maximumPeriod = rate / 65
+        val overlap = rate / 1000
+        val comparisonWindow = rate / 125
+        val scanEnd = minOf(earliest + rate / 50, frames - maximumPeriod - comparisonWindow)
+        if (scanEnd <= earliest) return null
+        val channel = audibleChannels
+        val start = (earliest until scanEnd).firstOrNull { frame ->
+            sample(frame, channel) >= 0 && sample(frame - 1, channel) < 0
+        } ?: return null
+        val period = (minimumPeriod..maximumPeriod).minByOrNull { distance ->
+            var difference = 0.0
+            for (offset in 0 until comparisonWindow) {
+                val delta = sample(start + offset, channel).toInt() - sample(start + distance + offset, channel)
+                difference += delta.toDouble() * delta
+            }
+            difference
+        } ?: return null
+        val peak = carrierPeak(start, start + period + overlap)
+        if (peak < .06f) return null
+        return RecordedRingtoneCycle(this, start, period, overlap, peak)
+    }
+
+    fun frameAt(timeMs: Int, roundUp: Boolean = false): Int {
+        val numerator = timeMs.toLong() * rate
+        return ((numerator + if (roundUp) 999 else 0) / 1000).toInt()
+    }
+
+    fun timeAt(frame: Int): Int = (frame * 1000L / rate).toInt()
+
     internal class Collector {
         private val samples = ArrayList<ShortArray>()
         private var size = 0
@@ -68,6 +111,20 @@ internal class RingtonePcm private constructor(
     companion object {
         private const val CHUNK = 16_384
         private const val MAX_PCM_SAMPLES = 16 * 1024 * 1024
+    }
+}
+
+internal class RecordedRingtoneCycle(
+    private val pcm: RingtonePcm, private val start: Int, private val period: Int,
+    private val overlap: Int, private val peak: Float,
+) {
+    fun sample(frame: Int, channel: Int): Float {
+        val phase = Math.floorMod(frame, period)
+        val current = pcm.sample(start + phase, channel).toFloat()
+        if (phase >= overlap) return current / peak
+        val previous = pcm.sample(start + period + phase, channel).toFloat()
+        val blend = phase.toFloat() / overlap
+        return (previous + (current - previous) * blend) / peak
     }
 }
 
@@ -131,21 +188,33 @@ internal class HapticRingtonePlayback(
         val framesPerStep = (pcm.rate / 250).coerceAtLeast(1)
         val data = ShortArray(framesPerStep * pcm.channels)
         val sameEnvelope = pattern.points == original.points
-        val shiftFrames = pattern.offset * pcm.rate / 1000
-        val first = start * pcm.rate / 1000
-        val last = (end * pcm.rate + 999) / 1000
+        val cycle = if (sameEnvelope) null else pcm.recordedCycle(original)
+        val shiftFrames = pcm.frameAt(pattern.offset)
+        val first = pcm.frameAt(start)
+        val last = pcm.frameAt(end, roundUp = true)
         var frame = first
+        var previousPeak = pcm.carrierPeak(frame - framesPerStep - shiftFrames, frame - shiftFrames)
+        var peak = pcm.carrierPeak(frame - shiftFrames, minOf(last, frame + framesPerStep) - shiftFrames)
         while (!stopped && frame < last) {
             val size = minOf(framesPerStep, last - frame)
-            val from = pattern.ringtoneGain(original, frame * 1000 / pcm.rate, sameEnvelope)
-            val to = pattern.ringtoneGain(original, (frame + size) * 1000 / pcm.rate, sameEnvelope)
+            val from = pattern.ringtoneMix(original, pcm.timeAt(frame), sameEnvelope)
+            val to = pattern.ringtoneMix(original, pcm.timeAt(frame + size), sameEnvelope)
+            val nextPeak = pcm.carrierPeak(frame + size - shiftFrames,
+                minOf(last, frame + size + framesPerStep) - shiftFrames)
+            // Both blocks sharing a boundary use the same gain there.
+            val limitedFrom = limitRingtoneMix(from, maxOf(previousPeak, peak))
+            val limitedTo = limitRingtoneMix(to, maxOf(peak, nextPeak))
             for (index in 0 until size) {
-                val gain = from + (to - from) * index / size
+                val fraction = index.toFloat() / size
+                val gain = limitedFrom.original + (limitedTo.original - limitedFrom.original) * fraction
+                val extension = limitedFrom.extension + (limitedTo.extension - limitedFrom.extension) * fraction
                 for (channel in 0 until pcm.channels) {
                     data[index * pcm.channels + channel] = if (channel < pcm.audibleChannels) {
                         if (audible) pcm.sample(frame + index, channel) else 0
                     } else {
-                        (pcm.sample(frame + index - shiftFrames, channel) * gain)
+                        val sourceFrame = frame + index - shiftFrames
+                        val added = if (extension > 0f) (cycle?.sample(sourceFrame, channel) ?: 0f) * extension else 0f
+                        (pcm.sample(sourceFrame, channel) * gain + added)
                             .roundToInt().coerceIn(-32768, 32767).toShort()
                     }
                 }
@@ -158,6 +227,8 @@ internal class HapticRingtonePlayback(
                 if (result == 0) Thread.sleep(4) else written += result
             }
             frame += size
+            previousPeak = peak
+            peak = nextPeak
         }
     }
 
@@ -166,6 +237,12 @@ internal class HapticRingtonePlayback(
         private const val HAPTIC_A = 0x20000000
         private const val HAPTIC_B = 0x10000000
     }
+}
+
+internal fun limitRingtoneMix(mix: RingtoneMix, peak: Float): RingtoneMix {
+    val level = peak * mix.original + mix.extension
+    if (level <= 1f) return mix
+    return RingtoneMix(mix.original / level, mix.extension / level)
 }
 
 internal fun ringtoneAudioAttributes(nativeHaptics: Boolean): AudioAttributes =
