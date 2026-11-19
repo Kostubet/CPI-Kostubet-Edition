@@ -26,6 +26,20 @@ object SuUtil {
         return execute("am force-stop com.android.launcher; am force-stop com.oppo.launcher; am force-stop com.oplus.launcher; am start -a android.intent.action.MAIN -c android.intent.category.HOME")
     }
 
+    fun restartSidebar(context: android.content.Context): Boolean {
+        val pkg = com.cosmod.launcherglass.ui.SoftGlassSettings.SIDEBAR_PACKAGE
+        if (HostControl.request(context, pkg, HostControl.RESTART_SIDEBAR).first == SystemUiControl.ACCEPTED) return true
+        // Keep the package enabled for ColorOS to rebind its services.
+        return execute("""
+            failed=0
+            for process in $pkg $pkg:edgepanel $pkg:ui; do
+                pids=${'$'}(pidof "${'$'}process")
+                if [ -n "${'$'}pids" ]; then kill -TERM ${'$'}pids || failed=1; fi
+            done
+            [ "${'$'}failed" = "0" ]
+        """.trimIndent())
+    }
+
     fun copyWallpaperToLauncher(): Boolean {
         // Legacy no-op; wallpaper capture is handled by WallpaperHelper.
         return true

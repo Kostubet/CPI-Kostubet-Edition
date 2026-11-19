@@ -10,7 +10,7 @@ internal object SoftGlassSettings {
         CONTROL("shade_glass_control_soft_", "SHADE", 1f),
         SHADE("shade_glass_notifications_soft_", "SHADE", 0f),
         LOCK("lock_notifications_soft_", "LOCKSCREEN", 3f),
-        SIDEBAR("sidebar_soft_", "SIDEBAR", 4f);
+        SIDEBAR("sidebar_soft_", "SIDEBAR", 5f);
 
         val enabled = prefix + "enabled"
         val white = prefix + "keep_white"

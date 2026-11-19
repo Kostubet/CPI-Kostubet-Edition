@@ -99,6 +99,6 @@ internal object LockscreenSettings {
         return Profile(prefs.getBoolean(surface.key("enabled"),false),value("style")==1 && Build.VERSION.SDK_INT>=33,
             value("blur"),value("opacity"),value("corner"),value("width"),value("distortion"),value("dispersion"),tint,
             if(surface.adjustableSaturation)value("saturation") else 100,
-            optics.takeIf {prefs.getBoolean(surface.key("new_engine"))},optics.backdropBrightness,optics.blur.opacity,optics.lensHeight)
+            optics.takeIf {it.softWidth != null || prefs.getBoolean(surface.key("new_engine"))},optics.backdropBrightness,optics.blur.opacity,optics.lensHeight)
     }
 }

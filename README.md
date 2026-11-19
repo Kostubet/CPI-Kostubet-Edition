@@ -42,7 +42,7 @@
 
 Фон центра управления использует системную анимацию ColorOS. У него свои настройки радиуса размытия, яркости и затемнения.
 
-У стекла «Мягкий свет» независимые профили для центра управления, центра уведомлений, уведомлений и развёрнутых активностей на экране блокировки и умной боковой панели. Для первых трёх выберите область **System UI**, для боковой панели — **Умная боковая панель** (`com.coloros.smartsidebar`). После первого включения перезапустите соответствующее системное приложение.
+У стекла «Мягкий свет» независимые профили для центра управления, центра уведомлений, уведомлений и развёрнутых активностей на экране блокировки и умной боковой панели. Для первых трёх выберите область **System UI**, для боковой панели — **Умная боковая панель** (`com.coloros.smartsidebar`). После первого включения перезапустите соответствующее системное приложение. Кнопка перезапуска боковой панели находится вверху её раздела. Для плиток и уведомлений в шторке «Мягкий свет» — единственный стиль. В остальных разделах его можно выбрать в меню «Тип стекла» и настроить ширину зоны преломления отдельно.
 
 Откройте **О модуле → Обновления**, чтобы проверить опубликованные сборки, включить уведомления и установить подписанный APK прямо из CPI. Android может запросить разрешение на установку или показать окно подтверждения.
 
@@ -101,7 +101,7 @@ Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-
 
 To test smooth zoom, add stock Camera to the LSPosed scope and reopen it. In CPI, open **Camera → iOS Smooth Video Zoom**, turn it on, and select the controls to smooth. The graph updates with manual adjustments and scales its time axis to the trajectory. Compare saved recordings at 1080p and 4K, at 30 and 60 FPS, while zooming within one lens range and changing direction mid-zoom. Lens switches use the stock camera path.
 
-Soft-light glass has independent profiles for control center, notification shade, lock-screen notifications and expanded live activities, and Smart Sidebar. Select **System UI** in LSPosed for the first three, or **Smart Sidebar** (`com.coloros.smartsidebar`) for the sidebar. Restart the affected system app after enabling the effect for the first time.
+Soft-light glass has independent profiles for control center, notification shade, lock-screen notifications and expanded live activities, and Smart Sidebar. Select **System UI** in LSPosed for the first three, or **Smart Sidebar** (`com.coloros.smartsidebar`) for the sidebar. Restart the affected system app after enabling the effect for the first time. The Smart Sidebar settings have a restart button. Soft Light is the only card material for Control Center and Notification Center. In other glass sections, choose it under Glass type to adjust the refraction width.
 
 Open **About → Updates** to check releases, receive update notifications, and install a signed build from CPI. Android may ask for installation permission or confirmation.
 

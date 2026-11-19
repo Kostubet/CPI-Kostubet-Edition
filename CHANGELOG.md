@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 423
+
+- Ползунки яркости и громкости получают «Мягкий свет» и в развёрнутом режиме. Штатное заполнение ползунков сохраняется.
+- Боковая панель использует стекло в своих отдельных процессах. В её настройках добавлена кнопка перезапуска.
+- Центры управления и уведомлений используют только «Мягкий свет». Настройки общего фона центра управления сохранены.
+- В остальных разделах «Мягкий свет» появился в меню «Тип стекла» с отдельной шириной зоны преломления.
+
 ### Сборка 422
 
 - «Мягкий свет» использует системное стекло ColorOS 17. Профили центра управления, центра уведомлений, уведомлений и активностей на экране блокировки и «Умной боковой панели» настраиваются отдельно.
@@ -123,6 +130,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 423
+
+- Soft Light follows control-center brightness and volume tracks in their expanded states, keeping the stock progress fills.
+- Smart Sidebar applies its material in the separate sidebar processes and has a restart button.
+- Soft Light is the only card material for Control Center and Notification Center. Independent control-center background adjustments remain.
+- Other glass sections can select Soft Light under Glass type and adjust their own refraction width.
 
 ### Build 422
 

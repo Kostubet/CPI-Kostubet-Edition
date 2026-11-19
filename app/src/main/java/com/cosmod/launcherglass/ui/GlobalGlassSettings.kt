@@ -8,6 +8,7 @@ import com.cosmod.launcherglass.ui.SettingsProvider.Companion as Keys
 internal object GlobalGlassSettings {
     const val ENABLED="global_glass_enabled"
     const val STYLE="global_glass_style"
+    const val SOFT_WIDTH="global_glass_soft_width"
     const val BLUR="global_glass_blur"
     const val BLUR_OPACITY="global_glass_blur_opacity"
     const val OPACITY="global_glass_opacity"
@@ -15,8 +16,8 @@ internal object GlobalGlassSettings {
     const val LENS_HEIGHT="global_glass_lens_height"
     const val DISTORTION="global_glass_distortion"
     const val DISPERSION="global_glass_dispersion"
-    val defaults=mapOf(STYLE to 1,BLUR to 12,BLUR_OPACITY to 100,OPACITY to 30,WIDTH to 42,DISTORTION to 80,DISPERSION to 0,LENS_HEIGHT to GlassEngineSettings.Parameter.LENS_HEIGHT.default)
-    val maximums=mapOf(STYLE to 1,BLUR to 32,DISTORTION to 300,LENS_HEIGHT to GlassEngineSettings.Parameter.LENS_HEIGHT.max)
+    val defaults=mapOf(STYLE to 1,SOFT_WIDTH to GlassEngineSettings.SOFT_WIDTH_DEFAULT,BLUR to 12,BLUR_OPACITY to 100,OPACITY to 30,WIDTH to 42,DISTORTION to 80,DISPERSION to 0,LENS_HEIGHT to GlassEngineSettings.Parameter.LENS_HEIGHT.default)
+    val maximums=mapOf(STYLE to 2,SOFT_WIDTH to GlassEngineSettings.SOFT_WIDTH_MAX,BLUR to 32,DISTORTION to 300,LENS_HEIGHT to GlassEngineSettings.Parameter.LENS_HEIGHT.max)
 
     fun opacity(bundle:Bundle)=if(bundle.getBoolean(ENABLED))bundle.getInt(OPACITY,defaults.getValue(OPACITY)) else 0
 
@@ -24,17 +25,22 @@ internal object GlobalGlassSettings {
         if(!bundle.getBoolean(ENABLED) || !bundle.getBoolean(Keys.KEY_ENABLED,true))return
         fun value(key:String)=bundle.getInt(key,defaults.getValue(key)).coerceIn(0,maximums[key] ?: 100)
         fun set(value:Int,vararg keys:String){for(key in keys)bundle.putInt(key,value)}
-        val mode=if(Build.VERSION.SDK_INT>=33)value(STYLE)else 0
+        val material=if(Build.VERSION.SDK_INT>=33)value(STYLE)else 0
+        val mode=material.coerceAtMost(1)
+        for(scope in GlassEngineSettings.materialScopes) {
+            bundle.putBoolean(GlassEngineSettings.softKey(scope),material==2)
+            if(material==2)set(value(SOFT_WIDTH),GlassEngineSettings.softWidthKey(scope))
+        }
         val blur=value(BLUR)
         val opacity=value(OPACITY)
         val blurOpacity=value(BLUR_OPACITY)
-        for(scope in GlassEngineSettings.booleans.keys){
+        for(scope in GlassEngineSettings.materialScopes){
             val key=GlassEngineSettings.blurOpacityKey(scope)
             if(key in GlassEngineSettings.integers)bundle.putInt(key,blurOpacity)
         }
         val lensHeight=value(LENS_HEIGHT)
         val heightParameter=GlassEngineSettings.Parameter.LENS_HEIGHT
-        for(scope in GlassEngineSettings.booleans.keys - GlassEngineSettings.LOCKSCREEN + ShadeGlassSettings.Panel.entries.map {it.newEngine}){
+        for(scope in GlassEngineSettings.materialScopes + ShadeGlassSettings.Panel.entries.map {it.newEngine}){
             set(lensHeight,GlassEngineSettings.key(scope,heightParameter))
         }
         bundle.putInt(GlassEngineSettings.key(GlassEngineSettings.LARGE_FOLDERS,GlassEngineSettings.Parameter.BLUR_RADIUS),blur)

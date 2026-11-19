@@ -53,7 +53,8 @@ class HookEntry : IXposedHookLoadPackage {
             return
         }
         if (packageName == com.cosmod.launcherglass.ui.SoftGlassSettings.SIDEBAR_PACKAGE) {
-            if (lpparam.processName == packageName) SoftGlassNative.installSidebar(lpparam.classLoader)
+            if (lpparam.processName == packageName || lpparam.processName == "$packageName:ui" ||
+                lpparam.processName == "$packageName:edgepanel") SoftGlassNative.installSidebar(lpparam.classLoader)
             return
         }
         if(packageName=="com.android.systemui") {

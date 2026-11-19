@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.cosmod.launcherglass.xposed
 
+import android.graphics.RuntimeShader
+import com.cosmod.launcherglass.ui.SoftGlassSettings.Parameter as P
+import com.cosmod.launcherglass.ui.SoftGlassSettings.Profile
+import kotlin.math.cos
+import kotlin.math.sin
+
 /** Extends only the ColorOS post-effect shader with its capture, mask and geometry intact. */
 internal object SoftGlassShader {
     const val INPUT = "uniBDFBitmap"
@@ -42,14 +48,31 @@ internal object SoftGlassShader {
             val shape = if (masked) "u_commonArray[6] > .5" else "false"
             appendLine("""
                 if (onbSoftGlass.x > 0.0 && onbOptics.x > 0.0 && outputCol.a > .001 &&
-                    min(u_size.x,u_size.y)>3.0 && ($shape || onbPanelSurface.x==3.0 || onbPanelSurface.x==4.0) &&
-                    (onbPanelSurface.x==4.0 || u_size.x<.94*onbSoftGlass.y || u_size.y<.82*onbSoftGlass.z)) {
+                    min(u_size.x,u_size.y)>3.0 && ($shape || onbPanelSurface.x>=2.0) &&
+                    (onbPanelSurface.x==4.0 || onbPanelSurface.x==5.0 || u_size.x<.94*onbSoftGlass.y || u_size.y<.82*onbSoftGlass.z)) {
                     outputCol.rgb = outputCol.a * onbMaterial(outputCol.rgb/outputCol.a, onbCapture,
                         position, mapCoords, matrixScale, shapeResult.sdf, $masked);
                 }
             """.trimIndent())
             append(source, finish, source.length)
         }
+    }
+
+    fun applyProfile(shader: RuntimeShader, profile: Profile, role: Float, dark: Boolean, density: Float,
+        screenWidth: Float, screenHeight: Float, x: Float = 0f, y: Float = 0f, fullMix: Boolean = false) {
+        shader.setFloatUniform("onbPanelSurface", role, if (dark) .30f else .63f)
+        shader.setFloatUniform("onbOptics", if (fullMix) 1f else profile[P.STRENGTH], profile[P.BLUR], profile[P.WIDTH], profile[P.SHINE])
+        shader.setFloatUniform("onbToneControls", profile[P.REFRACTION], profile[P.SATURATION], profile[P.EXPOSURE])
+        shader.setFloatUniform("onbTint", profile[P.WARMTH], profile[P.CONTRAST])
+        shader.setFloatUniform("onbDimming", profile[P.DIMMING])
+        shader.setFloatUniform("onbKeepWhite", if (profile.white) 1f else 0f)
+        shader.setFloatUniform("onbSelectionState", if (role == 1f) 1f else 0f)
+        val angle = Math.toRadians(profile.value(P.ANGLE).toDouble())
+        val c = cos(angle).toFloat()
+        val s = sin(angle).toFloat()
+        shader.setFloatUniform("onbLampOffset", .4f * (1f - c) + .6f * s + x * profile[P.RESPONSE],
+            .6f * (1f - c) - .4f * s + y * profile[P.RESPONSE])
+        shader.setFloatUniform(UNIFORM, density, screenWidth, screenHeight)
     }
 
     // Older expanded cards use the compositor's BackgroundBlurDrawable instead of the
@@ -80,13 +103,15 @@ internal object SoftGlassShader {
         }
     """.trimIndent()
 
-    private const val OPTICS = """
+    const val HEIGHT_PROFILE = """
         float onbHeight(float x, float power) {
             float t = .5+.5*sqrt(clamp(x,0.0,1.0));
             float smoothHeight = 2.0*t*t*t*(t*(t*6.0-15.0)+10.0)-1.0;
             return 1.0-pow(clamp(1.0-smoothHeight,0.0,1.0),power);
         }
 
+    """
+    private const val OPTICS = HEIGHT_PROFILE + """
         float3 onbTone(float3 color, float4 curve, float amount, float saturation, float brightness) {
             float3 rgb = toLinearSrgb(clamp(color,0.0,1.0));
             float3 cone = pow(max(float3(dot(rgb,float3(.412221,.536333,.051446)),

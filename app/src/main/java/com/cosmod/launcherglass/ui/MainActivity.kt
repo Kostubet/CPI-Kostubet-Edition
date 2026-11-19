@@ -170,7 +170,6 @@ class MainActivity : AppCompatActivity() {
     }
     private var rootNavigation:CouiRootNavigation?=null
     private var shadePanel=ShadeGlassSettings.Panel.CONTROL
-    private var shadeComponent=0
     private var shadePreview:ShadeGlassPreview?=null
     private var rootNavigationAppearance: Triple<Boolean, Int, Boolean>? = null
     private val rootNavigationIndex=mutableIntStateOf(0)
@@ -498,7 +497,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun save(key: String, value: Any, engine:Pair<String,Boolean>?=null) {
+    private fun save(key: String, value: Any, vararg flags: Pair<String, Boolean>) {
         if(updatingUi)return
         prefs.edit().apply {
             if(key==FolderSettingsKeys.OWN && value==true){
@@ -508,7 +507,7 @@ class MainActivity : AppCompatActivity() {
                     putInt(GlassDispersionSettings.FOLDERS,number(GlassDispersionSettings.ICONS))
             }
             when(value) { is Boolean -> putBoolean(key, value); is Int -> putInt(key, value) }
-            engine?.let { putBoolean(it.first,it.second) }
+            flags.forEach { (flag, enabled) -> putBoolean(flag, enabled) }
         }.apply()
         if (value == false && (key == com.cosmod.launcherglass.camera.CameraZoomSettings.DIAGNOSTICS ||
                 key == SettingsProvider.KEY_ENABLED)) {
@@ -1471,7 +1470,7 @@ class MainActivity : AppCompatActivity() {
             Screen.BANNERS->bannerSection(body,general,colors)
             Screen.LIVE->liveAlertSection(body,colors)
             Screen.VOLUME->volumeSection(body,general,colors)
-            Screen.SHADE->buildShadeGlass(body,general,colors,pageBody)
+            Screen.SHADE->buildShadeGlass(body,colors,pageBody)
             Screen.SIDEBAR->sidebarGlass(body)
             Screen.LOCKSCREEN->lockscreenSection(body,general,colors)
             Screen.LIGHT->buildLight(body)
@@ -1498,199 +1497,65 @@ class MainActivity : AppCompatActivity() {
         add(parent,card(container),bottom=12)
     }
 
-    private fun buildShadeGlass(body:LinearLayout,general:LinearLayout,colors:LinearLayout,pageBody:LinearLayout) {
-        val panel=shadePanel
-        softGlassSection(body, if(panel==ShadeGlassSettings.Panel.CONTROL)
-            SoftGlassSettings.Surface.CONTROL else SoftGlassSettings.Surface.SHADE)
-        val components=panel.components
-        val panelTitles=listOf(getString(R.string.shade_glass_control),getString(R.string.shade_glass_notifications))
-        val titles=listOf(R.string.shade_glass_round,R.string.shade_glass_large,R.string.shade_glass_media,
-            R.string.shade_glass_slider_brightness,R.string.shade_glass_volume,R.string.shade_glass_other_tile,
-            R.string.shade_glass_compact,R.string.shade_glass_expanded,R.string.shade_glass_group,
-            R.string.shade_glass_action,R.string.shade_glass_clear)
-        fun choose(label:Int,items:List<String>,selected:Int,pick:(Int)->Unit):View {
-            return optionRow(getString(label),items[selected]).apply {
-                setOnClickListener { showChoicePopup(this,items.mapIndexed { i,value->i to value },selected,onPick=pick) }
-            }
-        }
-        add(pageBody,CouiSectionTabs(this,darkUi,primary,panelTitles,panel.ordinal,commitOnRelease = true) { index->
-            if(index!=panel.ordinal){
-                shadePanel=ShadeGlassSettings.Panel.entries[index]
-                shadeComponent=0
+    private fun buildShadeGlass(body: LinearLayout, colors: LinearLayout, pageBody: LinearLayout) {
+        val panel = shadePanel
+        val surface = if (panel == ShadeGlassSettings.Panel.CONTROL)
+            SoftGlassSettings.Surface.CONTROL else SoftGlassSettings.Surface.SHADE
+        val titles = listOf(getString(R.string.shade_glass_control), getString(R.string.shade_glass_notifications))
+        add(pageBody,CouiSectionTabs(this,darkUi,primary,titles,panel.ordinal,commitOnRelease = true) { index->
+            if (index != panel.ordinal) {
+                shadePanel = ShadeGlassSettings.Panel.entries[index]
                 refreshCatalogStyle()
             }
         },bottom=10)
-        val navigation=column()
-        add(navigation,switchRow(getString(R.string.shade_glass_enabled),panel.enabled,getString(R.string.shade_glass_system_hint)))
-        val presets=listOf("iOS Liquid Glass","Clear Glass","Dark Glass","Frosted Glass","Custom")
-        val presetIndex=ShadeGlassSettings.Preset.entries.firstOrNull {
-            it!=ShadeGlassSettings.Preset.CUSTOM && it.values().all { (parameter,value)->number(panel.key(parameter))==value }
-        }?.ordinal ?: ShadeGlassSettings.Preset.CUSTOM.ordinal
-        add(navigation,choose(R.string.shade_glass_preset,presets,presetIndex) { index->
-            val preset=ShadeGlassSettings.Preset.entries[index].values()
-            if(preset.isNotEmpty()){
-                prefs.edit().apply {preset.forEach {(parameter,value)->putInt(panel.key(parameter),value)}}.apply()
-                contentResolver.notifyChange(SettingsProvider.CONTENT_URI,null)
-                refreshCatalogStyle()
-            }
-        })
-        add(navigation,optionRow(getString(R.string.shade_glass_reset),"").apply {
+        softGlassSection(body, surface)
+
+        val sectionEnabled = { master() && bool(FeatureSections.key(Screen.SHADE.name)) }
+        val backdrop = {
+            ShadeGlassSettings.controlBackground(sectionEnabled() && bool(ShadeGlassSettings.CONTROL_BACKGROUND),
+                bool(panel.highRefresh)) { key -> previewDraft[key] ?: number(key) }
+        }
+        val preview = ShadeGlassPreview(this, panel, darkUi,
+            backdrop.takeIf { panel == ShadeGlassSettings.Panel.CONTROL }) {
+            if (!sectionEnabled() || !bool(surface.enabled)) null
+            else SoftGlassSettings.Profile(SoftGlassSettings.Parameter.entries.map { parameter ->
+                val key = surface.key(parameter)
+                previewDraft[key] ?: number(key)
+            }, bool(surface.white), bool(surface.tilt))
+        }
+        shadePreview = preview
+        add(pageBody, text(getString(R.string.shade_glass_preview),16f), bottom=5)
+        pageBody.addView(preview, LinearLayout.LayoutParams(-1, dp(235)))
+        space(pageBody, 12)
+
+        val reset = optionRow(getString(R.string.shade_glass_reset), "").apply {
             setOnClickListener {
-                prefs.edit().apply { ShadeGlassSettings.panelKeys(panel).forEach { remove(it) } }.apply()
+                prefs.edit().apply {
+                    remove(surface.enabled)
+                    remove(surface.white)
+                    remove(surface.tilt)
+                    SoftGlassSettings.Parameter.entries.forEach { remove(surface.key(it)) }
+                }.apply()
                 contentResolver.notifyChange(SettingsProvider.CONTENT_URI,null)
                 refreshCatalogStyle()
             }
-        })
-        accordionCard(general,R.string.shade_glass_preset,navigation)
-        add(pageBody,text(getString(R.string.shade_glass_preview),16f),bottom=5)
-        val sectionEnabled={bool(FeatureSections.key(Screen.SHADE.name))}
-        val backdrop={ ShadeGlassSettings.controlBackground(
-            sectionEnabled() && bool(ShadeGlassSettings.CONTROL_BACKGROUND),bool(panel.highRefresh)) {
-            key->previewDraft[key] ?: number(key)
-        } }
-        val preview=ShadeGlassPreview(this,panel,darkUi,backdrop.takeIf { panel==ShadeGlassSettings.Panel.CONTROL }) { component->
-            ShadeGlassSettings.profile(panel,component,sectionEnabled() && bool(panel.enabled),
-                bool(panel.highRefresh),bool(panel.newEngine),
-                GlassEngineSettings.read(panel.newEngine) { key,_->
-                    val effective=if(key==GlassEngineSettings.key(panel.newEngine,GlassEngineSettings.Parameter.LENS_HEIGHT) &&
-                        bool(GlobalGlassSettings.ENABLED)) GlobalGlassSettings.LENS_HEIGHT else key
-                    previewDraft[effective] ?: number(effective)
-                }) {
-                key->previewDraft[key] ?: number(key)
-            }
         }
-        shadePreview=preview
-        pageBody.addView(preview,LinearLayout.LayoutParams(-1,dp(235)))
-        space(pageBody,12)
-        if(panel==ShadeGlassSettings.Panel.CONTROL) {
-            val background=column()
-            val enabled=ShadeGlassSettings.CONTROL_BACKGROUND
-            add(background,switchRow(getString(R.string.shade_glass_control_background),enabled,
+        add(body, card(reset))
+
+        if (panel == ShadeGlassSettings.Panel.CONTROL) {
+            val background = column()
+            val enabled = ShadeGlassSettings.CONTROL_BACKGROUND
+            add(background, switchRow(getString(R.string.shade_glass_control_background), enabled,
                 getString(R.string.shade_glass_control_background_hint)))
-            addGlassBlur(background,ShadeGlassSettings.CONTROL_BACKGROUND_RADIUS,
-                ShadeGlassSettings.CONTROL_BACKGROUND_BLUR_OPACITY,60,{master() && bool(enabled)})
-            accordionCard(body,R.string.shade_glass_control_background,background)
-            val backdropTone=column()
-            add(backdropTone,slider(getString(R.string.shade_glass_control_background_darkness),
-                ShadeGlassSettings.CONTROL_BACKGROUND_DARKNESS,0,100,"%").apply {gate(this){master() && bool(enabled)}})
-            add(backdropTone,slider(getString(R.string.shade_glass_control_background_brightness),
-                ShadeGlassSettings.CONTROL_BACKGROUND_BRIGHTNESS,0,200,"%").apply {gate(this){master() && bool(enabled)}})
-            accordionCard(colors,R.string.shade_glass_control_background,backdropTone)
-        }
-
-        val labels=intArrayOf(
-            R.string.shade_glass_material,
-            R.string.shade_glass_blur,
-            R.string.shade_glass_radius,
-            R.string.shade_glass_blur_strength,
-            R.string.shade_glass_blur_opacity,
-            R.string.shade_glass_quality,
-            R.string.shade_glass_live,
-            R.string.shade_glass_economy,
-            R.string.shade_glass_refraction,
-            R.string.shade_glass_strength,
-            R.string.shade_glass_lens,
-            R.string.shade_glass_edge,
-            R.string.shade_glass_dispersion,
-            R.string.shade_glass_dispersion_strength,
-            R.string.shade_glass_highlight,
-            R.string.shade_glass_highlight_brightness,
-            R.string.shade_glass_highlight_opacity,
-            R.string.shade_glass_highlight_width,
-            R.string.shade_glass_highlight_color,
-            R.string.shade_glass_rim,
-            R.string.shade_glass_reflection,
-            R.string.shade_glass_color,
-            R.string.shade_glass_opacity,
-            R.string.shade_glass_saturation,
-            R.string.shade_glass_contrast,
-            R.string.shade_glass_brightness,
-            R.string.shade_glass_tint,
-            R.string.shade_glass_auto_theme,
-            R.string.shade_glass_corner,
-            R.string.shade_glass_inner_shadow,
-            R.string.shade_glass_outer_shadow,
-            R.string.shade_glass_depth
-        )
-        val parameters=ShadeGlassSettings.Parameter.entries
-        val switches=listOf(getString(R.string.shade_glass_off),getString(R.string.shade_glass_on))
-        val groups=listOf(0..0 to R.string.ui_feature_tab_style,8..13 to R.string.shade_glass_refraction,
-            14..20 to R.string.shade_glass_highlight,21..27 to R.string.ui_feature_tab_colors,
-            28..31 to R.string.shade_glass_depth)
-        val highlightColors=column()
-        for((range,label) in groups){
-            val controls=column()
-            for(index in range){
-                val parameter=parameters[index]
-                val key=panel.key(parameter)
-                val title=labels[index]
-                when(parameter){
-                    ShadeGlassSettings.Parameter.MATERIAL->glassTypeChoice(controls,key,panel.newEngine,
-                        listOf("Liquid Glass","Frosted Glass"),liquid=0,title=title,allowed=::master) { blur ->
-                        addGlassBlur(blur,panel.key(ShadeGlassSettings.Parameter.RADIUS),
-                            panel.key(ShadeGlassSettings.Parameter.BLUR_OPACITY),60,::master)
-                    }
-                    ShadeGlassSettings.Parameter.COLOR,ShadeGlassSettings.Parameter.HIGHLIGHT_COLOR->{
-                        fun hex()=String.format(java.util.Locale.ROOT,"#%06X",number(key))
-                        val row=optionRow(getString(title),hex())
-                        refreshers.add { row.value=hex() }
-                        row.setOnClickListener { editShadeColor(row,title,key,hex()) }
-                        gate(row,::master)
-                        add(if(parameter==ShadeGlassSettings.Parameter.HIGHLIGHT_COLOR)highlightColors else controls,row)
-                    }
-                    else->if(parameter.range==0..1)modeChoice(controls,title,key,switches,allowed=::master)
-                        else add(controls,slider(getString(title),key,parameter.range.first,parameter.range.last,
-                            if(parameter in setOf(ShadeGlassSettings.Parameter.RADIUS,ShadeGlassSettings.Parameter.CORNER))" dp" else "%").apply {gate(this,::master)})
-                }
-            }
-            accordionCard(if(range.first==21)colors else body,label,controls)
-        }
-        accordionCard(colors,R.string.shade_glass_highlight_color,highlightColors)
-        val component=components[shadeComponent]
-        val overrides=column()
-        add(overrides,choose(R.string.shade_glass_component,components.map { getString(titles[it.ordinal]) },shadeComponent) {
-            shadeComponent=it
-            refreshCatalogStyle()
-        })
-        modeChoice(overrides,R.string.shade_glass_mode,component.mode,
-            listOf(getString(R.string.shade_glass_inherit),getString(R.string.shade_glass_custom),getString(R.string.shade_glass_stock)),
-            allowed=::master)
-        val allowed={master() && number(component.mode)==1}
-        addGlassBlur(overrides,component.radius,component.blurOpacity,60,allowed,inherited=true)
-        add(overrides,slider(getString(R.string.shade_glass_opacity),component.opacity,-1,100,"%",
-            formatter={ if(it<0)getString(R.string.shade_glass_inherit) else "$it%" }).apply {gate(this,allowed)})
-        accordionCard(body,R.string.shade_glass_component,overrides)
-    }
-
-    private fun editShadeColor(anchor:View,title:Int,key:String,initial:String) {
-        val form=column()
-        val input = CouiField(this, darkUi, primary, getString(R.string.shade_glass_hex),
-            initial, onSurface, maxLength = 7, autofocus = false)
-        add(form,input,bottom=8)
-        val swatches=LinearLayout(this)
-        for(value in listOf(0x252938,0x4f70ac,0x667d58,0xd99985,0xffffff)){
-            val hex=String.format(java.util.Locale.ROOT,"#%06X",value)
-            val swatch=button().apply {
-                text="●"
-                contentDescription=hex
-                setTextColor(value or 0xff000000.toInt())
-                setOnClickListener { input.replaceText(hex) }
-            }
-            swatches.addView(swatch,LinearLayout.LayoutParams(0,dp(44),1f))
-        }
-        add(form,swatches,bottom=8)
-        val apply=button().apply { text=getString(R.string.shade_glass_apply) }
-        add(form,apply)
-        val dialog=savedSettingsDialog(getString(title),form,anchor)
-        apply.setOnClickListener {
-            val digits = input.value.trim().removePrefix("#")
-            val value=digits.takeIf { it.length==6 }?.toIntOrNull(16)
-            if(value==null || value !in 0..0xffffff) input.error=getString(R.string.shade_glass_hex)
-            else {
-                save(key,value)
-                refreshControls()
-                dialog.dismiss()
-            }
+            addGlassBlur(background, ShadeGlassSettings.CONTROL_BACKGROUND_RADIUS,
+                ShadeGlassSettings.CONTROL_BACKGROUND_BLUR_OPACITY, 60, { master() && bool(enabled) })
+            accordionCard(body, R.string.shade_glass_control_background, background)
+            val backdropTone = column()
+            add(backdropTone, slider(getString(R.string.shade_glass_control_background_darkness),
+                ShadeGlassSettings.CONTROL_BACKGROUND_DARKNESS,0,100,"%").apply { gate(this) { master() && bool(enabled) } })
+            add(backdropTone, slider(getString(R.string.shade_glass_control_background_brightness),
+                ShadeGlassSettings.CONTROL_BACKGROUND_BRIGHTNESS,0,200,"%").apply { gate(this) { master() && bool(enabled) } })
+            accordionCard(colors, R.string.shade_glass_control_background, backdropTone)
         }
     }
 
@@ -2135,7 +2000,7 @@ class MainActivity : AppCompatActivity() {
         add(general,card(switchRow(getString(R.string.ui_global_glass_enabled),keys.ENABLED,
             getString(R.string.ui_global_glass_hint))),bottom=8)
         val active={bool(keys.ENABLED)}
-        modeChoice(style,R.string.ui_blur_style,keys.STYLE,listOf("Frosted","Liquid Glass"),
+        modeChoice(style,R.string.ui_blur_style,keys.STYLE,listOf("Frosted","Liquid Glass",getString(R.string.soft_glass_material)),
             valid={it==0 || Build.VERSION.SDK_INT>=33},allowed=active)
         fun control(group:LinearLayout,label:Int,key:String,unit:String,allowed:()->Boolean){
             divider(group)
@@ -2146,9 +2011,15 @@ class MainActivity : AppCompatActivity() {
         control(tone,R.string.island_opacity,keys.OPACITY,"%",active)
         accordionCard(colors,R.string.ui_feature_tab_colors,tone)
         val lens=column()
-        val showLens={number(keys.STYLE)==1 && Build.VERSION.SDK_INT>=33}
+        val showLens={number(keys.STYLE)>0 && Build.VERSION.SDK_INT>=33}
         val liquid={active() && showLens()}
         control(lens,R.string.glass_lens_height,keys.LENS_HEIGHT,"%",liquid)
+        val softWidth = slider(getString(R.string.soft_glass_width),keys.SOFT_WIDTH,0,OpticalSettings.maximum(keys.SOFT_WIDTH),"%")
+        val showSoft = { number(keys.STYLE) == 2 && Build.VERSION.SDK_INT >= 33 }
+        softWidth.visibility = if (showSoft()) View.VISIBLE else View.GONE
+        refreshers.add { reveal(softWidth, showSoft()) }
+        gate(softWidth, liquid)
+        add(lens,softWidth)
         control(lens,R.string.ui_liquid_width,keys.WIDTH,"%",liquid)
         control(lens,R.string.ui_liquid_distortion,keys.DISTORTION,"%",liquid)
         control(lens,R.string.ui_glass_dispersion,keys.DISPERSION,"%",liquid)
@@ -2276,6 +2147,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
     private fun featureRestartActions(): List<View> {
+        if(screen == Screen.SIDEBAR) {
+            val label = getString(R.string.soft_glass_sidebar_restart)
+            return listOf(smallIcon(R.drawable.ic_restart,label,chrome=true,action=::confirmSidebarRestart)
+                .apply { tooltipText = label })
+        }
         val launcher=screen in setOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.MOTION)
         val systemUi=screen in setOf(Screen.BANNERS,Screen.LIVE,Screen.VOLUME,Screen.LOCKSCREEN,Screen.SHADE)
         if (!launcher && !systemUi) return emptyList()
@@ -2449,23 +2325,32 @@ class MainActivity : AppCompatActivity() {
         title:Int=R.string.ui_blur_style, allowed:()->Boolean,colors:LinearLayout?=null,blurControls:((LinearLayout)->Unit)?=null) {
         if(styleKey!=null)featureKeys.add(styleKey)
         featureKeys.add(engineKey)
-        val labels=(if(styleKey==null)listOf("Liquid Glass") else base)+getString(R.string.glass_engine_new)
-        fun selected():Int {
-            val style=styleKey?.let {number(it).coerceIn(base.indices)} ?: 0
-            return if((styleKey==null || style==liquid) && Build.VERSION.SDK_INT>=33 && bool(engineKey))
-                labels.lastIndex else style
+        val softKey = GlassEngineSettings.softKey(engineKey)
+        featureKeys.add(softKey)
+        val labels = (if(styleKey==null)listOf("Liquid Glass") else base) +
+            listOf(getString(R.string.glass_engine_new), getString(R.string.soft_glass_material))
+        fun selected(): Int {
+            val style = styleKey?.let { number(it).coerceIn(base.indices) } ?: 0
+            if (Build.VERSION.SDK_INT < 33 || (styleKey != null && style != liquid)) return style
+            return when {
+                bool(softKey) -> labels.lastIndex
+                bool(engineKey) -> labels.lastIndex - 1
+                else -> style
+            }
         }
         val row=optionRow(getString(title),labels[selected()])
         refreshers.add {row.value=labels[selected()]}
         row.setOnClickListener {
             haptic(it)
             val choices=labels.mapIndexed {id,label->id to label}.filter { (id,_) ->
-                Build.VERSION.SDK_INT>=33 || id!=labels.lastIndex && (styleKey==null || id!=liquid)
+                Build.VERSION.SDK_INT>=33 || id<base.size && (styleKey==null || id!=liquid)
             }
             showChoicePopup(row,choices,selected()) {next->
-                val newEngine=next==labels.lastIndex
-                if(styleKey==null)save(engineKey,newEngine)
-                else save(styleKey,if(newEngine)liquid else next,engineKey to newEngine)
+                val soft = next == labels.lastIndex
+                val kyant = next == labels.lastIndex - 1
+                val softFlag = softKey to soft
+                if(styleKey==null) save(engineKey, kyant, softFlag)
+                else save(styleKey, if(soft || kyant) liquid else next, engineKey to kyant, softFlag)
                 refreshControls()
             }
         }
@@ -2499,14 +2384,21 @@ class MainActivity : AppCompatActivity() {
             add(advanced,slider(getString(label),GlassEngineSettings.key(engineKey,parameter),
                 0,parameter.max,"%"))
         }
-        val details=SettingsAccordion(advanced,selected()==labels.lastIndex)
+        val details=SettingsAccordion(advanced,selected()==labels.lastIndex - 1)
         add(parent,details,bottom=4)
         gate(advanced,allowed)
         refreshers.add {
-            val newEngine=selected()==labels.lastIndex
+            val newEngine=selected()==labels.lastIndex - 1
             val animate=canAnimate()
             details.setOpen(newEngine,animate)
         }
+        val softControls = column()
+        add(softControls, slider(getString(R.string.soft_glass_width),
+            GlassEngineSettings.softWidthKey(engineKey), 0, GlassEngineSettings.SOFT_WIDTH_MAX, "%"))
+        val softDetails = SettingsAccordion(softControls, selected() == labels.lastIndex)
+        add(parent, softDetails, bottom=4)
+        gate(softControls, allowed)
+        refreshers.add { softDetails.setOpen(selected() == labels.lastIndex, canAnimate()) }
     }
 
     private fun addGlassBlur(parent:LinearLayout,radius:String,opacity:String,max:Int,allowed:()->Boolean,
@@ -3551,7 +3443,7 @@ class MainActivity : AppCompatActivity() {
         val globalOpacity=GlobalGlassSettings.opacity(bundle)
         val material=when(screen){
             Screen.GLASS->GlassPreview.Material(enabled && flag(GlobalGlassSettings.ENABLED),
-                read(GlobalGlassSettings.STYLE)==1,read(GlobalGlassSettings.BLUR),read(GlobalGlassSettings.OPACITY),
+                read(GlobalGlassSettings.STYLE)>0,read(GlobalGlassSettings.BLUR),read(GlobalGlassSettings.OPACITY),
                 read(GlobalGlassSettings.WIDTH),read(GlobalGlassSettings.DISTORTION),read(GlobalGlassSettings.DISPERSION),30)
             Screen.LOCKSCREEN->{
                 val profile=LockscreenSettings.read(bundle,lockPreviewSurface)
@@ -3677,10 +3569,15 @@ class MainActivity : AppCompatActivity() {
                     com.cosmod.launcherglass.util.WidgetElementTint.matrix(com.cosmod.launcherglass.xposed.SurfaceTints.color(
                         read("widget_logo_hue"),read("widget_logo_saturation"),read("widget_logo_brightness"),0),read("widget_logo_transparency")))else null)
         }
-        val globalOptics=if(screen==Screen.GLASS)GlassEngineSettings.Optics(
-            blur=GlassEngineSettings.Blur(opacity=read(GlobalGlassSettings.BLUR_OPACITY)),
-            lensHeight=read(GlobalGlassSettings.LENS_HEIGHT)) else null
-        preview.configure(bundle,when(screen){Screen.ICONS->0;Screen.FOLDERS->1;Screen.PHOTO->2;Screen.DOCK->3;Screen.BANNERS->4;Screen.LIVE->5;Screen.VOLUME->13;Screen.LOCKSCREEN->lockPreviewSurface.edgeSurface;else->-1},globalOptics)
+        val previewOptics = when(screen) {
+            Screen.GLASS -> GlassEngineSettings.Optics(
+                blur=GlassEngineSettings.Blur(opacity=read(GlobalGlassSettings.BLUR_OPACITY)),
+                lensHeight=read(GlobalGlassSettings.LENS_HEIGHT),
+                softWidth=read(GlobalGlassSettings.SOFT_WIDTH).takeIf {read(GlobalGlassSettings.STYLE)==2})
+            Screen.LOCKSCREEN -> GlassEngineSettings.optics(bundle,lockPreviewSurface.key("new_engine"))
+            else -> null
+        }
+        preview.configure(bundle,when(screen){Screen.ICONS->0;Screen.FOLDERS->1;Screen.PHOTO->2;Screen.DOCK->3;Screen.BANNERS->4;Screen.LIVE->5;Screen.VOLUME->13;Screen.LOCKSCREEN->lockPreviewSurface.edgeSurface;else->-1},previewOptics)
         preview.show(result)
         return if(screen==Screen.BANNERS)result.plateColor==0xff121214.toInt() else null
     }
@@ -4170,6 +4067,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun restartSystemUi(view:View)=
         confirmRestart(R.string.ui_restart_systemui,R.string.ui_restart_systemui_confirm){sendSystemUiRestart(view)}
+
+    private fun confirmSidebarRestart(view: View) =
+        confirmRestart(R.string.soft_glass_sidebar_restart, R.string.soft_glass_sidebar_restart_confirm) {
+            if (restartBusy) return@confirmRestart
+            restartBusy = true
+            view.isEnabled = false
+            executor.execute {
+                val success = SuUtil.restartSidebar(this)
+                runOnUiThread {
+                    restartBusy = false
+                    view.isEnabled = true
+                    Toast.makeText(this, if (success) R.string.soft_glass_sidebar_restarted
+                        else R.string.soft_glass_sidebar_restart_failed, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
 
     private fun confirmSoftRestart(view:View)=
         confirmRestart(R.string.ui_soft_restart,R.string.ui_soft_restart_confirm){

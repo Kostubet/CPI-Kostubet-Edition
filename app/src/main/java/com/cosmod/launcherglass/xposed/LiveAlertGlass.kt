@@ -208,7 +208,7 @@ internal object LiveAlertGlass {
         val wantBanners=master && prefs.getBoolean("banner_glass_enabled",false)
         val wantSoftLock=master && SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.LOCK)
         val wantLock=master && (LockscreenSettings.requested(prefs) || wantSoftLock)
-        val wantVolume=master && prefs.getBoolean("volume_glass_enabled")
+        val wantVolume=master && prefs.getBoolean("volume_glass_enabled") && !SoftGlassNative.replacesVolume()
         if((wantIsland || wantBanners || wantLock || wantVolume) && !guardEvaluated){
             guardEvaluated=true
             guard?.let {store->

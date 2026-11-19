@@ -44,3 +44,5 @@ ColorOsTopBarButton, removing CPI's shared NavigationMaterial and custom connect
 outline. CPI retains its persistent navigation host, hit targets, reveal sizing and
 unclipped spring motion. The bottom-bar material is initialized synchronously when
 attached and sized, avoiding a deferred change from fallback to native appearance.
+
+Build 423 also adapts the ONextBox control-center and volume material owner bindings and reuses its optical height curve for CPI's other glass surfaces.

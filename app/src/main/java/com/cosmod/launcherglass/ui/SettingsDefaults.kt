@@ -54,6 +54,7 @@ object SettingsDefaults {
         if (prefs.getInt("defaults_revision", 0) >= 38) {
             initializeColors(prefs); initializeTone(prefs)
             applyFactoryDefaults(prefs, fresh = false)
+            migrateShadeMaterial(prefs)
             return
         }
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
@@ -76,6 +77,20 @@ object SettingsDefaults {
         initializeColors(prefs)
         initializeTone(prefs)
         applyFactoryDefaults(prefs, fresh = !upgrade)
+        migrateShadeMaterial(prefs)
+    }
+
+    private fun migrateShadeMaterial(prefs: android.content.SharedPreferences) {
+        if (prefs.getBoolean("soft_glass_shade_revision", false)) return
+        prefs.edit().apply {
+            for ((panel, surface) in listOf(ShadeGlassSettings.Panel.CONTROL to SoftGlassSettings.Surface.CONTROL,
+                ShadeGlassSettings.Panel.NOTIFICATIONS to SoftGlassSettings.Surface.SHADE)) {
+                if (!prefs.contains(surface.enabled) && prefs.getBoolean(panel.enabled, false)) {
+                    putBoolean(surface.enabled, true)
+                }
+            }
+            putBoolean("soft_glass_shade_revision", true)
+        }.apply()
     }
 
     private fun applyFactoryDefaults(prefs: android.content.SharedPreferences, fresh: Boolean) {
