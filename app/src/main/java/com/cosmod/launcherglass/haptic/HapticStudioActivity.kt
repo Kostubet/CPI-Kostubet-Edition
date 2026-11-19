@@ -48,6 +48,7 @@ import com.cosmod.launcherglass.ui.CouiSwitchRow
 import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.ui.UiLanguage
 import com.cosmod.launcherglass.ui.CouiAction
+import com.cosmod.launcherglass.ui.couiMaterialEnabled
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
 import io.github.suqi8.coui.kmp.basic.HorizontalDivider
 import io.github.suqi8.coui.kmp.basic.SmallTitle
@@ -1086,7 +1087,7 @@ class HapticStudioActivity : AppCompatActivity() {
         anchor.getLocationInWindow(anchorPos)
         root.getLocationInWindow(rootPos)
         lateinit var menu: CouiPopup
-        menu = CouiPopup(this, dark, accent, choices.mapIndexed { i, label -> i to label }, selected, {
+        menu = CouiPopup(this, dark, accent, surface, choices.mapIndexed { i, label -> i to label }, selected, {
             root.removeView(menu)
             if (popup === menu) popup = null
         }, select)
@@ -1106,7 +1107,10 @@ class HapticStudioActivity : AppCompatActivity() {
         val box = column()
         content(box)
         if (divided) for (index in (box.childCount - 1) downTo 1) divider(box, index)
-        parent.addView(CouiCardHost(this, surface, 20, box),
+        val edge = if (couiMaterialEnabled(this)) androidx.core.graphics.ColorUtils.setAlphaComponent(
+            ContextCompat.getColor(this, R.color.cpi_ui_text), if (dark) 33 else 23
+        ) else android.graphics.Color.TRANSPARENT
+        parent.addView(CouiCardHost(this, surface, 20, edge, box),
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
     }
     private fun choose(title: String, options: List<String>, action: (Int) -> Unit) {

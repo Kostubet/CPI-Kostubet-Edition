@@ -25,14 +25,13 @@ internal class CouiSearchHost(
     private val onQueryChanged: (String) -> Unit,
     onSearch: () -> Unit,
     private val onFocusChanged: () -> Unit,
-) : CouiControl(context, dark, accent) {
+) : CouiControl(context, dark, accent, surface) {
     private var queryText by mutableStateOf(initialQuery)
     private var inputFocused by mutableStateOf(false)
     private var clearInputFocus: (() -> Unit)? = null
-    private var hardwareBackdrop by mutableStateOf(false)
     private var requestedWidth = LayoutParams.MATCH_PARENT
     val capsuleWidth get() = composition.width
-    private val backdrop = CouiChromeBackdrop(context, dark) { hardwareBackdrop = it }
+    private val backdrop = CouiChromeBackdrop(context, dark) {}
 
     init {
         addView(backdrop, 0, LayoutParams(0, 0))
@@ -49,12 +48,11 @@ internal class CouiSearchHost(
                 expanded = inputFocused,
                 onExpandedChange = { if (!it) closeKeyboard() },
                 label = label,
-                material = false,
                 colors = SearchBarDefaults.searchBarColors(
-                    backgroundColor = Color(surface).copy(alpha = if (hardwareBackdrop) .55f else 1f),
+                    backgroundColor = Color(surface),
                     labelColor = Color(foreground).copy(alpha = .74f),
                     iconColor = Color(foreground).copy(alpha = .8f),
-                    clearIconColor = Color(foreground),
+                    clearIconColor = Color(foreground).copy(alpha = .5f),
                 ),
                 modifier = Modifier.fillMaxSize().onFocusChanged {
                     if (inputFocused != it.hasFocus) {

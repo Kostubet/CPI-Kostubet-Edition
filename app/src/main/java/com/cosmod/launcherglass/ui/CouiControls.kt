@@ -92,12 +92,13 @@ import com.cosmod.launcherglass.R
 import kotlin.math.roundToInt
 
 /** Connects the COUI controls to CPI's View-based feature pages. */
-internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int) : FrameLayout(context) {
+internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int, barSurface: Int? = null) : FrameLayout(context) {
     private val surface = Color(ContextCompat.getColor(context, R.color.cpi_ui_panel))
+    private val bar = barSurface?.let { Color(it) } ?: surface
     private val colors = if (dark) {
-        darkColorScheme(primary = Color(accent), backgroundTop = surface, surface = surface, bar = surface)
+        darkColorScheme(primary = Color(accent), backgroundTop = surface, surface = surface, bar = bar)
     } else {
-        lightColorScheme(primary = Color(accent), backgroundTop = surface, surface = surface, bar = surface)
+        lightColorScheme(primary = Color(accent), backgroundTop = surface, surface = surface, bar = bar)
     }
     protected var controlEnabled by mutableStateOf(true)
         private set
@@ -407,35 +408,59 @@ internal class CouiPreviewActions(context: Context, dark: Boolean, accent: Int,
 }
 
 internal class CouiCardHost(
-    context: Context, color: Int, radius: Int, body: View,
+    context: Context, color: Int, radius: Int, edge: Int, body: View,
 ) : FrameLayout(context) {
     init {
         clipChildren = false
         clipToPadding = false
-        background = CouiCardFill(context, color, radius)
+        background = CouiCardFill(context, color, radius, edge)
         addView(body, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }
 }
 
 /** Paint the COUI Card outline for View rows without creating a composition for the fill. */
-private class CouiCardFill(context: Context, color: Int, radius: Int) : Drawable() {
+private class CouiCardFill(context: Context, private val fillColor: Int, radius: Int, private val edge: Int) : Drawable() {
     private val density = Density(context.resources.displayMetrics.density)
     private val shape = SquircleShape(radius.dp, COUIRoundCorner.Normal.Weight)
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fillColor }
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = edge
+        style = Paint.Style.STROKE
+        strokeWidth = with(density) { 1.dp.toPx() }
+    }
     private val path = android.graphics.Path()
+    private val strokePath = android.graphics.Path()
 
     override fun onBoundsChange(bounds: Rect) {
         path.rewind()
+        strokePath.rewind()
         if (!bounds.isEmpty) {
             val size = Size(bounds.width().toFloat(), bounds.height().toFloat())
             val outline = shape.createOutline(size, LayoutDirection.Ltr, density) as Outline.Generic
             path.addPath(outline.path.asAndroidPath(), bounds.left.toFloat(), bounds.top.toFloat())
+            val inset = stroke.strokeWidth / 2
+            if (edge != 0 && size.width > inset * 2 && size.height > inset * 2) {
+                val inner = shape.createOutline(Size(size.width - inset * 2, size.height - inset * 2),
+                    LayoutDirection.Ltr, density) as Outline.Generic
+                strokePath.addPath(inner.path.asAndroidPath(), bounds.left + inset, bounds.top + inset)
+            }
         }
     }
 
-    override fun draw(canvas: Canvas) = canvas.drawPath(path, paint)
-    override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
-    override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter; invalidateSelf() }
+    override fun draw(canvas: Canvas) {
+        canvas.drawPath(path, paint)
+        if (edge != 0) canvas.drawPath(strokePath, stroke)
+    }
+    override fun setAlpha(alpha: Int) {
+        paint.alpha = (fillColor ushr 24) * alpha / 255
+        stroke.alpha = (edge ushr 24) * alpha / 255
+        invalidateSelf()
+    }
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        paint.colorFilter = colorFilter
+        stroke.colorFilter = colorFilter
+        invalidateSelf()
+    }
     @Suppress("OVERRIDE_DEPRECATION")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
 }
@@ -445,26 +470,24 @@ internal class CouiPreference(context: Context, dark: Boolean, accent: Int, titl
     longPressLabel:Int=R.string.ui_feature_peek_title,
     action: (View) -> Unit) : CouiControl(context, dark, accent) {
     private var liftingForDialog = false
+    private val previewScale = OnextSpring(1f) { scaleX = it; scaleY = it }
 
     fun resetPreviewLift() {
         liftingForDialog = false
-        animate().cancel()
-        scaleX = 1f
-        scaleY = 1f
+        previewScale.snap(1f)
     }
 
     init {
         setOnClickListener(action)
         content {
             val interactions = remember { MutableInteractionSource() }
-            if (onPreview != null) LaunchedEffect(interactions) {
+            if (onPreview != null && LocalCOUIMaterialEffectEnabled.current) LaunchedEffect(interactions) {
                 interactions.interactions.collect { interaction ->
                     if (!liftingForDialog && android.animation.ValueAnimator.areAnimatorsEnabled()) {
                         val pressed = interaction is PressInteraction.Press
                         if (pressed || interaction is PressInteraction.Release || interaction is PressInteraction.Cancel) {
-                            val scale = if (pressed) 1.033f else 1f
-                            animate().scaleX(scale).scaleY(scale).setDuration(if (pressed) 390L else 160L)
-                                .setInterpolator(android.view.animation.PathInterpolator(.28f, .03f, .50f, 1f)).start()
+                            if (pressed) previewScale.to(1.033f, 105f, .8f)
+                            else previewScale.to(1f, 250f, .55f)
                         }
                     }
                 }
@@ -476,11 +499,11 @@ internal class CouiPreference(context: Context, dark: Boolean, accent: Int, titl
                 indication=null,
                 onLongClick={
                     liftingForDialog=true
-                    animate().cancel()
+                    previewScale.snap(previewScale.value)
                     onPreview(this@CouiPreference)
                 },
                 onClick={
-                    if(!catalog){liftingForDialog=true;animate().cancel()}
+                    if(!catalog){liftingForDialog=true;previewScale.snap(previewScale.value)}
                     performClick()
                 },
             )
@@ -502,7 +525,8 @@ internal class CouiPreference(context: Context, dark: Boolean, accent: Int, titl
 }
 
 internal class CouiIconButton(context: Context, dark: Boolean, accent: Int, foreground: Int, surface: Int,
-    private val icon: Int, private val label: String, effects: Boolean, chrome: Boolean = false) : CouiControl(context, dark, accent) {
+    private val icon: Int, private val label: String, effects: Boolean, chrome: Boolean = false) :
+    CouiControl(context, dark, accent, surface) {
     init {
         composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
@@ -510,7 +534,7 @@ internal class CouiIconButton(context: Context, dark: Boolean, accent: Int, fore
                 onClick={performClick()}, modifier=Modifier.fillMaxSize(), enabled=controlEnabled,
                 material=effects, backgroundColor=when {
                     !effects -> Color(surface)
-                    chrome -> Color(surface).copy(alpha = .55f)
+                    chrome -> Color(surface).copy(alpha = .27f)
                     else -> Color.Unspecified
                 },
                 cornerRadius=50.dp, minHeight=0.dp, minWidth=0.dp) {

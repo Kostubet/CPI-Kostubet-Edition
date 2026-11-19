@@ -167,7 +167,7 @@ class MainActivity : AppCompatActivity() {
         DEVICE(R.string.ui_device_details, R.drawable.ic_cpi_module, 0, 0),
         CONTRIBUTORS(R.string.ui_about_contributors, R.drawable.ic_cpi_people, 0, 0),
     }
-    private var rootNavigation:FrameLayout?=null
+    private var rootNavigation:CouiRootNavigation?=null
     private var shadePanel=ShadeGlassSettings.Panel.CONTROL
     private var shadeComponent=0
     private var shadePreview:ShadeGlassPreview?=null
@@ -432,11 +432,12 @@ class MainActivity : AppCompatActivity() {
     private fun card(content:View,inner:Boolean=false):FrameLayout {
         val color=if(coloredFeatures)withAlpha(Color.WHITE,if(darkUi)27 else 154)else if(inner)raised else panel
         val radius=if(inner)16 else 20
-        return CouiCardHost(this,color,radius,content)
+        val edge=if(bool("coloros_ui_effects"))withAlpha(onSurface,if(darkUi)33 else 23)else Color.TRANSPARENT
+        return CouiCardHost(this,color,radius,edge,content)
     }
 
     private fun chromeSurface() = when {
-        coloredFeatures -> androidx.core.graphics.ColorUtils.blendARGB(panel, primary, if(darkUi) .15f else .07f)
+        coloredFeatures -> androidx.core.graphics.ColorUtils.blendARGB(panel, primary, if(darkUi) .24f else .10f)
         else -> panel
     }
 
@@ -460,7 +461,7 @@ class MainActivity : AppCompatActivity() {
         val anchorPos=IntArray(2);val pagePos=IntArray(2)
         anchor.getLocationInWindow(anchorPos);page.getLocationInWindow(pagePos)
         lateinit var popup:CouiPopup
-        popup=CouiPopup(this,darkUi,primary,options,selected,{
+        popup=CouiPopup(this,darkUi,primary,chromeSurface(),options,selected,{
             page.removeView(popup)
             if(menuOverlay===popup)menuOverlay=null
         },onPick)
@@ -1086,19 +1087,17 @@ class MainActivity : AppCompatActivity() {
             rootNavigation=null
         }
         rootNavigationIndex.intValue=rootTabs.indexOf(screen)
-        val host=rootNavigation ?: FrameLayout(this).apply {
-            clipChildren=false;clipToPadding=false
-            elevation=dp(5).toFloat()
-        }.also {frame->
-            rootNavigation=frame;rootNavigationAppearance=appearance
-            val content=CouiRootNavigation(this,darkUi,primary,
+        val host=rootNavigation ?: CouiRootNavigation(this,darkUi,primary,
                 rootTabs.map {it.icon},listOf(R.drawable.ic_cpi_home_outline,R.drawable.ic_cpi_features_outline,
                     R.drawable.ic_cpi_module_outline),
                 rootTabs.map {getString(if(it==Screen.TOOLS)R.string.ui_cpi_module else it.title)},
-                rootNavigationIndex,panel){index->haptic(page);openTab(rootTabs[index])}
-            frame.addView(content,FrameLayout.LayoutParams(-1,-1))
-            page.addView(frame,FrameLayout.LayoutParams(-1,dp(176),Gravity.BOTTOM))
+                rootNavigationIndex,chromeSurface()){index->haptic(page);openTab(rootTabs[index])}
+            .also {navigation->
+                rootNavigation=navigation;rootNavigationAppearance=appearance
+                navigation.elevation=dp(5).toFloat()
+                page.addView(navigation,FrameLayout.LayoutParams(-1,dp(176),Gravity.BOTTOM))
         }
+        host.surfaceColor=chromeSurface()
         host.visibility=View.VISIBLE
         avoidNavigationBar(host,0)
         page.bringChildToFront(host)
@@ -1265,9 +1264,11 @@ class MainActivity : AppCompatActivity() {
         fun layoutSearch(progress:Float){
             searchPanel.resizeCapsule(desiredSearchWidth(progress))
             placeSearch()
+            val titleTravel=maxOf(dp(64),heading.bottom)*progress
+            fadeRootTitle(heading,maxOf(scroll.scrollY,titleTravel.roundToInt()))
         }
         val searchMotion=androidx.dynamicanimation.animation.SpringAnimation(androidx.dynamicanimation.animation.FloatValueHolder(0f)).apply {
-            spring=androidx.dynamicanimation.animation.SpringForce(0f).setStiffness(130f).setDampingRatio(.63f)
+            spring=androidx.dynamicanimation.animation.SpringForce(0f).setStiffness(165f).setDampingRatio(.52f)
             minimumVisibleChange=.001f
             addUpdateListener {_,value,_->
                 searchProgress=value
@@ -1280,7 +1281,6 @@ class MainActivity : AppCompatActivity() {
         })
         fun positionSearch(y:Int){
             val searching=searchPanel.isInputFocused() || searchQuery.isNotEmpty()
-            fadeRootTitle(heading,if(searching)0 else y)
             val expanded=maxOf(dp(64),heading.bottom).toFloat()
             val target=if(searching)1f else (y/expanded).coerceIn(0f,1f)
             if (!searchPositionReady || !canAnimate()) {
@@ -1294,7 +1294,8 @@ class MainActivity : AppCompatActivity() {
             if(kotlin.math.abs(searchTarget-target)>.0001f){
                 searchTarget=target
                 searchMotion.animateToFinalPosition(target)
-            }else layoutSearch(searchProgress)
+            }
+            layoutSearch(searchProgress)
         }
         val updateSearchMode={
             val searching=searchPanel.isInputFocused() || searchQuery.isNotEmpty()

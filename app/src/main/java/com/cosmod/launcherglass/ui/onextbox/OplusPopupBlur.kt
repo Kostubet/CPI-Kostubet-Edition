@@ -11,9 +11,15 @@ import io.github.suqi8.coui.kmp.effect.MaterialBlurBlendMode
 import io.github.suqi8.coui.kmp.effect.MaterialBlurSpec
 import io.github.suqi8.coui.kmp.theme.COUIRoundCorner
 
-internal fun applyOplusPopupBlur(view: View, spec: MaterialBlurSpec, radius: Float): Boolean = runCatching {
-    if (Settings.System.getInt(view.context.contentResolver, "system_material_blur_enable", 0) != 1) return false
-    if (view.context.getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled != true) return false
+internal fun applyOplusPopupBlur(view: View, spec: MaterialBlurSpec, radius: Float): Boolean {
+    val backdrop = createOplusPopupBackdrop(view, spec, radius) ?: return false
+    view.background = backdrop
+    return true
+}
+
+internal fun createOplusPopupBackdrop(view: View, spec: MaterialBlurSpec, radius: Float): Drawable? = runCatching {
+    if (Settings.System.getInt(view.context.contentResolver, "system_material_blur_enable", 0) != 1) return null
+    if (view.context.getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled != true) return null
 
     val managerClass = Class.forName("com.oplus.view.ViewRootManager")
     val blurParamClass = Class.forName("com.oplus.graphics.OplusBlurParam")
@@ -41,9 +47,7 @@ internal fun applyOplusPopupBlur(view: View, spec: MaterialBlurSpec, radius: Flo
     managerClass.getMethod("setCornerRadius", float, float, float, float)
         .invoke(manager, radius, radius, radius, radius)
     managerClass.getMethod("setColor", int).invoke(manager, android.graphics.Color.TRANSPARENT)
-    val backdrop = managerClass.getMethod("getBackgroundBlurDrawable").invoke(manager) as? Drawable ?: return false
-    view.background = backdrop
-    true
-}.getOrDefault(false)
+    managerClass.getMethod("getBackgroundBlurDrawable").invoke(manager) as? Drawable
+}.getOrNull()
 
 private fun Color.channels() = floatArrayOf(red, green, blue, alpha)

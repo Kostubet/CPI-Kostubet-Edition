@@ -20,6 +20,7 @@ import kotlin.math.roundToInt
 internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
     icons:List<Int>,outlineIcons:List<Int>,labels:List<String>,selected:MutableIntState,surface:Int,
     onSelected:(Int)->Unit):CouiControl(context,dark,accent){
+    var surfaceColor by mutableIntStateOf(surface)
     private var hardwareBackdrop by mutableStateOf(false)
     private val capsuleBounds = Rect()
     private val backdrop = CouiChromeBackdrop(context, dark) { hardwareBackdrop = it }
@@ -32,9 +33,7 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
             Box(Modifier.fillMaxSize(),contentAlignment=Alignment.BottomCenter){
                 FloatingNavigationBar(
                     defaultWindowInsetsPadding = false,
-                    materialEffect = false,
-                    showDivider = true,
-                    color = Color(surface).copy(alpha = if (hardwareBackdrop) .63f else 1f),
+                    color = Color(surfaceColor).copy(alpha = if (hardwareBackdrop) .20f else 1f),
                     backgroundModifier = Modifier.onGloballyPositioned { coordinates ->
                         val bounds = coordinates.boundsInRoot()
                         capsuleBounds.set(bounds.left.roundToInt(), bounds.top.roundToInt(),

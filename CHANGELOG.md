@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 416
+
+- Поиск и нижняя панель снова используют кромку, подсветку и упругое движение COUI. Заголовок «Функции» возвращается синхронно с поиском.
+- Меню выбора использует системное размытие ColorOS при поддержке композитором, с цветом текущего экрана в запасном режиме. У карточек настроек тонкая обводка по форме COUI.
+- Строки с предпросмотром пружинят при отпускании пальца.
+
 ### Сборка 415
 
 - Иконки обновляют стекло после загрузки кадра обоев. Растянутые иконки сохраняют привязку стекла при перерисовке.
@@ -88,6 +94,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 416
+
+- Search and bottom navigation use COUI edge lighting, touch highlights, and elastic motion again. The Features title returns in sync with search.
+- Choice menus use ColorOS compositor blur when supported, with a page-matched fallback. Settings cards have a subtle outline that follows the COUI shape.
+- Preview rows spring back on release.
 
 ### Build 415
 
