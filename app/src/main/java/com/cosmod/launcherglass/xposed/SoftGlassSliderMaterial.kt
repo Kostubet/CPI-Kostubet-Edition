@@ -9,11 +9,13 @@ import android.graphics.RectF
 import android.graphics.RuntimeShader
 import android.graphics.drawable.Drawable
 import android.view.View
+import androidx.annotation.RequiresApi
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Parameter
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Profile
 import com.cosmod.launcherglass.util.GlassLogger
 
 /** Shares one live backdrop for tracks that the OEM draws through its older blur wrapper. */
+@RequiresApi(33)
 internal class SoftGlassSliderMaterial(context: Context) {
     private val screen = RectF()
     private val local = RectF()

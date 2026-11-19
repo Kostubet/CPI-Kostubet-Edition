@@ -69,7 +69,7 @@ internal object LiveAlertGlass {
                 if(p.hasThrowable())return
                 try {
                     val profile=if(allowed) SoftGlassNative.lockedActivityProfile() else null
-                    if(profile!=null) SoftGlassActivityMaterial.draw(canvas,view,profile)
+                    if(Build.VERSION.SDK_INT>=33 && profile!=null) SoftGlassActivityMaterial.draw(canvas,view,profile)
                     else if(islandActive()) NativeAlertMaterial.draw(canvas,view,prefs)
                 }
                 catch(t:Throwable){GlassLogger.limited("LiveAlertGlass","nativeOverlay"){"Native alert retained: "+t}}

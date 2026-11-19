@@ -105,7 +105,7 @@ internal class ShadeGlassPreview(context: Context, private val panel: Panel, pri
         paint.color = if (active || !dark) 0xffe9ebf0.toInt() else 0xff282b36.toInt()
         c.drawRoundRect(bounds, radius, radius, paint)
         val glass = profile ?: return
-        if (!hasRenderer || !c.isHardwareAccelerated || active && glass.white) return
+        if (Build.VERSION.SDK_INT < 33 || !hasRenderer || !c.isHardwareAccelerated || active && glass.white) return
         val strength = glass[SoftGlassSettings.Parameter.STRENGTH]
         if (strength <= 0f) return
         val role = when (kind) {

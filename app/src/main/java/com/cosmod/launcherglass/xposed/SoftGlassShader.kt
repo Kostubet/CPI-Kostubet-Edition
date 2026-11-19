@@ -3,6 +3,7 @@
 package com.cosmod.launcherglass.xposed
 
 import android.graphics.RuntimeShader
+import androidx.annotation.RequiresApi
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Parameter as P
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Profile
 import kotlin.math.cos
@@ -58,6 +59,7 @@ internal object SoftGlassShader {
         }
     }
 
+    @RequiresApi(33)
     fun applyProfile(shader: RuntimeShader, profile: Profile, role: Float, dark: Boolean, density: Float,
         screenWidth: Float, screenHeight: Float, x: Float = 0f, y: Float = 0f, fullMix: Boolean = false) {
         shader.setFloatUniform("onbPanelSurface", role, if (dark) .30f else .63f)

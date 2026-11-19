@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
 import android.view.View
+import androidx.annotation.RequiresApi
 import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.ui.SoftGlassSettings
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Parameter as P
@@ -36,7 +37,7 @@ internal object SoftGlassNative {
     private val liveActivityLoaders = WeakHashMap<ClassLoader, Boolean>()
 
     fun liveActivityLoader(loader: ClassLoader?) {
-        if (loader == null || liveActivityLoaders.put(loader, true) != null) return
+        if (Build.VERSION.SDK_INT < 33 || loader == null || liveActivityLoaders.put(loader, true) != null) return
         systemUi?.let { session ->
             runCatching { session.installMaterial(loader) }.onFailure { error ->
                 GlassLogger.limited("SoftGlass", "activities") { "Native activity adapter unavailable: ${error.javaClass.simpleName}" }
@@ -65,15 +66,16 @@ internal object SoftGlassNative {
         prefs.getBoolean(com.cosmod.launcherglass.ui.FeatureSections.key("VOLUME"), true) &&
             !prefs.getBoolean("volume_glass_enabled")
 
-    fun replacesVolume(): Boolean = systemUi?.let {
+    fun replacesVolume(): Boolean = Build.VERSION.SDK_INT >= 33 && systemUi?.let {
         Surface.CONTROL in it.profiles && it.panelTargets.supportsVolume && it.followControlForVolume
     } == true
 
-    fun replaces(surface: Surface): Boolean = systemUi?.profiles?.containsKey(surface) == true
-    fun lockedActivityProfile(): Profile? = systemUi?.let { session ->
+    fun replaces(surface: Surface): Boolean = Build.VERSION.SDK_INT >= 33 && systemUi?.profiles?.containsKey(surface) == true
+    fun lockedActivityProfile(): Profile? = if (Build.VERSION.SDK_INT >= 33) systemUi?.let { session ->
         if (session.locked()) session.profiles[Surface.LOCK] else null
-    }
+    } else null
 
+    @RequiresApi(33)
     fun activityUniforms(shader: RuntimeShader, view: View): Boolean =
         systemUi?.activityUniforms(shader, view) == true
 
@@ -90,6 +92,7 @@ internal object SoftGlassNative {
                 val uri = SettingsProvider.CONTENT_URI
                 val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
                     override fun onChange(selfChange: Boolean) {
+                        if (Build.VERSION.SDK_INT < 33) return
                         val preferences = runCatching { app.contentResolver.call(uri, SettingsProvider.METHOD_GET_ALL, null, null) }
                             .getOrNull() ?: return
                         val profiles = readProfiles(preferences, true)
@@ -113,10 +116,12 @@ internal object SoftGlassNative {
         .filter { (it == Surface.SIDEBAR) == sidebar }
         .mapNotNull { surface -> SoftGlassSettings.read(prefs, surface)?.let { surface to it } }.toMap()
 
+    @RequiresApi(33)
     private fun create(context: Context, loader: ClassLoader, sidebar: Boolean): Session? = runCatching {
         Session(context, sidebar).also { it.install(loader) }
     }.onFailure { GlassLogger.e("SoftGlass", "Native material unavailable in ${context.packageName}", it) }.getOrNull()
 
+    @RequiresApi(33)
     private class Session(private val context: Context, private val sidebar: Boolean) {
         @Volatile var profiles: Map<Surface, Profile> = emptyMap()
             private set

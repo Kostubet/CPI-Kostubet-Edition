@@ -355,7 +355,7 @@ internal object LockscreenGlass {
         val softNotifications=enabled && SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.LOCK)
         val activityChange=softActivities!=softNotifications
         softActivities=softNotifications
-        if(activityChange && !softActivities)SoftGlassActivityMaterial.clear()
+        if(android.os.Build.VERSION.SDK_INT>=33 && activityChange && !softActivities)SoftGlassActivityMaterial.clear()
         val next=if(enabled)Surface.entries.filterNot {it==Surface.NOTIFICATIONS && softNotifications}
             .associateWith {LockscreenSettings.read(prefs,it)}.filterValues {it.enabled} else emptyMap()
         val clear=enabled && prefs.getBoolean(LockscreenSettings.CLEAR_BOUNCER_BLUR,false)
@@ -447,7 +447,7 @@ internal object LockscreenGlass {
             rowMotion.clear()
             movingTargets.clear()
             clearWidgetBackgrounds()
-            SoftGlassActivityMaterial.clear()
+            if(android.os.Build.VERSION.SDK_INT>=33)SoftGlassActivityMaterial.clear()
         }
         repaint()
     }
