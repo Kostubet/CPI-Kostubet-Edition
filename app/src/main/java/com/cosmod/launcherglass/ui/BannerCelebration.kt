@@ -43,6 +43,8 @@ internal class BannerCelebration(context:Context):View(context) {
         burst(.79f,.76f,.32f,0xfffc8ac5.toInt(),0xfff0d0ff.toInt(),Tap(255,112),40,95f)
     )
     private var player:MediaPlayer?=null
+    private val winter = com.cosmod.launcherglass.haptic.WinterMelodyPlayback(context)
+    private var winterPlaying = false
     private var vibrator:Vibrator?=null
     private var startedAt=0L
     private var nextBurst=0
@@ -61,7 +63,7 @@ internal class BannerCelebration(context:Context):View(context) {
             seconds=(SystemClock.uptimeMillis()-startedAt)/1000f
             while(nextBurst<bursts.size && seconds>=bursts[nextBurst].time){
                 val burst=bursts[nextBurst++]
-                if(seconds-burst.time<.09f)vibrate(burst.tap)
+                if(!winterPlaying && seconds-burst.time<.09f)vibrate(burst.tap)
             }
             if(seconds<2.25f){
                 invalidate()
@@ -118,19 +120,15 @@ internal class BannerCelebration(context:Context):View(context) {
     }
 
     private fun play(anchor:View){
-        if(visibility==VISIBLE || player!=null)return
-        player=runCatching {MediaPlayer.create(context,R.raw.cpi_fireworks)}.getOrNull()
-        player?.apply {
-            setOnCompletionListener {releaseAudio()}
-            setOnErrorListener {_,_,_->releaseAudio();true}
-            if(runCatching {start()}.isFailure)releaseAudio()
-        }
+        if(visibility==VISIBLE || player!=null || winter.playing)return
+        winterPlaying=WinterEffects.melodyEnabled(context)
+        if(winterPlaying)winter.play() else playOriginalAudio()
         if(!ValueAnimator.areAnimatorsEnabled())return
         anchor.getLocationInWindow(sourceLocation)
         getLocationInWindow(overlayLocation)
         sourceX=sourceLocation[0]-overlayLocation[0]+anchor.width*.5f
         sourceY=sourceLocation[1]-overlayLocation[1]+anchor.height*.6f
-        vibrator=if(Settings.System.getInt(context.contentResolver,Settings.System.HAPTIC_FEEDBACK_ENABLED,1)==1)
+        vibrator=if(!winterPlaying && Settings.System.getInt(context.contentResolver,Settings.System.HAPTIC_FEEDBACK_ENABLED,1)==1)
             context.getSystemService(VibratorManager::class.java)?.defaultVibrator?.takeIf {it.hasVibrator()}
             else null
         seconds=0f
@@ -138,6 +136,15 @@ internal class BannerCelebration(context:Context):View(context) {
         startedAt=SystemClock.uptimeMillis()
         visibility=VISIBLE
         postOnAnimation(update)
+    }
+
+    private fun playOriginalAudio(){
+        player=runCatching {MediaPlayer.create(context,R.raw.cpi_fireworks)}.getOrNull()
+        player?.apply {
+            setOnCompletionListener {releaseAudio()}
+            setOnErrorListener {_,_,_->releaseAudio();true}
+            if(runCatching {start()}.isFailure)releaseAudio()
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -216,6 +223,8 @@ internal class BannerCelebration(context:Context):View(context) {
         player=null
     }
     fun stop(){
+        winter.stop()
+        winterPlaying=false
         cancelHold()
         removeCallbacks(update)
         releaseAudio()

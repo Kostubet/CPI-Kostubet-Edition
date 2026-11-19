@@ -166,6 +166,8 @@ object SettingsDefaults {
         editor.remove("color_theme").putInt("color_profiles_revision", 1).apply()
     }
     private val booleans = OpticalSettings.booleans + com.cosmod.launcherglass.camera.CameraZoomSettings.booleans + mapOf(
+        WinterEffects.SNOW to true,
+        WinterEffects.MELODY to true,
         SettingsProvider.KEY_BOOT_RESTART to true,
         SettingsProvider.KEY_BOOT_RESTART_TOAST to true,
         SettingsProvider.KEY_DEVELOPER_MODE to false,

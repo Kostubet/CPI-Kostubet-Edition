@@ -447,6 +447,7 @@ internal class CouiCardHost(
     context: Context, color: Int, radius: Int, edge: Int, body: View,
 ) : FrameLayout(context) {
     init {
+        WinterEffects.mark(this, radius.toFloat())
         clipChildren = false
         clipToPadding = false
         background = CouiCardFill(context, color, radius, edge)
@@ -564,6 +565,7 @@ internal class CouiIconButton(context: Context, dark: Boolean, accent: Int, fore
     private val icon: Int, private val label: String, effects: Boolean, chrome: Boolean = false) :
     CouiControl(context, dark, accent, surface) {
     init {
+        WinterEffects.mark(this, 50f, 2)
         composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
             if (appearance == CouiAppearance.ORIGINAL) {

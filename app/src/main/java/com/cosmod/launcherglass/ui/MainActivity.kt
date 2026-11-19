@@ -1667,6 +1667,7 @@ class MainActivity : AppCompatActivity() {
             addView(identity,FrameLayout.LayoutParams(-1,-1))
         }
         hero=heroCard
+        WinterEffects.mark(heroCard,20f,1)
         decorateCelebration(heroCard)
         add(body,heroCard,bottom=12)
 
@@ -3903,6 +3904,10 @@ class MainActivity : AppCompatActivity() {
         })
         divider(tools)
         add(tools,switchRow(getString(R.string.ui_coloros_effects),"coloros_ui_effects",getString(R.string.ui_coloros_effects_hint)))
+        divider(tools)
+        add(tools,switchRow(getString(R.string.ui_winter_snow),WinterEffects.SNOW,getString(R.string.ui_winter_snow_hint)))
+        divider(tools)
+        add(tools,switchRow(getString(R.string.ui_winter_melody),WinterEffects.MELODY,getString(R.string.ui_winter_melody_hint)))
         val backgrounds=listOf(0 to R.string.ui_background_off,1 to R.string.ui_background_classic,2 to R.string.ui_background_flowing)
         val selected=number("coloros_feature_background")
         val appearance=optionRow(getString(R.string.ui_feature_background),getString(backgrounds.first {it.first==selected}.second))

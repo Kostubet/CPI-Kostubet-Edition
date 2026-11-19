@@ -28,6 +28,7 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
     private val backdrop = CouiChromeBackdrop(context, dark) { hardwareBackdrop = it }
 
     init {
+        WinterEffects.mark(this, 28f, 3)
         if (appearance == CouiAppearance.MODERN) addView(backdrop, 0, LayoutParams(0, 0))
         composition.layoutParams=LayoutParams(-1,-1)
         composition.clipChildren=false;composition.clipToPadding=false
@@ -89,5 +90,18 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
                 MeasureSpec.makeMeasureSpec(capsuleBounds.height(), MeasureSpec.EXACTLY))
         }
         backdrop.layout(capsuleBounds.left, capsuleBounds.top, capsuleBounds.right, capsuleBounds.bottom)
+    }
+
+    internal fun snowBounds(out: android.graphics.RectF) {
+        if (appearance == CouiAppearance.MODERN && !capsuleBounds.isEmpty) {
+            out.set(out.left + capsuleBounds.left, out.top + capsuleBounds.top,
+                out.left + capsuleBounds.right, out.top + capsuleBounds.bottom)
+        } else if (appearance == CouiAppearance.ORIGINAL) {
+            val d = resources.displayMetrics.density
+            val w = minOf((24f + 70f * 3 + 8f * 2 - 16f) * d, width - 48f * d)
+            val x = out.centerX()
+            val y = out.top + height * .5f
+            out.set(x - w * .5f, y - 28f * d, x + w * .5f, y + 28f * d)
+        }
     }
 }

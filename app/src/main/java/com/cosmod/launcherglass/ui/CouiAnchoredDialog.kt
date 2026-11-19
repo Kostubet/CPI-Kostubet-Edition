@@ -136,6 +136,19 @@ internal class CouiAnchoredDialog(
         }
     }
 
+    private var winterSnow: WinterSnowfall? = null
+    override fun onStart() {
+        super.onStart()
+        val decor = window?.decorView as? android.view.ViewGroup ?: return
+        winterSnow = WinterEffects.attach(decor).also { it.resume() }
+        WinterEffects.mark(card, 28f, 1)
+    }
+    override fun onStop() {
+        winterSnow?.dispose()
+        winterSnow = null
+        super.onStop()
+    }
+
     private fun resolveAnchor(){
         val source=anchor?.takeIf {it.isShown && it.width>0 && it.height>0}
         if(source==null){

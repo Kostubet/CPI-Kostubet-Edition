@@ -3,6 +3,7 @@ package com.cosmod.launcherglass.ui
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -10,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.cosmod.launcherglass.ui.onextbox.ColorOs17Button
 import com.cosmod.launcherglass.ui.onextbox.ColorOs17ConfirmDialog
 import io.github.suqi8.coui.kmp.basic.ButtonDefaults
@@ -31,8 +33,15 @@ internal fun CouiGroup(content: @Composable ColumnScope.() -> Unit) {
         Modifier.border(1.dp, color.labelPrimary.copy(alpha = if (color.isDark) .13f else .09f),
             SquircleShape(CardDefaults.CornerRadius))
     } else Modifier
-    Card(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp).then(edge),
-        insideMargin = PaddingValues(0.dp), content = content)
+    Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+        AndroidView(factory = { context ->
+            android.view.View(context).also {
+                it.importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                WinterEffects.mark(it)
+            }
+        }, modifier = Modifier.matchParentSize())
+        Card(Modifier.fillMaxWidth().then(edge), insideMargin = PaddingValues(0.dp), content = content)
+    }
 }
 
 @Composable

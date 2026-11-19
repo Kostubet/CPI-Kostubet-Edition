@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 424
+
+- Добавлен снег во всём интерфейсе приложения. Снежинки оседают на краях карточек, поиска, кнопок и панели вкладок, образуют небольшие сугробы, сползают и плавно тают.
+- Зажатие главного баннера на 0,5 секунды воспроизводит приложенную праздничную мелодию. Нежные аппаратные постукивания разной силы следуют атакам нот; последняя нота завершается плавным слайдом.
+- В настройках приложения появились отдельные выключатели снега и праздничной мелодии. Исходные звук, фейерверки и вибрация сохранены; выключение мелодии возвращает прежний звук и вибрацию.
+- Снег не перехватывает нажатия, останавливается в фоне и снижает частоту в режиме энергосбережения. Воспроизведение и вибрация отменяются при уходе со страницы баннера.
+
 ### Сборка 423
 
 - Ползунки яркости и громкости получают «Мягкий свет» и в развёрнутом режиме. Штатное заполнение ползунков сохраняется.
@@ -130,6 +137,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 424
+
+- Added snowfall across the app. Flakes settle on cards, search, buttons and the navigation bar, form small snow caps, slide down and fade away.
+- Holding the home banner for 0.5 seconds plays the supplied festive melody. Gentle hardware taps follow note attacks at varying strengths; the final note ends with a smooth slide.
+- Separate app settings control snowfall and the festive melody. The original audio, fireworks and vibration remain available; disabling the melody restores the original audio and haptics.
+- Snow does not intercept touch, pauses in the background and reduces its frame rate in battery saver. Leaving the banner page stops audio and vibration.
 
 ### Build 423
 

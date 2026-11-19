@@ -36,6 +36,7 @@ internal class CouiSearchHost(
     private val backdrop = CouiChromeBackdrop(context, dark) {}
 
     init {
+        WinterEffects.mark(this, 25f, 2)
         if (appearance == CouiAppearance.MODERN) addView(backdrop, 0, LayoutParams(0, 0))
         composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
@@ -109,6 +110,11 @@ internal class CouiSearchHost(
     }
 
     fun isInputFocused(): Boolean = inputFocused
+
+    internal fun snowBounds(out: android.graphics.RectF) {
+        out.left += composition.left
+        out.right = out.left + composition.width
+    }
 
     fun setQuery(value: String) {
         if (queryText == value) return

@@ -2,6 +2,8 @@
 
 **Frosted и Liquid Glass для ColorOS** · модуль LSPosed на Kotlin
 
+Зимнее оформление добавляет снег на страницы приложения и праздничную мелодию с мягкой вибрацией при зажатии баннера CPI. Оба эффекта отключаются отдельно в **О модуле → Настройки**. Прежние звук и вибрация сохранены и возвращаются при отключении праздничной мелодии.
+
 [![Kostubet Topics in Telegram](https://img.shields.io/badge/Telegram-Kostubet%20Topics-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/KostubetTopics)
 
 [Русский](#русский) · [English](#english) · [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases) · [Actions](https://github.com/Kostubet/CPI-Kostubet-Edition/actions)
@@ -79,6 +81,8 @@ git push origin v0.2.78-build328
 - [Лицензия GPL v3](COPYING), [благодарности и сторонний код](THIRD_PARTY_NOTICES.md), [поддержать разработку](https://pay.cloudtips.ru/p/e6230fb4).
 
 ## English
+
+Winter decoration adds snowfall throughout the app and a festive melody with gentle haptics when holding the CPI banner. Both effects have separate switches in **About → Settings**. Disabling the festive melody restores the original audio and vibration.
 
 An LSPosed module written in Kotlin that brings Frosted and Liquid Glass design to launcher icons. A beautiful icon backdrop engine with nice customisation. A fork of [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
 
