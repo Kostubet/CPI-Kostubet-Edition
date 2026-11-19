@@ -24,6 +24,7 @@ internal object SettingsTransfer {
     data class Document(val metadata:Metadata,val values:Map<String,Any>)
 
     private fun optionalFolder(key: String) = key != FolderSettingsKeys.OWN && key in optionalFolderKeys
+    internal fun isOptionalFolder(key: String) = optionalFolder(key)
 
     fun export(prefs: SharedPreferences, keys: Set<String> = defaults.keys): String {
         val values = JSONObject()
@@ -48,7 +49,7 @@ internal object SettingsTransfer {
     fun previewValues(document:Document):Map<String,Any> =
         previewDefaults + document.values
 
-    fun readDocument(input: InputStream): Document {
+    fun readDocument(input: InputStream, acceptOutdated: Boolean = false): Document {
         val bytes = java.io.ByteArrayOutputStream()
         val buffer = ByteArray(4096)
         while (true) {
@@ -57,22 +58,24 @@ internal object SettingsTransfer {
             require(bytes.size() + count <= MAX_BYTES) { "Preset exceeds 64 KB" }
             bytes.write(buffer, 0, count)
         }
-        return parseDocument(bytes.toString("UTF-8"))
+        return parseDocument(bytes.toString("UTF-8"), acceptOutdated)
     }
 
     fun parse(text: String): Map<String, Any> = parseDocument(text).values
 
-    fun parseDocument(text: String): Document {
+    fun parseDocument(text: String, acceptOutdated: Boolean = false): Document {
         require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Preset exceeds 64 KB" }
         val document = JSONObject(text.removePrefix("\uFEFF"))
         require(document.opt("format") == FORMAT) { "Not a CherryPick preset" }
         require(document.opt("version") == VERSION) { "Unsupported preset version" }
         val source = document.getJSONObject("settings")
-        val schema = defaults
+        val schema = if (acceptOutdated) SettingsDefaults.schema() else defaults
         val values = linkedMapOf<String, Any>()
         val saved=source.keys().asSequence().associateWith {source.get(it)}
-        val migrated=saved+LockscreenSettings.sharedShortcutValues(saved)+GlassEngineSettings.inheritLegacy(saved)
-        val normalized=migrated+GlassEngineSettings.legacyRadii(migrated)
+        val migrated=saved+LockscreenSettings.sharedShortcutValues(saved)+GlassEngineSettings.inheritLegacy(saved)+
+            GlassEngineSettings.legacyIconMaterial(saved)
+        val normalized=migrated+GlassEngineSettings.legacyRadii(migrated)+
+            com.cosmod.launcherglass.util.Ba31kAnimationSettings.migrateClassic(saved)
         for ((key,value) in normalized) {
             val default = schema[key] ?: continue // New optional settings may be ignored by older modules.
             when (default) {
@@ -81,8 +84,9 @@ internal object SettingsTransfer {
                     require(value is Int || value is Long) { "Invalid $key" }
                     val number = (value as Number).toLong()
                     val portable=legacyNumber(key,number)
-                    require(portable in range(key)) { "Out of range: $key" }
-                    values[key]=portable.toInt()
+                    val range = range(key)
+                    require(acceptOutdated || portable in range) { "Out of range: $key" }
+                    values[key]=portable.coerceIn(range).toInt()
                 }
             }
         }
@@ -123,6 +127,7 @@ internal object SettingsTransfer {
     }
 
     internal fun range(key: String): LongRange {
+        com.cosmod.launcherglass.camera.CameraZoomSettings.ranges[key]?.let { return it.first.toLong()..it.last.toLong() }
         if(key in OpticalSettings.integers)return OpticalSettings.minimum(key).toLong()..OpticalSettings.maximum(key).toLong()
         val base = if (key.startsWith("folder_")) key.removePrefix("folder_") else key
         if(base in OpticalSettings.integers)return OpticalSettings.minimum(base).toLong()..OpticalSettings.maximum(base).toLong()
@@ -175,7 +180,7 @@ internal object SettingsTransfer {
         // Complete replacement of portable settings; retain local state and migration markers.
         for ((key, default) in defaults) {
             if (key !in keys) continue
-            val value = values[key] ?: if (optionalFolder(key)) null else default
+            val value = values[key] ?: if (optionalFolder(key) && !SettingsDefaults.hasFactoryValue(key)) null else default
             when (value) {
                 is Boolean -> editor.putBoolean(key, value)
                 is Int -> editor.putInt(key, value)

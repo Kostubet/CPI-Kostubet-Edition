@@ -60,6 +60,8 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
         shader.setFloatUniform("distortion",if(style.liquid)style.distortion/50f else 0f)
         shader.setFloatUniform("dispersion",if(style.liquid)style.dispersion.coerceIn(0,100)*.01f else 0f)
         shader.setFloatUniform("kyantEngine",if(style.newEngine)1f else 0f)
+        val soft = style.engineOptics.softWidth
+        shader.setFloatUniform("softOptics", if (style.liquid && soft != null) 1f else 0f, (soft ?: 0) * .01f)
         shader.setFloatUniform("engineOptics",style.engineOptics.power*.01f,
             style.engineOptics.edgeWidth*.01f,style.engineOptics.edgeLight*.01f)
     }
@@ -113,13 +115,14 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
             uniform float lensHeight;
             uniform float dispersion;
             uniform float kyantEngine;
+            uniform float2 softOptics;
             uniform float3 engineOptics;
             uniform float4 rowR;
             uniform float4 rowG;
             uniform float4 rowB;
             uniform float3 bias;
         """
-        private const val LENS=KyantGlassEngine.AGSL+"""
+        private const val LENS=KyantGlassEngine.AGSL+SoftGlassShader.HEIGHT_PROFILE+"""
             float2 kyantOffset(float2 xy,float radius) {
                 float2 halfSize=size*.5;
                 float2 p=xy-halfSize;
@@ -144,6 +147,42 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 float glint=kyantDirectionalHighlight(normal,1.36,1.25)*edge*engineOptics.z*.36;
                 return half4(min(pixel.rgb+half3(glint)*pixel.a,half3(pixel.a)),pixel.a);
             }
+            float softGlassReach(float extent) {
+                return extent * .49 * softOptics.y / (1.0 + softOptics.y);
+            }
+            float2 softGlassOffset(float2 p, float radius, bool reflected) {
+                float2 halfSize = size * .5;
+                float2 local = p - halfSize;
+                float edge = min(size.x, size.y);
+                float reach = softGlassReach(edge);
+                float inset = max(0.0, -kyantSd(local, halfSize, radius));
+                if (reach <= 0.0 || inset >= reach) return float2(0.0);
+                float depth = onbHeight(inset / reach, 3.8);
+                float slope = .5 * reach * (onbHeight((inset + 1.0) / reach, 3.8)
+                    - onbHeight((inset - 1.0) / reach, 3.8));
+                float3 normal = normalize(float3(kyantNormal(local, halfSize, radius) * slope, 1.0));
+                float2 transmit = refract(float3(0.0, 0.0, -1.0), normal, .25).xy;
+                float magnitude = edge * min(distortion, 6.0);
+                if (reflected) {
+                    return normal.xy * (2.0 * normal.z) * magnitude * .47 * (1.0 - depth);
+                }
+                return transmit * magnitude * mix(.18, .53, depth);
+            }
+            float softReflection(float2 p, float radius) {
+                float edge = min(size.x, size.y);
+                float reach = softGlassReach(edge);
+                float inset = max(0.0, -kyantSd(p - size * .5, size * .5, radius));
+                if (reach <= 0.0 || inset >= reach) return 0.0;
+                return .38 * pow(1.0 - onbHeight(inset / reach, 3.8), 1.0 / 3.8);
+            }
+            half4 softGlassGlint(half4 pixel, float2 p, float radius) {
+                float reflection = softReflection(p, radius);
+                if (reflection <= 0.0) return pixel;
+                float2 normal = kyantNormal(p - size * .5, size * .5, radius);
+                half light = half(kyantDirectionalHighlight(normal, -2.16, 1.55) * reflection * .26);
+                return half4(min(pixel.rgb + light * pixel.a, half3(pixel.a)), pixel.a);
+            }
+
             float2 spectrumOffset(float2 p, float r) {
                 if(dispersion<=0.0)return float2(0.0);
                 float edge=min(size.x,size.y);
@@ -151,7 +190,9 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 float2 q=abs(center)-size*.5+r;
                 float2 outside=max(q,0.0);
                 float distance=r-length(outside)-min(max(q.x,q.y),0.0);
-                float profile=1.0-smoothstep(0.0,edge*.16,distance);
+                float reach=softOptics.x>.5 ? softGlassReach(edge) : edge*.16;
+                if(reach<=0.0)return float2(0.0);
+                float profile=1.0-smoothstep(0.0,reach,distance);
                 if(profile<.01)return float2(0.0);
                 float2 normal=outside+float2(q.x>=q.y ? .01 : 0.0,q.y>=q.x ? .01 : 0.0);
                 return normalize(normal)*sign(center)*profile*profile*dispersion*min(edge*.042,7.0);
@@ -217,13 +258,23 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 half alpha=mask.eval(xy).a;
                 if(alpha<=.001)return half4(0.0);
                 float radius=rounding*min(size.x,size.y);
-                float2 shift=kyantEngine>.5 ? kyantOffset(xy,radius) : lensSample(xy);
+                bool soft = softOptics.x > .5;
+                float2 shift = soft ? softGlassOffset(xy, radius, false) :
+                    (kyantEngine > .5 ? kyantOffset(xy, radius) : lensSample(xy));
                 float2 coord=crop.xy+(xy+lensHeight*shift)*crop.zw/size;
                 half4 pixel=backdrop.eval(coord);
                 float2 prism=lensHeight*spectrumOffset(xy,radius)*crop.zw/size;
                 if(dot(prism,prism)>.0001){
                     pixel.r=backdrop.eval(coord+prism).r;
                     pixel.b=backdrop.eval(coord-prism).b;
+                }
+                if (soft) {
+                    float reflection = softReflection(xy, radius);
+                    if (reflection > 0.0) {
+                        float2 reflected = xy + lensHeight * softGlassOffset(xy, radius, true);
+                        pixel = mix(pixel, backdrop.eval(crop.xy + reflected * crop.zw / size), reflection);
+                    }
+                    return softGlassGlint(shade(pixel, alpha), xy, radius);
                 }
                 half4 resultColor=shade(pixel,alpha);
                 return kyantEngine>.5 ? kyantGlint(resultColor,xy,radius) : resultColor;
@@ -249,10 +300,16 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 if(p.x<0.0 || p.y<0.0 || p.x>size.x || p.y>size.y)return half4(0.0);
                 half alpha=mask.eval(p).a;
                 if(alpha<=.001)return half4(0.0);
-                float radius=nativeContour>.5 ? contourRadius(p) : rounding*min(size.x,size.y);
-                float opticalRadius=rounding*min(size.x,size.y);
-                float2 lens=kyantEngine>.5 ? kyantOffset(p,radius) :
-                    (nativeContour>.5 ? softLens(p,radius,opticalRadius) : lensSample(p));
+                float extent=min(size.x,size.y);
+                // Shape refraction independently of the OEM silhouette mask.
+                float opticalRadius=rounding*extent;
+                float radius=nativeContour>.5
+                    ? clamp(contourRadius(p)+(rounding-.30)*extent,0.0,.5*extent)
+                    : opticalRadius;
+                bool soft = softOptics.x > .5;
+                float2 lens = soft ? softGlassOffset(p, radius, false) :
+                    (kyantEngine>.5 ? kyantOffset(p,radius) :
+                        (nativeContour>.5 ? softLens(p,radius,opticalRadius) : lensSample(p)));
                 float2 q=clamp(xy+lensHeight*lens,float2(.5),limit-float2(.5));
                 half4 pixel=backdrop.eval(q);
                 if(pixel.a<.999)pixel+=backdrop.eval(xy)*(half(1.0)-pixel.a);
@@ -264,6 +321,15 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                     half4 blue=backdrop.eval(clamp(q-prism,float2(.5),limit-float2(.5)));
                     if(red.a>.01)color.r=red.r/red.a;
                     if(blue.a>.01)color.b=blue.b/blue.a;
+                }
+                if (soft) {
+                    float reflection = softReflection(p, radius);
+                    if (reflection > 0.0) {
+                        float2 reflected = xy + lensHeight * softGlassOffset(p, radius, true);
+                        half4 reflectedSample = backdrop.eval(clamp(reflected, float2(.5), limit - float2(.5)));
+                        if (reflectedSample.a > .01) color = mix(color, reflectedSample / reflectedSample.a, reflection * reflectedSample.a);
+                    }
+                    return softGlassGlint(shade(color, alpha) * pixel.a, p, radius);
                 }
                 half4 resultColor=shade(color,alpha)*pixel.a;
                 return kyantEngine>.5 ? kyantGlint(resultColor,p,radius) : resultColor;

@@ -7,5 +7,8 @@
         <item>com.android.launcher3</item>
         <item>com.kostubet.cpi</item>
         <item>com.android.systemui</item>
+        <item>com.coloros.smartsidebar</item>
+        <item>com.android.server.telecom</item>
+        <item>com.oplus.camera</item>
     </string-array>
 </resources>

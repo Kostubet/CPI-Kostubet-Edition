@@ -53,6 +53,8 @@ internal object NativeAlertMaterial {
             (manager?.javaClass?.getMethod("getBackgroundBlurDrawable")?.invoke(manager) as? android.graphics.drawable.Drawable) ?: background
         }catch(_:Exception){background}
     }
+    fun backgroundBlur(view: View) = material(view)?.takeIf { it.javaClass.name.contains("BackgroundBlur") }
+
     fun describe(view:View):String="contour=${if(view.width>0)AlertContour.resolve(view,material(view)).let { "nativePath=${it.nativePath}, bounds=${it.bounds}, revision=${it.revision}" }else "unlaid"}; "+"${view.javaClass.simpleName} ${view.width}x${view.height}, shown=${view.isShown}, skip=${view.willNotDraw()}, hw=${view.isHardwareAccelerated}, background=${view.background?.javaClass?.name}, material=${material(view)?.javaClass?.name}, nativeAlpha=${alphas[view]}, rendered=$rendered"
     fun contour(canvas:Canvas,view:View):Path? {
         if(!canvas.isHardwareAccelerated || view.width<=0 || view.height<=0 || !view.isShown ||

@@ -128,7 +128,6 @@ internal fun ColorOs17ConfirmDialog(
 ) {
     val darkTheme = COUITheme.colorScheme.background.luminance() < 0.5f
     val density = LocalDensity.current
-    val dimProgress by animateFloatAsState(if (show) 1f else 0f, tween(200), label = "C17DialogDim")
     val currentPresentation = DialogPresentation(title, summary, negativeText, positiveText, content)
     var lastVisiblePresentation by remember { mutableStateOf(currentPresentation) }
     SideEffect {
@@ -137,73 +136,70 @@ internal fun ColorOs17ConfirmDialog(
     // Dismissal can clear the caller's selection before the window finishes sliding out.
     val presentation = if (show) currentPresentation else lastVisiblePresentation
     // Keep the window host alive until its exit and predictive-back transitions finish.
-    COUITheme(colors = COUITheme.colorScheme.copy(windowDimming = Color.Black.copy(alpha = .2f))) {
-        WindowDialog(
-            show = show,
-            enableWindowDim = false,
-            backgroundColor = Color.Transparent,
-            cornerRadius = 0.dp,
-            maxWidth = 392.dp,
-            outsideMargin = DpSize(16.dp, 32.dp),
-            onDismissRequest = onDismissRequest,
-            onDismissFinished = onDismissFinished,
-        ) {
-            ColorOsDialogSystemBars(darkTheme, dimProgress)
-            Box(Modifier.fillMaxWidth().graphicsLayer { shape = ColorOsDialogShape; clip = true }) {
-                key(darkTheme, density.density) {
-                    AndroidView(
-                        factory = { ColorOsDialogMaterialView(it, darkTheme, ColorOsDialogMaterialView.Kind.Panel) },
-                        modifier = Modifier.matchParentSize(),
-                    )
+    WindowDialog(
+        show = show,
+        enableWindowDim = true,
+        backgroundColor = Color.Transparent,
+        cornerRadius = 0.dp,
+        maxWidth = 392.dp,
+        outsideMargin = DpSize(16.dp, 32.dp),
+        onDismissRequest = onDismissRequest,
+        onDismissFinished = onDismissFinished,
+    ) {
+        Box(Modifier.fillMaxWidth().graphicsLayer { shape = ColorOsDialogShape; clip = true }) {
+            key(darkTheme, density.density) {
+                AndroidView(
+                    factory = { ColorOsDialogMaterialView(it, darkTheme, ColorOsDialogMaterialView.Kind.Panel) },
+                    modifier = Modifier.matchParentSize(),
+                )
+            }
+            Column(Modifier.fillMaxWidth().heightIn(max = 632.dp)) {
+                presentation.title?.takeIf { it.isNotBlank() }?.let {
+                    Box(
+                        Modifier.fillMaxWidth().padding(
+                            start = DialogSpacing.ContentInset, end = DialogSpacing.ContentInset,
+                            top = DialogSpacing.TitleTop, bottom = DialogSpacing.TitleBottom,
+                        ),
+                    ) {
+                        BasicText(
+                            text = it,
+                            modifier = Modifier.fillMaxWidth().heightIn(max = DialogSpacing.TitleMaxHeight)
+                                .verticalScroll(rememberScrollState()),
+                            style = dialogTextStyle(18, if (darkTheme) Color(0xE6FFFFFF) else Color(0xE6000000), FontWeight(550), TextAlign.Center, 1.36f),
+                        )
+                    }
                 }
-                Column(Modifier.fillMaxWidth().heightIn(max = 632.dp)) {
-                    presentation.title?.takeIf { it.isNotBlank() }?.let {
-                        Box(
-                            Modifier.fillMaxWidth().padding(
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                    presentation.summary?.let {
+                        var multiline by remember(it) { mutableStateOf(false) }
+                        BasicText(
+                            text = it,
+                            modifier = Modifier.fillMaxWidth().padding(
                                 start = DialogSpacing.ContentInset, end = DialogSpacing.ContentInset,
-                                top = DialogSpacing.TitleTop, bottom = DialogSpacing.TitleBottom,
+                                top = if (presentation.title.isNullOrBlank()) 22.dp else 0.dp,
+                                bottom = if (presentation.content == null) 16.dp else 4.dp,
+                            ),
+                            style = dialogTextStyle(13, if (darkTheme) Color(0x8AFFFFFF) else Color(0x8A000000), FontWeight.Normal, if (multiline) TextAlign.Start else TextAlign.Center, 1.29f),
+                            onTextLayout = { multiline = it.lineCount > 1 },
+                        )
+                    }
+                    presentation.content?.let { customContent ->
+                        Column(
+                            Modifier.fillMaxWidth().padding(
+                                horizontal = DialogSpacing.ContentInset,
+                                vertical = DialogSpacing.CustomVerticalInset,
+                            ).then(
+                                if (presentation.title.isNullOrBlank() && presentation.summary == null) Modifier.padding(top = 16.dp)
+                                else Modifier,
                             ),
                         ) {
-                            BasicText(
-                                text = it,
-                                modifier = Modifier.fillMaxWidth().heightIn(max = DialogSpacing.TitleMaxHeight)
-                                    .verticalScroll(rememberScrollState()),
-                                style = dialogTextStyle(18, if (darkTheme) Color(0xE6FFFFFF) else Color(0xE6000000), FontWeight(550), TextAlign.Center, 1.36f),
-                            )
-                        }
-                    }
-                    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                        presentation.summary?.let {
-                            var multiline by remember(it) { mutableStateOf(false) }
-                            BasicText(
-                                text = it,
-                                modifier = Modifier.fillMaxWidth().padding(
-                                    start = DialogSpacing.ContentInset, end = DialogSpacing.ContentInset,
-                                    top = if (presentation.title.isNullOrBlank()) 22.dp else 0.dp,
-                                    bottom = if (presentation.content == null) 16.dp else 4.dp,
-                                ),
-                                style = dialogTextStyle(13, if (darkTheme) Color(0x8AFFFFFF) else Color(0x8A000000), FontWeight.Normal, if (multiline) TextAlign.Start else TextAlign.Center, 1.29f),
-                                onTextLayout = { multiline = it.lineCount > 1 },
-                            )
-                        }
-                        presentation.content?.let { customContent ->
-                            Column(
-                                Modifier.fillMaxWidth().padding(
-                                    horizontal = DialogSpacing.ContentInset,
-                                    vertical = DialogSpacing.CustomVerticalInset,
-                                ).then(
-                                    if (presentation.title.isNullOrBlank() && presentation.summary == null) Modifier.padding(top = 16.dp)
-                                    else Modifier,
-                                ),
-                            ) {
-                                CompositionLocalProvider(LocalColorOsDialogContent provides true) {
-                                    customContent()
-                                }
+                            CompositionLocalProvider(LocalColorOsDialogContent provides true) {
+                                customContent()
                             }
                         }
                     }
-                    ColorOsDialogButtonBar(presentation, darkTheme, onNegative, onPositive)
                 }
+                ColorOsDialogButtonBar(presentation, darkTheme, onNegative, onPositive)
             }
         }
     }

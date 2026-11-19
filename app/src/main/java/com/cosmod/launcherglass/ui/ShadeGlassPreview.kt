@@ -13,41 +13,31 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.os.Build
 import android.view.View
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.ShadeGlassSettings.Component
 import com.cosmod.launcherglass.ui.ShadeGlassSettings.Panel
 import com.cosmod.launcherglass.ui.ShadeGlassSettings.Profile
 import com.cosmod.launcherglass.util.ShadeGlassRenderer
-import io.github.suqi8.coui.kmp.basic.TabRowWithContour
+import com.cosmod.launcherglass.xposed.SoftGlassShader
 
-internal class ShadeGlassTabs(context:Context,dark:Boolean,accent:Int,labels:List<String>,
-    selected:Int,choose:(Int)->Unit) : CouiControl(context,dark,accent) {
-    init {
-        content {
-            TabRowWithContour(labels,selected,choose,modifier=Modifier.fillMaxWidth(),height=46.dp)
-        }
-    }
-}
-
-/** Built from live View geometry with the same material renderer as SystemUI. */
+/** Previews the same optical shader on a local sample backdrop. */
 internal class ShadeGlassPreview(context: Context, private val panel: Panel, private val dark: Boolean,
     private val readBackground:(()->Profile)?,
-    private val read: (Component) -> Profile) : View(context) {
+    private val read: () -> SoftGlassSettings.Profile?) : View(context) {
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val bounds=RectF()
     private val clip=Path()
     private val scene=Rect(0,0,320,212)
     private var source:ShadeGlassRenderer.Frame?=null
-    private val renderers=mutableMapOf<Int,ShadeGlassRenderer>()
-    private var profiles=panel.components.associateWith(read)
+    private val backgroundRenderer=ShadeGlassRenderer()
+    private var shader: android.graphics.RuntimeShader? = null
+    private var profile = read()
+    private val sourceMatrix = android.graphics.Matrix()
+    private val shapeData = FloatArray(8)
     private var backdrop=readBackground?.invoke()
     private var hasRenderer=Build.VERSION.SDK_INT>=33
     private var playing=false
     private var progress=.48f
-    private var index=0
 
     init {
         contentDescription=context.getString(R.string.shade_glass_preview)
@@ -55,7 +45,7 @@ internal class ShadeGlassPreview(context: Context, private val panel: Panel, pri
     }
 
     fun refresh() {
-        profiles=panel.components.associateWith(read)
+        profile = read()
         backdrop=readBackground?.invoke()
         invalidate()
     }
@@ -66,8 +56,8 @@ internal class ShadeGlassPreview(context: Context, private val panel: Panel, pri
     }
 
     fun release() {
-        renderers.values.forEach { it.clear() }
-        renderers.clear()
+        backgroundRenderer.clear()
+        shader = null
         source=null
     }
 
@@ -84,10 +74,9 @@ internal class ShadeGlassPreview(context: Context, private val panel: Panel, pri
         val background=backdrop
         if(hasRenderer && background?.enabled==true){
             runCatching {
-                renderers.getOrPut(-1){ShadeGlassRenderer()}.draw(canvas,bounds,bounds,frame,background,1f,!dark,backdrop=true)
+                backgroundRenderer.draw(canvas,bounds,bounds,frame,background,1f,!dark,backdrop=true)
             }.onFailure { android.util.Log.w("CPI.ShadeGlassPreview","Background renderer unavailable",it); hasRenderer=false }
         }
-        index=0
         if(panel==Panel.CONTROL)control(canvas,frame) else notifications(canvas,frame)
         canvas.restoreToCount(restore)
     }
@@ -110,23 +99,50 @@ internal class ShadeGlassPreview(context: Context, private val panel: Panel, pri
         return ShadeGlassRenderer.Frame(image,scene)
     }
 
-    private fun plate(c:Canvas,frame:ShadeGlassRenderer.Frame,kind:Component,
-        l:Float,t:Float,r:Float,b:Float,radius:Float,active:Boolean=false,circle:Boolean=false) {
-        val id=index++
-        val profile=profiles.getValue(kind)
-        bounds.set(l,t,r,b)
-        if(hasRenderer && profile.enabled){
-            val drawn=runCatching {
-                renderers.getOrPut(id){ShadeGlassRenderer()}.draw(c,bounds,bounds,frame,profile,1f,!dark,active,circle)
-            }.getOrElse {
-                android.util.Log.w("CPI.ShadeGlassPreview","Material renderer unavailable",it)
-                hasRenderer=false
-                false
-            }
-            if(drawn)return
+    private fun plate(c: Canvas, frame: ShadeGlassRenderer.Frame, kind: Component,
+        l: Float, t: Float, r: Float, b: Float, radius: Float, active: Boolean = false, circle: Boolean = false) {
+        bounds.set(l, t, r, b)
+        paint.color = if (active || !dark) 0xffe9ebf0.toInt() else 0xff282b36.toInt()
+        c.drawRoundRect(bounds, radius, radius, paint)
+        val glass = profile ?: return
+        if (Build.VERSION.SDK_INT < 33 || !hasRenderer || !c.isHardwareAccelerated || active && glass.white) return
+        val strength = glass[SoftGlassSettings.Parameter.STRENGTH]
+        if (strength <= 0f) return
+        val role = when (kind) {
+            Component.BRIGHTNESS, Component.VOLUME -> 9f
+            else -> if (panel == Panel.CONTROL) 1f else 0f
         }
-        paint.color=if(active || !dark)0xffe9ebf0.toInt() else 0xff282b36.toInt()
-        c.drawRoundRect(bounds,radius,radius,paint)
+        runCatching {
+            val effect = shader ?: android.graphics.RuntimeShader(SoftGlassShader.activitySource()).also { shader = it }
+            SoftGlassShader.applyProfile(effect, glass, role, dark, 1f, 320f, 212f, fullMix = true)
+            val source = android.graphics.BitmapShader(frame.image, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
+            sourceMatrix.setTranslate(-l, -t)
+            source.setLocalMatrix(sourceMatrix)
+            effect.setInputShader(SoftGlassShader.INPUT, source)
+            val width = r - l
+            val height = b - t
+            shapeData[2] = width * .5f
+            shapeData[3] = height * .5f
+            shapeData[4] = shapeData[2]
+            shapeData[5] = shapeData[3]
+            shapeData[6] = if (circle) minOf(shapeData[4], shapeData[5]) else radius
+            effect.setFloatUniform("u_size", width, height)
+            effect.setFloatUniform("u_commonArray", shapeData)
+            val save = c.save()
+            try {
+                c.translate(l, t)
+                paint.shader = effect
+                paint.alpha = (255f * strength).toInt()
+                c.drawRoundRect(0f, 0f, width, height, radius, radius, paint)
+            } finally {
+                paint.shader = null
+                paint.alpha = 255
+                c.restoreToCount(save)
+            }
+        }.onFailure {
+            hasRenderer = false
+            android.util.Log.w("CPI.ShadeGlassPreview", "Soft glass renderer unavailable", it)
+        }
     }
 
     private fun label(c:Canvas,value:String,x:Float,y:Float,size:Float=12f,solid:Boolean=false,center:Boolean=false) {

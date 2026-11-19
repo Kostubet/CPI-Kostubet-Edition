@@ -39,7 +39,7 @@ internal object DynamicIconForeground {
         val palette = PrefsHelper.iconPalette
         val key = listOf(background, palette, PrefsHelper.gradientOpacity, PrefsHelper.glyphStroke,
             PrefsHelper.glyphStrokeOpacity, PrefsHelper.glyphStrokeWidth, PrefsHelper.glyphStrokeBrightness,
-            PrefsHelper.glyphShadow, PrefsHelper.shadowOpacity, bounds.width(), bounds.height())
+            bounds.width(), bounds.height())
         if (entry.key != key) {
             val shader = entry.shader
             shader.setFloatUniform("background", Color.red(background)/255f, Color.green(background)/255f, Color.blue(background)/255f)
@@ -50,15 +50,7 @@ internal object DynamicIconForeground {
             shader.setFloatUniform("stroke", if (PrefsHelper.glyphStroke) PrefsHelper.glyphStrokeOpacity/100f else 0f)
             shader.setFloatUniform("strokeWidth", .4f + PrefsHelper.glyphStrokeWidth*.018f)
             shader.setFloatUniform("strokeTone", PrefsHelper.glyphStrokeBrightness/100f)
-            val foreground = RenderEffect.createRuntimeShaderEffect(shader, "content")
-            val effect = if (PrefsHelper.glyphShadow && PrefsHelper.shadowOpacity > 0) {
-                val shadow = RenderEffect.createColorFilterEffect(PorterDuffColorFilter(
-                    Color.argb(175*PrefsHelper.shadowOpacity/100,0,0,0), PorterDuff.Mode.SRC_IN),
-                    RenderEffect.createOffsetEffect(0f, maxOf(2f, bounds.height()*.016f),
-                        RenderEffect.createBlurEffect(2f,2f,foreground,Shader.TileMode.CLAMP)))
-                RenderEffect.createBlendModeEffect(shadow, foreground, BlendMode.SRC_OVER)
-            } else foreground
-            entry.node.setRenderEffect(effect)
+            entry.node.setRenderEffect(RenderEffect.createRuntimeShaderEffect(shader,"content"))
             entry.key = key
         }
         entry.node.setPosition(bounds.left, bounds.top, bounds.right, bounds.bottom)

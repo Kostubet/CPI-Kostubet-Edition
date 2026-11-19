@@ -52,7 +52,11 @@ internal object PreviewWallpaper {
             inSampleSize = Integer.highestOneBit((maxOf(bounds.outWidth, bounds.outHeight) / MAX_SIDE).coerceAtLeast(1))
         }
         manager.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)?.use {
-            BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)?.let(::bounded)
+            BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)?.let { decoded ->
+                val resized = bounded(decoded)
+                if (resized !== decoded) decoded.recycle()
+                resized
+            }
         }
     }.getOrNull()
 
@@ -84,15 +88,22 @@ internal object PreviewWallpaper {
         val frame = WallpaperHelper.readSystemSnapshot(context, fresh = live, maxSide = MAX_SIDE)
             ?: if (live) null else readStatic(WallpaperManager.getInstance(context))
         if (frame == null) return false
-        val software = if (frame.config == Bitmap.Config.HARDWARE) frame.copy(Bitmap.Config.ARGB_8888, false) else frame
-        val preview = bounded(software)
         try {
-            context.contentResolver.openOutputStream(uri)?.use {
-                preview.compress(Bitmap.CompressFormat.JPEG, 88, it)
-            } ?: false
+            val software = if (frame.config == Bitmap.Config.HARDWARE)
+                frame.copy(Bitmap.Config.ARGB_8888, false) ?: return false else frame
+            try {
+                val preview = bounded(software)
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use {
+                        preview.compress(Bitmap.CompressFormat.JPEG, 88, it)
+                    } ?: false
+                } finally {
+                    if (preview !== software) preview.recycle()
+                }
+            } finally {
+                if (software !== frame) software.recycle()
+            }
         } finally {
-            if (preview !== software) preview.recycle()
-            if (software !== frame) software.recycle()
             frame.recycle()
         }
     }.getOrDefault(false)

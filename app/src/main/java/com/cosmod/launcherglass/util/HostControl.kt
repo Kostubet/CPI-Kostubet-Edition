@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit
 /** Signature-protected commands handled by the injected host, without su. */
 object HostControl {
     const val RESTART_LAUNCHER=com.cosmod.launcherglass.BuildConfig.APPLICATION_ID+".RESTART_LAUNCHER"
+    const val RESTART_SIDEBAR=BuildConfig.APPLICATION_ID+".RESTART_SIDEBAR"
     const val DIAGNOSTICS=com.cosmod.launcherglass.BuildConfig.APPLICATION_ID+".HOST_DIAGNOSTICS"
     const val RETRY_ALERTS=com.cosmod.launcherglass.BuildConfig.APPLICATION_ID+".RETRY_ALERTS"
     const val PREVIEW_URI = "wallpaper_uri"
@@ -34,6 +35,7 @@ object HostControl {
                 addAction(PREVIEW_WIDGET)
                 addAction(PREVIEW_FOLDER)
             }
+            if(role=="sidebar")addAction(RESTART_SIDEBAR)
             if(retry!=null)addAction(RETRY_ALERTS)
             addAction(PREVIEW_SURFACE)
         }
@@ -43,6 +45,10 @@ object HostControl {
                     when(intent?.action){
                         DIAGNOSTICS->{resultCode=SystemUiControl.ACCEPTED;resultData="${BuildConfig.VERSION_NAME} build=${BuildConfig.VERSION_CODE}; $role PID=${Process.myPid()}\n${details()}\n${GlassLogger.snapshot()}"}
                         RESTART_LAUNCHER->if(role=="launcher"){
+                            resultCode=SystemUiControl.ACCEPTED
+                            main.postDelayed({Process.killProcess(Process.myPid())},400L)
+                        }
+                        RESTART_SIDEBAR->if(role=="sidebar"){
                             resultCode=SystemUiControl.ACCEPTED
                             main.postDelayed({Process.killProcess(Process.myPid())},400L)
                         }

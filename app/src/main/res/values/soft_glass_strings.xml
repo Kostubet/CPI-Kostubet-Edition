@@ -1,0 +1,23 @@
+<resources>
+    <string name="soft_glass_title">Soft-light glass</string>
+    <string name="soft_glass_lock">Soft-light glass for lock screen notifications</string>
+    <string name="soft_glass_sidebar">Smart Sidebar</string>
+    <string name="soft_glass_sidebar_hint">Add Smart Sidebar (com.coloros.smartsidebar) to the CPI scope in LSPosed. Restart the sidebar after first enabling the effect.</string>
+    <string name="soft_glass_hint">Uses the ColorOS 17 system material. After enabling it for the first time, restart the affected system app.</string>
+    <string name="soft_glass_strength">Effect strength</string>
+    <string name="soft_glass_blur">Blur spread</string>
+    <string name="soft_glass_width">Refraction zone width</string>
+    <string name="soft_glass_shine">Rim highlight</string>
+    <string name="soft_glass_exposure">Brightness offset</string>
+    <string name="soft_glass_dimming">Glass dimming</string>
+    <string name="soft_glass_warmth">Glass warmth</string>
+    <string name="soft_glass_direction">Highlight direction</string>
+    <string name="soft_glass_response">Tilt sensitivity</string>
+    <string name="soft_glass_keep_white">Keep active tiles white</string>
+    <string name="soft_glass_tilt">Tilt-sensitive highlights</string>
+    <string name="soft_glass_sidebar_restart">Restart Smart Sidebar</string>
+    <string name="soft_glass_sidebar_restart_confirm">The sidebar will close briefly. Swipe from the edge to open it again.</string>
+    <string name="soft_glass_sidebar_restarted">Restart requested. Open Smart Sidebar again.</string>
+    <string name="soft_glass_sidebar_restart_failed">Could not restart Smart Sidebar. Enable its LSPosed scope or grant CPI root access.</string>
+    <string name="soft_glass_material">Soft Light</string>
+</resources>

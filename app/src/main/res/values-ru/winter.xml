@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_winter_snow">Снег в приложении</string>
+    <string name="ui_winter_snow_hint">Снежинки оседают на краях карточек, сползают и плавно тают. Анимация останавливается, когда приложение скрыто.</string>
+    <string name="ui_winter_melody">Праздничная мелодия баннера</string>
+    <string name="ui_winter_melody_hint">Зажмите баннер CPI на главной на полсекунды. Нежные постукивания следуют мелодии, завершаясь плавным слайдом. Выключите, чтобы вернуть прежний звук и вибрацию.</string>
+</resources>

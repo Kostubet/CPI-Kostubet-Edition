@@ -23,9 +23,9 @@ internal class Ba31kGenieMotion {
     @Synchronized
     fun sample(openFraction: Double, iconLeft: Double, iconWidth: Double, iconRow: Double,
         strength: Double, response: Double, damping: Double, initialVelocity: Double,
-        opening: Boolean, now: Long): AppWindowDeformation? {
+        opening: Boolean, now: Long, tilt: Double = 0.0): AppWindowDeformation? {
         if (!openFraction.isFinite() || !iconLeft.isFinite() || !iconWidth.isFinite() ||
-            !iconRow.isFinite() || strength <= 0) return null
+            !iconRow.isFinite() || !strength.isFinite() || !tilt.isFinite() || (strength <= 0 && tilt <= 0)) return null
         val minimized = 1 - openFraction.coerceIn(0.0, 1.0)
         val elapsed = if (lastTime == Long.MIN_VALUE) Double.POSITIVE_INFINITY else (now - lastTime) * 1e-9
         if (elapsed < 0) return null
@@ -71,9 +71,12 @@ internal class Ba31kGenieMotion {
         }
 
         val openFractionNow = 1 - minimized
-        val calibration = .86 - .42 * ease((openFractionNow - .34) / .55)
-        val gain = strength * calibration * ease(minimized / .035) * ease(openFractionNow / .06)
-        if (gain == 0.0) return null
+        val handoff = ease(minimized / .12) * ease(openFractionNow / .13)
+        if (handoff == 0.0) return null
+        val gain = strength * (1.10 - .46 * ease((openFractionNow - .34) / .55)) * handoff
+        val tiltEnvelope = tilt * handoff * (4 * minimized * openFractionNow)
+        val horizontalTilt = (2 * iconLeft + iconWidth - 1).coerceIn(-1.0, 1.0) * .080 * tiltEnvelope
+        val verticalTilt = -y * .061 * tiltEnvelope
         // The stock transaction supplies the crop scale. Subtract the uniformly moving
         // grid so only the shape and offset from the row springs are applied to it.
         val b = bounds.position.coerceIn(0.0, 1.0)
@@ -83,11 +86,11 @@ internal class Ba31kGenieMotion {
         val center = rows[1].position
         val top = rows[0].position
         val bottom = rows[2].position
-        val topInset = (gain * .3 * counterScale * (top - b)).coerceIn(-.18, .18)
-        val bottomInset = (gain * .3 * counterScale * (bottom - b)).coerceIn(-.18, .18)
+        val topInset = (gain * .3 * counterScale * (top - b) + verticalTilt).coerceIn(-.18, .18)
+        val bottomInset = (gain * .3 * counterScale * (bottom - b) - verticalTilt).coerceIn(-.18, .18)
         val centerShift = (center - b) * anchor
-        val topShift = (gain * (centerShift + counterScale * (top - center) * anchor)).coerceIn(-.24, .24)
-        val bottomShift = (gain * (centerShift + counterScale * (bottom - center) * anchor)).coerceIn(-.24, .24)
+        val topShift = (gain * (centerShift + counterScale * (top - center) * anchor) + horizontalTilt).coerceIn(-.24, .24)
+        val bottomShift = (gain * (centerShift + counterScale * (bottom - center) * anchor) - horizontalTilt).coerceIn(-.24, .24)
         if (maxOf(abs(topInset), abs(bottomInset), abs(topShift), abs(bottomShift)) < .0002) return null
         return AppWindowDeformation(topInset.toFloat(), -bottomInset.toFloat(),
             (1 - 2 * topInset).toFloat(), (1 - 2 * bottomInset).toFloat(),

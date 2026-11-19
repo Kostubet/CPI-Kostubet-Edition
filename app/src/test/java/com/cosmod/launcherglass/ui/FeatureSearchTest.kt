@@ -3,13 +3,23 @@ import com.cosmod.launcherglass.R
 import org.junit.Assert.*
 import org.junit.Test
 class FeatureSearchTest {
+    @Test fun cameraZoomIndexesTuningAndDiagnostics() {
+        val labels = FeatureSearch.labels("CAMERA_ZOOM")
+        assertTrue(R.string.camera_zoom_speed_in in labels)
+        assertTrue(R.string.camera_zoom_diagnostics in labels)
+    }
     @Test fun everyFeatureSectionIsIndexed(){
         for(section in FeatureSections.sections)assertTrue("Missing $section",FeatureSearch.labels(section).isNotEmpty())
     }
     @Test fun indexesNativePreviewSelectorsAndCurrentMotionOptions(){
         assertTrue(R.string.ui_preview_widget in FeatureSearch.labels("PHOTO"))
         assertTrue(R.string.ui_preview_style in FeatureSearch.labels("BANNERS"))
-        assertTrue(R.string.ui_genie_trajectory in FeatureSearch.labels("MOTION"))
+        val motion=FeatureSearch.labels("MOTION")
+        assertTrue(R.string.ui_genie_trajectory in motion)
+        assertTrue(R.string.ui_ios_tilt_strength in motion)
+        assertTrue(R.string.ui_ios_deformation_strength in motion)
+        assertTrue(FeatureSearch.labels("BA31K_MOTION").isEmpty())
+        assertTrue(R.string.ui_folder_icons_blur in FeatureSearch.labels("FOLDERS"))
     }
     @Test fun iconsIndexComesFromTheFeatureRatherThanThePreview(){
         val icons=FeatureSearch.labels("ICONS")
@@ -35,13 +45,26 @@ class FeatureSearchTest {
         assertTrue(R.string.lock_glass_clock in FeatureSearch.labels("LOCKSCREEN"))
         assertTrue(R.string.lock_glass_widgets in FeatureSearch.labels("LOCKSCREEN"))
     }
+
+    @Test fun unrelatedSectionsDoNotMatchLockscreenSettingsThroughPreviewRefresh() {
+        val lockscreenLabels = setOf(R.string.lock_glass_clock, R.string.lock_glass_widgets, R.string.lock_glass_capsule)
+        for (section in (FeatureSections.sections - "LOCKSCREEN") + "CAMERA_ZOOM") {
+            assertTrue(section, FeatureSearch.labels(section).none { it in lockscreenLabels })
+        }
+        assertFalse(R.string.ui_device_unknown in FeatureSearch.labels("CAMERA_ZOOM"))
+    }
     @Test fun shadeSearchIndexesBothPanelsAndMaterialOptions(){
         val labels=FeatureSearch.labels("SHADE")
         assertTrue(R.string.shade_glass_control in labels)
         assertTrue(R.string.shade_glass_notifications in labels)
         assertTrue(R.string.glass_blur_group in labels)
         assertTrue(R.string.shade_glass_blur_opacity in labels)
-        assertTrue(R.string.shade_glass_dispersion_strength in labels)
+        assertFalse(R.string.shade_glass_dispersion_strength in labels)
+        assertTrue(R.string.soft_glass_width in labels)
+        assertTrue(R.string.soft_glass_width in FeatureSearch.labels("ICONS"))
         assertTrue(R.string.shade_glass_control_background in labels)
+        assertTrue(R.string.soft_glass_title in labels)
+        assertTrue(R.string.soft_glass_direction in FeatureSearch.labels("SIDEBAR"))
+        assertTrue(R.string.soft_glass_lock in FeatureSearch.labels("LOCKSCREEN"))
     }
 }

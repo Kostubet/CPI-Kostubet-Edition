@@ -11,8 +11,8 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 404
-        versionName = "0.3.0"
+        versionCode = 425
+        versionName = "0.3.1"
     }
 
     signingConfigs {
@@ -56,10 +56,12 @@ android {
 }
 
 dependencies {
+    val couiVersion = "2.0.0"
     implementation(platform(libs.androidx.compose.bom))
     implementation("androidx.activity:activity:1.13.0")
-    implementation(project(":coui-ui"))
-    implementation(project(":coui-preference"))
+    implementation("io.github.suqi8.coui.kmp:coui-ui-android:$couiVersion")
+    implementation("io.github.suqi8.coui.kmp:coui-preference-android:$couiVersion")
+    implementation("io.github.suqi8.coui.kmp:coui-icons-android:$couiVersion")
     compileOnly("de.robv.android.xposed:api:82")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -84,10 +86,11 @@ val generateFeatureSearch by tasks.registering(GenerateFeatureSearch::class) {
         val definitions=Regex("(?m)^    private fun (\\w+)\\s*\\(").findAll(source).toList()
         val bodies=definitions.mapIndexed {i,m->m.groupValues[1] to source.substring(m.range.first,definitions.getOrNull(i+1)?.range?.first ?: source.length)}.toMap()
         val featureRouting=bodies.getValue("buildFeaturePage").substringAfter("when(section){")
-        val roots=Regex("(?m)^\\s*Screen\\.(\\w+)\\s*->\\s*(\\w+)\\(body\\)")
+        val roots=Regex("(?m)^\\s*Screen\\.(\\w+)\\s*->\\s*(\\w+)\\(body(?:,\\s*\\w+)*\\)")
             .findAll(featureRouting).associate {it.groupValues[1] to it.groupValues[2]}
         val labels=Regex("(?<!android\\.)R\\.string\\.(\\w+)")
-        val blocked=setOf("showPage","openScreen","openTab","backToCatalog","refreshCatalogStyle","save","refreshControls","updateStatus")
+        val blocked=setOf("showPage","openScreen","openTab","backToCatalog","refreshCatalogStyle","save",
+            "refreshControls","updateStatus","updateGlassPreview","informationRow")
         val auxiliary=sources.files.filter {it.name!="MainActivity.kt" && it.name!="FeatureSearch.kt"}.associate {it.nameWithoutExtension to it.readText()}
         val index=roots.mapValues {(_,root)->
             val result=sortedSetOf<String>();val seen=hashSetOf<String>()

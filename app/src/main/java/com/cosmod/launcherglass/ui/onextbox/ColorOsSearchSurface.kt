@@ -58,7 +58,7 @@ internal fun ColorOsSearchSurface(
 ) {
     val dark = COUITheme.colorScheme.background.luminance() < .5f
     val nativeBlurEnabled = LocalChromeNativeBlurEnabled.current
-    val fallbackColor = ColorOsToolbarGlass.fallbackColor(COUITheme.colorScheme.surfaceContainer, COUITheme.colorScheme.surface)
+    val fallbackColor = ColorOsToolbarGlass.fallbackColor(COUITheme.colorScheme.surfaceContainerHighest, COUITheme.colorScheme.surface)
     val motion = remember { SearchMotion() }
     val editing = rememberUpdatedState(focused)
     val emptyEditor = rememberUpdatedState(editorEmpty)

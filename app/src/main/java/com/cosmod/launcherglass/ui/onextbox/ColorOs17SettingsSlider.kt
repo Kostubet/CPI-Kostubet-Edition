@@ -139,7 +139,7 @@ fun ColorOs17SettingsSlider(
         targetValue = if (enabled) {
             colorScheme.primary
         } else {
-            colorScheme.disabledPrimarySlider
+            colorScheme.disabledProgress
         },
         animationSpec = tween(TouchResizeDurationMillis, easing = TouchResizeEasing),
         label = "C17SeekBarForegroundColor",
@@ -157,7 +157,7 @@ fun ColorOs17SettingsSlider(
         targetValue = if (enabled) {
             colorScheme.onPrimary
         } else {
-            colorScheme.disabledOnPrimary
+            colorScheme.disabledSliderThumb
         },
         animationSpec = tween(TouchResizeDurationMillis, easing = TouchResizeEasing),
         label = "C17SeekBarThumbColor",

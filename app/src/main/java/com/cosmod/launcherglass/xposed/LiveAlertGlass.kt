@@ -46,6 +46,7 @@ internal object LiveAlertGlass {
         val method=LiveAlertTargets.drawMethod(cls) ?: return
         XposedBridge.hookMethod(method,object:XC_MethodHook(){
             override fun beforeHookedMethod(p:MethodHookParam){
+                if(allowed && SoftGlassNative.lockedActivityProfile()!=null)return
                 if(!islandActive() && !NativeMaterialPreview.active(SurfacePreviewKind.LIVE))return
                 val view=p.thisObject as View
                 val canvas=p.args[0] as Canvas
@@ -65,8 +66,12 @@ internal object LiveAlertGlass {
                 val save=p.getObjectExtra("cpiAlertNativeClip") as? Int
                 if(save!=null)canvas.restoreToCount(save)
                 if(p.getObjectExtra("cpiAlertReplaced")==true)return
-                if(!islandActive() || p.hasThrowable())return
-                try {NativeAlertMaterial.draw(canvas,view,prefs)}
+                if(p.hasThrowable())return
+                try {
+                    val profile=if(allowed) SoftGlassNative.lockedActivityProfile() else null
+                    if(Build.VERSION.SDK_INT>=33 && profile!=null) SoftGlassActivityMaterial.draw(canvas,view,profile)
+                    else if(islandActive()) NativeAlertMaterial.draw(canvas,view,prefs)
+                }
                 catch(t:Throwable){GlassLogger.limited("LiveAlertGlass","nativeOverlay"){"Native alert retained: "+t}}
             }
         })
@@ -77,7 +82,8 @@ internal object LiveAlertGlass {
                     NativeAlertMaterial.nativeAlpha(p.thisObject as View,(p.args[0] as Number).toFloat())
                     if(!allowed)return
                     // Scale the radius the OEM just computed; never change its alpha.
-                    val active=prefs.getBoolean(SettingsProvider.KEY_ENABLED,false) && prefs.getBoolean("island_glass_enabled",false)
+                    val active=prefs.getBoolean(SettingsProvider.KEY_ENABLED,false) &&
+                        prefs.getBoolean("island_glass_enabled",false) && SoftGlassNative.lockedActivityProfile()==null
                     NativeAlertMaterial.adjustBlur(p.thisObject as View,if(active)compositorBlur() else 12)
                 }
             })
@@ -99,7 +105,7 @@ internal object LiveAlertGlass {
             val draw=type.getDeclaredMethod("dispatchDraw",Canvas::class.java)
             XposedBridge.hookMethod(draw,object:XC_MethodHook(){
                 override fun beforeHookedMethod(p:MethodHookParam){
-                    if(!islandActive())return
+                    if(!islandActive() || SoftGlassNative.lockedActivityProfile()!=null)return
                     val canvas=p.args[0] as Canvas
                     val card=p.thisObject as View
                     try {
@@ -130,6 +136,7 @@ internal object LiveAlertGlass {
     private fun discover(root:View?){
         if(!allowed || root==null)return
         try {LiveAlertTargets.visitViews(root){view->
+            SoftGlassNative.liveActivityLoader(view.javaClass.classLoader)
             hookBackground(view.javaClass)
             var parent=view.parent as? View
             repeat(4){
@@ -179,6 +186,10 @@ internal object LiveAlertGlass {
             for(name in names)discover(XposedHelpers.callMethod(global,"getRootView",name) as? View)
         }catch(t:Throwable){GlassLogger.limited("LiveAlertGlass","existingRoots"){"Existing roots unavailable; awaiting view inflation: $t"}}
     }
+    fun lockWallpaperChanged() {
+        views.keys.weakSnapshot().filter(View::isShown).forEach(View::postInvalidateOnAnimation)
+    }
+
     private fun load(){
         val c=context ?: return
         prefs=try {c.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_GET_ALL,null,null) ?: Bundle()}catch(_:Throwable){Bundle()}
@@ -188,14 +199,16 @@ internal object LiveAlertGlass {
         SurfaceTints.update(prefs,com.cosmod.launcherglass.util.IconPalette.wallpaperTone(c))
         WallpaperGlow.update(prefs)
         val master=prefs.getBoolean(SettingsProvider.KEY_ENABLED,false)
+        SoftGlassNative.updateSystemUi(c, hostLoader, prefs)
         runCatching { ShadeGlass.configure(c,hostLoader,prefs,master) }.onFailure {
             GlassLogger.e("ShadeGlass","Could not apply shade preferences",it)
         }
         Ba31kShadeTransparency.update(prefs,hostLoader)
         val wantIsland=master && prefs.getBoolean("island_glass_enabled",false)
         val wantBanners=master && prefs.getBoolean("banner_glass_enabled",false)
-        val wantLock=master && LockscreenSettings.requested(prefs)
-        val wantVolume=master && prefs.getBoolean("volume_glass_enabled")
+        val wantSoftLock=master && SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.LOCK)
+        val wantLock=master && (LockscreenSettings.requested(prefs) || wantSoftLock)
+        val wantVolume=master && prefs.getBoolean("volume_glass_enabled") && !SoftGlassNative.replacesVolume()
         if((wantIsland || wantBanners || wantLock || wantVolume) && !guardEvaluated){
             guardEvaluated=true
             guard?.let {store->
@@ -221,7 +234,7 @@ internal object LiveAlertGlass {
             NativeAlertMaterial.adjustBlur(it,if(active)nativeBlur else 12,false)
             it.postInvalidateOnAnimation()
         }
-        if(active)try {installViewHooks()}catch(t:Throwable){disable(t)}
+        if(active || allowed && wantSoftLock)try {installViewHooks()}catch(t:Throwable){disable(t)}
     }
     fun install(loader:ClassLoader){
         hostLoader=loader

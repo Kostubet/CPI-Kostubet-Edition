@@ -1,6 +1,8 @@
 // From ONextBox 5e417d7, MiToverG422 and contributors. SPDX-License-Identifier: GPL-3.0-only
 package com.cosmod.launcherglass.ui.onextbox
 
+import com.cosmod.launcherglass.ui.ColorOs17ShadowEdgeShader
+
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.BlendMode

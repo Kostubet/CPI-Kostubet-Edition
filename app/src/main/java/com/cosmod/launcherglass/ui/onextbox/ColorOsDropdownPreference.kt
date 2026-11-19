@@ -62,10 +62,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cosmod.launcherglass.ui.onextbox.ColorOsPopup
-import io.github.suqi8.coui.kmp.basic.BasicComponent
-import io.github.suqi8.coui.kmp.basic.DropdownColors
 import io.github.suqi8.coui.kmp.basic.DropdownEntry
-import io.github.suqi8.coui.kmp.basic.DropdownItem
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.squircle.squircleBackground
 import io.github.suqi8.coui.kmp.theme.COUITheme
@@ -86,170 +83,6 @@ private val PopupSharedMaskSpring = spring<Float>(
 )
 
 @Composable
-internal fun ColorOsWindowDropdownPreference(
-    items: List<String>,
-    selectedIndex: Int,
-    title: String,
-    modifier: Modifier = Modifier,
-    summary: String? = null,
-    dropdownColors: DropdownColors,
-    startAction: @Composable (() -> Unit)? = null,
-    bottomAction: (@Composable () -> Unit)? = null,
-    maxHeight: Dp? = null,
-    enabled: Boolean = true,
-    showValue: Boolean = true,
-    onExpandedChange: ((Boolean) -> Unit)? = null,
-    onSelectedIndexChange: ((Int) -> Unit)? = null,
-    interactionEnabled: Boolean = true,
-) {
-    val entry = remember(items, selectedIndex, onSelectedIndexChange) {
-        DropdownEntry(
-            items = items.mapIndexed { index, text ->
-                DropdownItem(
-                    text = text,
-                    selected = index == selectedIndex,
-                    onClick = { onSelectedIndexChange?.invoke(index) },
-                )
-            },
-        )
-    }
-    ColorOsWindowDropdownPreference(
-        entry = entry,
-        title = title,
-        modifier = modifier,
-        summary = summary,
-        dropdownColors = dropdownColors,
-        startAction = startAction,
-        bottomAction = bottomAction,
-        maxHeight = maxHeight,
-        enabled = enabled,
-        showValue = showValue,
-        onExpandedChange = onExpandedChange,
-        interactionEnabled = interactionEnabled,
-    )
-}
-
-@Composable
-internal fun ColorOsWindowDropdownPreference(
-    entry: DropdownEntry,
-    title: String,
-    modifier: Modifier = Modifier,
-    summary: String? = null,
-    dropdownColors: DropdownColors,
-    startAction: @Composable (() -> Unit)? = null,
-    bottomAction: (@Composable () -> Unit)? = null,
-    maxHeight: Dp? = null,
-    enabled: Boolean = true,
-    showValue: Boolean = true,
-    collapseOnSelection: Boolean = true,
-    onExpandedChange: ((Boolean) -> Unit)? = null,
-    interactionEnabled: Boolean = true,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    var expanded by remember { mutableStateOf(false) }
-    val hapticFeedback = LocalHapticFeedback.current
-    val currentEntry by rememberUpdatedState(entry)
-    val currentOnExpandedChange by rememberUpdatedState(onExpandedChange)
-    val actualEnabled = enabled && entry.items.isNotEmpty()
-    var componentLeftInWindow by remember { mutableFloatStateOf(0f) }
-    var componentWidth by remember { mutableFloatStateOf(0f) }
-    var lastTouchXInWindow by remember { mutableFloatStateOf(Float.NaN) }
-
-    fun setExpanded(value: Boolean) {
-        if (expanded != value) {
-            expanded = value
-            currentOnExpandedChange?.invoke(value)
-        }
-    }
-
-    val actionColor = if (actualEnabled) {
-        COUITheme.colorScheme.onSurfaceVariantActions
-    } else {
-        COUITheme.colorScheme.disabledOnSecondaryVariant
-    }
-    val valueColor = if (actualEnabled) {
-        COUITheme.colorScheme.onSurfaceSecondary
-    } else {
-        COUITheme.colorScheme.disabledOnSecondaryVariant
-    }
-
-    BasicComponent(
-        modifier = modifier.settingsInteractionGate(interactionEnabled)
-            .onGloballyPositioned { coordinates ->
-                val bounds = coordinates.boundsInWindow()
-                componentLeftInWindow = bounds.left
-                componentWidth = bounds.width
-            }
-            .pointerInput(actualEnabled) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val down = awaitFirstDown(
-                            requireUnconsumed = false,
-                            pass = PointerEventPass.Initial,
-                        )
-                        if (actualEnabled) {
-                            lastTouchXInWindow = componentLeftInWindow + down.position.x
-                        }
-                    }
-                }
-            },
-        interactionSource = interactionSource,
-        insideMargin = SettingsTokens.RowInsideMargin,
-        title = title,
-        summary = summary,
-        startAction = startAction,
-        endActions = {
-            val selectedText = entry.items.firstOrNull { it.selected }?.text
-            if (showValue && !selectedText.isNullOrEmpty()) {
-                Text(
-                    text = selectedText,
-                    modifier = Modifier
-                        .padding(start = 8.dp, end = 4.dp)
-                        .align(Alignment.CenterVertically)
-                        .weight(1f, fill = false),
-                    fontSize = COUITheme.textStyles.body2.fontSize,
-                    color = valueColor,
-                    textAlign = TextAlign.End,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            SettingsPopupArrow(tint = actionColor)
-            ColorOsDropdownPopup(
-                show = expanded,
-                entry = entry,
-                maxHeight = maxHeight,
-                anchorCenterX = if (lastTouchXInWindow.isFinite()) {
-                    lastTouchXInWindow
-                } else {
-                    componentLeftInWindow + componentWidth / 2f
-                },
-                onDismissRequest = { setExpanded(false) },
-                onItemClick = { index ->
-                    if (interactionEnabled && actualEnabled) {
-                        currentEntry.items.getOrNull(index)?.takeIf { it.enabled }?.let { item ->
-                            hapticFeedback.performHapticFeedback(HapticFeedbackType.Confirm)
-                            item.onClick?.invoke()
-                            if (collapseOnSelection) setExpanded(false)
-                        }
-                    }
-                },
-            )
-        },
-        bottomAction = bottomAction,
-        onClick = {
-            if (actualEnabled && interactionEnabled) {
-                setExpanded(!expanded)
-                if (expanded) {
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
-                }
-            }
-        },
-        role = Role.DropdownList,
-        enabled = actualEnabled,
-    )
-}
-
-@Composable
 internal fun ColorOsDropdownPopup(
     show: Boolean,
     entry: DropdownEntry,
@@ -257,11 +90,13 @@ internal fun ColorOsDropdownPopup(
     anchorCenterX: Float? = null,
     selectionMenu: Boolean = true,
     onDismissRequest: () -> Unit,
+    onDismissFinished: (() -> Unit)? = null,
     onItemClick: (Int) -> Unit,
 ) {
     ColorOsPopup(
         show = show,
         onDismissRequest = onDismissRequest,
+        onDismissFinished = onDismissFinished,
         maxHeight = maxHeight,
         anchorCenterX = anchorCenterX,
     ) {
@@ -322,7 +157,7 @@ internal fun ColorOsDropdownMenuContent(
                     .squircleBackground(
                         color = pressColor.copy(alpha = pressColor.alpha * pressProgress),
                         cornerRadius = 20.dp,
-                        extension = 1f,
+                        weight = 1f,
                     ),
             )
             Column(
@@ -450,7 +285,7 @@ internal fun ColorOsDropdownMenuContent(
                         Text(
                             text = item.text,
                             color = titleColor,
-                            style = COUITheme.textStyles.body1.copy(
+                            style = COUITheme.textStyles.bodyL.copy(
                                 fontSize = 15.sp,
                                 lineHeight = 17.sp,
                             ),

@@ -110,7 +110,7 @@ internal object AlertGlassLens {
         if(plate.key!=key){
             plate.mask.setFloatUniform("size",w.toFloat(),h.toFloat());plate.mask.setFloatUniform("radius",corner*scale)
             val style=GlassStyle(true,lensWidth,distortion,0,0,null,extendedLens=true,dispersion=hue,
-                surfaceScope=scope,newEngine=hazeStyle.newEngine)
+                surfaceScope=scope,newEngine=hazeStyle.newEngine,engineOptics=hazeStyle.engineOptics)
             val mask=if(shape==null)plate.mask else {
                 val size=(w.toLong() shl 32) or h.toLong()
                 if(plate.shapeVersion!=shape.revision || plate.shapeSize!=size){

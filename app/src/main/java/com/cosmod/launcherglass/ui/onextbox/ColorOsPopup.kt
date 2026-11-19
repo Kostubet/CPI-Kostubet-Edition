@@ -307,6 +307,7 @@ fun ColorOsPopup(
     maxWidth: Dp = 256.dp,
     maxHeight: Dp? = null,
     anchorCenterX: Float? = null,
+    onDismissFinished: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     var popupMounted by remember { mutableStateOf(show) }
@@ -326,6 +327,7 @@ fun ColorOsPopup(
                 launch { alphaProgress.animateTo(0f, ColorOsPopupExitAlphaSpring) }
             }
             popupMounted = false
+            onDismissFinished?.invoke()
         }
     }
 
@@ -406,44 +408,6 @@ fun ColorOsPopup(
         )
         }
     }
-}
-
-/** Keeps the edge shader, but paints the preview's own theme instead of sampling the host window. */
-@Composable
-internal fun ColorOsPopupMiniatureMaterial(
-    darkTheme: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val density = LocalDensity.current
-    key(darkTheme, density.density) {
-        AndroidView(
-            factory = { context ->
-                ColorOsPopupMaterialView(
-                    context = context,
-                    darkTheme = darkTheme,
-                    cornerRadiusDp = 19f,
-                ).also { view ->
-                    view.isForceDarkAllowed = false
-                    view.setBackgroundColor(
-                        if (darkTheme) 0xFF19191B.toInt() else 0xFFFDFDFE.toInt(),
-                    )
-                }
-            },
-            modifier = modifier,
-        )
-    }
-}
-
-@Composable
-internal fun ColorOsEmbeddedPopup(progress: Float, scale: Float, content: @Composable () -> Unit) {
-    val origin = remember { PopupTransformOrigin().apply { x = .5f } }
-    ColorOsPopupSurface(
-        scaleProgress = scale,
-        alphaProgress = progress,
-        transformOrigin = origin,
-        modifier = Modifier,
-        content = content,
-    )
 }
 
 @Composable

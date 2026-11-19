@@ -119,8 +119,8 @@ fun ColorOsSwitch(
     }
     val visualProgress = position.value.coerceIn(0f, 1f)
     val thumbOffset = ThumbStartOffset + (ThumbEndOffset - ThumbStartOffset) * visualProgress
-    val uncheckedTrack = if (enabled) colorScheme.secondary else colorScheme.disabledSecondary
-    val checkedTrack = if (enabled) colorScheme.primary else colorScheme.disabledPrimary
+    val uncheckedTrack = if (enabled) colorScheme.secondary else colorScheme.disabledProgressBackground
+    val checkedTrack = if (enabled) colorScheme.primary else colorScheme.disable
     val trackColor = Color(
         red = uncheckedTrack.red + (checkedTrack.red - uncheckedTrack.red) * visualProgress,
         green = uncheckedTrack.green + (checkedTrack.green - uncheckedTrack.green) * visualProgress,
@@ -129,12 +129,12 @@ fun ColorOsSwitch(
     )
     val thumbColor by animateColorAsState(
         targetValue = colorOsSwitchThumbColor(
-            monet = LocalColorOsMonetEnabled.current,
+            monet = true,
             checked = checked,
             enabled = enabled,
             darkTheme = darkTheme,
             onPrimary = colorScheme.onPrimary,
-            onSurface = colorScheme.onSurfaceVariantSummary,
+            onSurface = colorScheme.labelSecondary,
         ),
         animationSpec = tween(durationMillis = 450, easing = easing),
         label = "colorOsSwitchThumbColor",

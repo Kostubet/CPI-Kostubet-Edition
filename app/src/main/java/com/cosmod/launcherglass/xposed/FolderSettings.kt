@@ -23,8 +23,7 @@ internal object FolderSettings {
         val ownStyle=if(own)selected else null
         val plateColor=if(dark)0x181818 else 0xeeeeee
         val normal=ownStyle?.copy(plateColor=plateColor) ?: GlassStyle.icons().copy(
-            folder=true,surfaceScope=GlassSurface.FOLDERS,plateColor=plateColor,volumeOpacity=0,filter=inheritedFilter,
-            newEngine=KyantGlassEngine.enabled(GlassSurface.FOLDERS),engineOptics=KyantGlassEngine.optics(GlassSurface.FOLDERS))
+            folder=true,surfaceScope=GlassSurface.FOLDERS,plateColor=plateColor,volumeOpacity=0,filter=inheritedFilter)
         val independent=if(expanded)large else null
         return independent?.let {
             val engine=KyantGlassEngine.largeFolderOptics()
@@ -33,11 +32,11 @@ internal object FolderSettings {
                 radius=engine.radius,largeFolderBackdrop=true)
         } ?: normal
     }
+    fun backdrop() = if(own)processing else Processing(PrefsHelper.blurRadius,PrefsHelper.blurQuality,
+        PrefsHelper.blurVibrancy,PrefsHelper.blurLightening,PrefsHelper.liquidGlass)
     fun largeBackdrop():Processing? {
         val custom=large ?: return null
-        val source=if(own)processing else Processing(PrefsHelper.blurRadius,PrefsHelper.blurQuality,
-            PrefsHelper.blurVibrancy,PrefsHelper.blurLightening,PrefsHelper.liquidGlass)
-        return source.copy(radius=KyantGlassEngine.largeFolderOptics().radius,liquid=custom.liquid)
+        return backdrop().copy(radius=KyantGlassEngine.largeFolderOptics().radius,liquid=custom.liquid)
     }
     fun update(bundle:Bundle):Boolean {
         val signature=ArrayList<Any>()

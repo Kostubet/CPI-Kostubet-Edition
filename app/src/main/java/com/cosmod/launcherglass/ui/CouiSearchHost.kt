@@ -1,44 +1,133 @@
 package com.cosmod.launcherglass.ui
+
 import android.content.Context
-import android.widget.EditText
-import android.view.View
-import android.view.ViewTreeObserver
-import android.text.Editable
-import android.text.TextWatcher
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import com.cosmod.launcherglass.ui.onextbox.ColorOsSearchSurface
-/** Input binding only; the search capsule's material and touch motion are upstream. */
-internal class CouiSearchHost(context:Context,dark:Boolean,accent:Int,surface:Int,editorRow:View,private val input:EditText):
-    CouiControl(context,dark,accent) {
-    private var focused by mutableStateOf(input.hasFocus())
-    private var empty by mutableStateOf(input.text.isEmpty())
-    private val focusListener=ViewTreeObserver.OnGlobalFocusChangeListener {_,_->focused=input.hasFocus()}
-    private val watcher=object:TextWatcher {
-        override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
-        override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int){empty=s.isNullOrEmpty()}
-        override fun afterTextChanged(s:Editable?){}
-    }
+import io.github.suqi8.coui.kmp.basic.InputField
+import io.github.suqi8.coui.kmp.basic.SearchBarDefaults
+
+/** Keeps the CPI catalog query in sync with COUI's search field. */
+internal class CouiSearchHost(
+    context: Context,
+    dark: Boolean,
+    accent: Int,
+    private val surface: Int,
+    foreground: Int,
+    label: String,
+    initialQuery: String,
+    private val onQueryChanged: (String) -> Unit,
+    onSearch: () -> Unit,
+    private val onFocusChanged: () -> Unit,
+) : CouiControl(context, dark, accent, surface) {
+    private var queryText by mutableStateOf(initialQuery)
+    private var inputFocused by mutableStateOf(false)
+    private var clearInputFocus: (() -> Unit)? = null
+    private var requestedWidth = LayoutParams.MATCH_PARENT
+    val capsuleWidth get() = composition.width
+    private val backdrop = CouiChromeBackdrop(context, dark) {}
+
     init {
-        composition.layoutParams=LayoutParams(-1,-1)
+        WinterEffects.mark(this, 25f, 2)
+        if (appearance == CouiAppearance.MODERN) addView(backdrop, 0, LayoutParams(0, 0))
+        composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
-            ColorOsSearchSurface(Modifier.fillMaxSize(),Color(surface),focused,empty) {
-                AndroidView(factory={editorRow},modifier=Modifier.fillMaxSize())
+            val focus = LocalFocusManager.current
+            val keyboard = LocalSoftwareKeyboardController.current
+            clearInputFocus = { keyboard?.hide(); focus.clearFocus() }
+
+            val input: @Composable () -> Unit = {
+                InputField(
+                    query = queryText,
+                    onQueryChange = ::setQuery,
+                    onSearch = { onSearch() },
+                    expanded = inputFocused,
+                    onExpandedChange = { if (!it) closeKeyboard() },
+                    label = label,
+                    material = appearance == CouiAppearance.MODERN && couiMaterialEnabled(context),
+                    colors = SearchBarDefaults.searchBarColors(
+                        backgroundColor = if (appearance == CouiAppearance.ORIGINAL) Color.Transparent else Color(surface),
+                        labelColor = Color(foreground).copy(alpha = .74f),
+                        iconColor = Color(foreground).copy(alpha = .8f),
+                        clearIconColor = Color(foreground).copy(alpha = .5f),
+                    ),
+                    modifier = Modifier.fillMaxSize().onFocusChanged {
+                        if (inputFocused != it.hasFocus) {
+                            inputFocused = it.hasFocus
+                            post { onFocusChanged() }
+                        }
+                    },
+                )
             }
+            if (appearance == CouiAppearance.ORIGINAL) {
+                ColorOsSearchSurface(Modifier.fillMaxSize(), Color(surface), inputFocused, queryText.isEmpty()) { input() }
+            } else input()
         }
     }
-    override fun onAttachedToWindow(){
-        super.onAttachedToWindow()
-        focused=input.hasFocus();empty=input.text.isEmpty()
-        input.addTextChangedListener(watcher)
-        input.viewTreeObserver.addOnGlobalFocusChangeListener(focusListener)
+
+    /** Keep the catalog's measure/layout pass out of the search spring. */
+    fun resizeCapsule(value: Int) {
+        if (requestedWidth == value) return
+        requestedWidth = value
+        if (isLaidOut) {
+            measureCapsule(width, height)
+            placeCapsule(width, height)
+        }
     }
-    override fun onDetachedFromWindow(){
-        input.removeTextChangedListener(watcher)
-        if(input.viewTreeObserver.isAlive)input.viewTreeObserver.removeOnGlobalFocusChangeListener(focusListener)
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val width = MeasureSpec.getSize(widthMeasureSpec)
+        val height = MeasureSpec.getSize(heightMeasureSpec)
+        setMeasuredDimension(width, height)
+        measureCapsule(width, height)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        placeCapsule(right - left, bottom - top)
+    }
+
+    private fun measureCapsule(width: Int, height: Int) {
+        val visibleWidth = if (requestedWidth < 0) width else requestedWidth.coerceIn(0, width)
+        val widthSpec = MeasureSpec.makeMeasureSpec(visibleWidth, MeasureSpec.EXACTLY)
+        val heightSpec = MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
+        if (appearance == CouiAppearance.MODERN) backdrop.measure(widthSpec, heightSpec)
+        composition.measure(widthSpec, heightSpec)
+    }
+
+    private fun placeCapsule(width: Int, height: Int) {
+        val visibleWidth = composition.measuredWidth
+        val left = if (layoutDirection == LAYOUT_DIRECTION_RTL) width - visibleWidth else 0
+        if (appearance == CouiAppearance.MODERN) backdrop.layout(left, 0, left + visibleWidth, height)
+        composition.layout(left, 0, left + visibleWidth, height)
+    }
+
+    fun isInputFocused(): Boolean = inputFocused
+
+    internal fun snowBounds(out: android.graphics.RectF) {
+        out.left += composition.left
+        out.right = out.left + composition.width
+    }
+
+    fun setQuery(value: String) {
+        if (queryText == value) return
+        queryText = value
+        onQueryChanged(value)
+    }
+
+    fun closeKeyboard() {
+        clearInputFocus?.invoke()
+    }
+
+    override fun onDetachedFromWindow() {
+        clearInputFocus = null
         super.onDetachedFromWindow()
     }
 }

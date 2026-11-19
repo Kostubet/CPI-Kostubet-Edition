@@ -58,8 +58,6 @@
     <string name="ui_logo_outline_opacity">Outline opacity</string>
     <string name="ui_logo_outline_width">Outline thickness</string>
     <string name="ui_logo_outline_brightness">Outline brightness</string>
-    <string name="ui_logo_shadow">Logo shading</string>
-    <string name="ui_logo_shadow_opacity">Logo shadow</string>
     <string name="ui_icon_depth">Icon depth</string>
     <string name="ui_depth_strength">Depth intensity</string>
     <string name="ui_coloring">Coloring</string>
@@ -196,8 +194,6 @@
     <string name="banner_hint">ColorOS banners with live backdrop blur and refraction. Requires System UI scope in LSPosed.</string>
     <string name="banner_motion">iOS-style banner animation</string>
     <string name="app_tilt_title">iOS animations (Classic engine)</string>
-    <string name="ui_motion_engines_enabled">Allow iOS animations</string>
-    <string name="ui_motion_engines_scope">Applies to both engines.</string>
     <string name="app_tilt_hint">The app window stretches towards its icon as it opens or closes. The effect follows the ColorOS transition.</string>
     <string name="app_tilt_open">Opening apps</string>
     <string name="app_tilt_close">Closing apps</string>
@@ -304,6 +300,9 @@
     <string name="ui_device_display">Display</string>
     <string name="ui_device_patch">Security patch</string>
     <string name="ui_settings_display">Display</string>
+    <string name="ui_coui_appearance">COUI appearance</string>
+    <string name="ui_coui_original">Original COUI</string>
+    <string name="ui_coui_modern">COUI 2.0</string>
     <string name="ui_export_diagnostics">Export diagnostics</string>
     <string name="ui_status_restart_pending">Active. Restart %1$s.</string>
     <string name="ui_about_contributors">Contributors</string>
@@ -321,8 +320,8 @@
     <string name="ui_preset_error">Could not read the saved settings</string>
     <string name="ui_reset_section">Reset this section</string>
     <string name="ui_reset_section_confirm">Reset section</string>
-    <string name="ui_icon_size">Launcher icon size</string>
-    <string name="ui_icon_size_hint">Changes icons, stretched shortcuts and closed folders. Restart the launcher if a layout has yet to update.</string>
+    <string name="ui_icon_size">Icon and folder size</string>
+    <string name="ui_icon_size_hint">100% uses the ColorOS size. Adjusts icons, stretched shortcuts, and regular and stretched folders.</string>
     <string name="ui_tilt_gentle">Gentle</string>
     <string name="ui_tilt_balanced">Balanced</string>
     <string name="ui_tilt_expressive">Expressive</string>
@@ -497,8 +496,8 @@
     <string name="ui_feature_peek_title">Preview</string>
     <string name="ui_feature_peek_open">Open section</string>
     <string name="ui_floating_close">Close</string>
-    <string name="ui_ba31k_title">iOS animations (New engine)</string>
-    <string name="ui_ba31k_summary">Uses these settings while enabled. The previous engine resumes when disabled.</string>
+    <string name="ui_ba31k_title">iOS animations</string>
+    <string name="ui_ba31k_summary">Adjust window and icon motion when opening and returning from apps.</string>
     <string name="ui_ba31k_transitions">App transitions</string>
     <string name="ui_ba31k_bounce">Home gesture bounce</string>
     <string name="ui_ba31k_effects">Window effects</string>
@@ -516,4 +515,10 @@
     <string name="ui_ba31k_damping">Tilt spring damping</string>
     <string name="ui_ba31k_velocity">Initial tilt velocity</string>
     <string name="ui_ba31k_duration">Transition duration</string>
+    <string name="ui_feature_tab_general">General</string>
+    <string name="ui_feature_tab_colors">Colors</string>
+    <string name="ui_feature_tab_style">Style</string>
+    <string name="ui_ios_deformation_strength">Deformation strength</string>
+    <string name="ui_ios_tilt_strength">Tilt strength</string>
+    <string name="ui_folder_icons_blur">Glass on folder icons</string>
 </resources>

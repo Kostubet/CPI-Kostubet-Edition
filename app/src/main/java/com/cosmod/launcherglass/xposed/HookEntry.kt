@@ -39,6 +39,24 @@ class HookEntry : IXposedHookLoadPackage {
             return
         }
 
+        if (packageName == "android" && lpparam.processName in setOf("android", "system_server")) {
+            if (android.os.Process.myUid() != android.os.Process.SYSTEM_UID) return
+            runCatching { HapticTelecom.observeSystemTelecom(lpparam.classLoader) }
+            return
+        }
+        if (packageName == HapticTelecom.PACKAGE) {
+            HapticTelecom.install(lpparam.classLoader)
+            return
+        }
+        if (packageName == com.cosmod.launcherglass.camera.CameraZoomSettings.PACKAGE) {
+            if (lpparam.processName == packageName) runCatching { CameraVideoZoom.install(lpparam.classLoader) }
+            return
+        }
+        if (packageName == com.cosmod.launcherglass.ui.SoftGlassSettings.SIDEBAR_PACKAGE) {
+            if (lpparam.processName == packageName || lpparam.processName == "$packageName:ui" ||
+                lpparam.processName == "$packageName:edgepanel") SoftGlassNative.installSidebar(lpparam.classLoader)
+            return
+        }
         if(packageName=="com.android.systemui") {
             LiveAlertGlass.install(lpparam.classLoader)
             return

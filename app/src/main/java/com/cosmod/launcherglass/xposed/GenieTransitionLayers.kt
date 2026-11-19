@@ -6,7 +6,6 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.view.SurfaceControl
 import android.view.View
-import com.cosmod.launcherglass.util.AppWindowDeformation
 import com.cosmod.launcherglass.util.Ba31kGenieMotion
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
@@ -34,7 +33,7 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
     }
     private data class IconTarget(val pass: IconPass, val builder: Any, val crop: Rect)
     private data class Window(
-        val transaction: Any, val screen: RectF, val deformation: AppWindowDeformation?,
+        val transaction: Any, val screen: RectF,
         val time: Long, val shared: SharedProjection?,
     )
     private data class ViewIcon(val view: View, val screen: RectF, val time: Long)
@@ -106,9 +105,8 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
         if (warpedIcons.remove(leash)) setter.invoke(builder, identity)
     }
 
-    fun stageWindow(transaction: Any, screen: RectF, deformation: AppWindowDeformation?, time: Long,
-                    shared: SharedProjection? = null) {
-        windows.set(Window(transaction, RectF(screen), deformation, time, shared))
+    fun stageWindow(transaction: Any, screen: RectF, time: Long, shared: SharedProjection?) {
+        windows.set(Window(transaction, RectF(screen), time, shared))
         matchLayers()
         matchView()
     }
@@ -128,23 +126,19 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
 
     private fun projectIcon(icon: IconTarget, window: Window) {
         val projection = projections.get()!!
-        val shared = window.shared
-        val projected = if (shared != null) projection.share(icon.pass.native, shared, icon.crop)
-            else window.deformation?.let { projection.center(it, icon.crop) } == true
-        if (projected) {
+        val shared = window.shared ?: return
+        if (projection.share(icon.pass.native, shared, icon.crop)) {
             setter.invoke(icon.builder, projection.matrix)
             warpedIcons.add(icon.pass.leash)
             val count = projectedFrames.incrementAndGet()
-            if (count == 1L && shared != null) GlassLogger.i("AppGenieTransition", "Icon uses the window's deformation")
+            if (count == 1L) GlassLogger.i("AppGenieTransition", "Icon uses the window's deformation")
         }
-        if (shared != null) {
-            icon.pass.shared = shared
-            icon.pass.nativeAlpha?.let { alpha ->
-                val factor = shared.iconAlpha(alpha)
-                if (factor != alpha) {
-                    // When the icon updater is still on the stack the normal hook applies the fade.
-                    alphaSetter?.invoke(icon.builder, if (passes.get() === icon.pass) alpha else factor)
-                }
+        icon.pass.shared = shared
+        icon.pass.nativeAlpha?.let { alpha ->
+            val factor = shared.iconAlpha(alpha)
+            if (factor != alpha) {
+                // An icon updater still on the stack applies the fade in its normal hook.
+                alphaSetter?.invoke(icon.builder, if (passes.get() === icon.pass) alpha else factor)
             }
         }
     }
@@ -211,25 +205,22 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
         val icon = viewIcons.get() ?: return
         if (abs(window.time - icon.time) > MATCH_NS || !near(icon.screen, window)) return
         viewIcons.remove()
-        if (window.deformation == null && window.shared == null) {
-                if(viewPoses.remove(icon.view)!=null)icon.view.postInvalidateOnAnimation()
-                return
-            }
-        projectView(icon, window)
+        val shared = window.shared
+        if (shared == null) {
+            if(viewPoses.remove(icon.view)!=null)icon.view.postInvalidateOnAnimation()
+            return
+        }
+        projectView(icon, shared)
     }
 
-    private fun projectView(icon: ViewIcon, window: Window) {
+    private fun projectView(icon: ViewIcon, shared: SharedProjection) {
         val view = icon.view
         val projection = projections.get()!!
         val crop=Rect(0,0,view.width,view.height)
-        val shared = window.shared
-        val projected = if (shared != null) {
-            val localToScreen = Matrix().apply {
-                setRectToRect(RectF(crop), icon.screen, Matrix.ScaleToFit.FILL)
-            }
-            projection.share(localToScreen, shared, crop)
-        } else window.deformation?.let { projection.center(it, crop) } == true
-        if (projected) {
+        val localToScreen = Matrix().apply {
+            setRectToRect(RectF(crop), icon.screen, Matrix.ScaleToFit.FILL)
+        }
+        if (projection.share(localToScreen, shared, crop)) {
             val pose=projection.asMatrix()
             viewPoses[view] = DrawPose(pose, icon.time)
             projectedFrames.incrementAndGet()

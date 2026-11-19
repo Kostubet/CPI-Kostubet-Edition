@@ -39,7 +39,7 @@ internal class ClockGlyphGlass {
     private var chainedEffect:RenderEffect?=null
     private val crop=RectF()
     private val recordingBounds=Rect()
-    private val shader=RuntimeShader(KyantGlassEngine.AGSL+"""
+    private val shader=RuntimeShader(KyantGlassEngine.AGSL+SoftGlassShader.HEIGHT_PROFILE+"""
         uniform shader glyph;
         uniform shader scene;
         uniform float4 crop;
@@ -56,6 +56,7 @@ internal class ClockGlyphGlass {
         uniform float contourSoftness;
         uniform float lightOverlaps;
         uniform float kyantEngine;
+        uniform float softEngine;
         uniform float2 engineHighlight;
         uniform float backdropGain;
 
@@ -118,7 +119,8 @@ internal class ClockGlyphGlass {
                 rim=smoothstep(.10,.86,max(dot(narrow,float2(-.43,-.90)),0.0)/max(ink.a,.45));
             }
             float2 centre=crop.xy+p*crop.zw;
-            float refraction=kyantEngine>.5 ? kyantCircularProfile(edge) : edge;
+            float refraction=softEngine>.5 ? (1.0-onbHeight(1.0-edge,3.8)) :
+                (kyantEngine>.5 ? kyantCircularProfile(edge) : edge);
             float2 source=centre+normal*bend*refraction*crop.zw;
             float3 backdrop=clamp(float3(scene.eval(centre).rgb)*backdropGain,0.0,1.0);
             float3 rgb=float3(scene.eval(source).rgb);
@@ -215,7 +217,7 @@ internal class ClockGlyphGlass {
             val density=metrics.density
             shader.setFloatUniform("crop",x,y,sx,sy)
             val bevel=if(profile.liquid && profile.width>0)density*(1.2f+profile.width*.037f) else 0f
-            shader.setFloatUniform("width",bevel)
+            shader.setFloatUniform("width", bevel * (engine?.softWidth?.times(.01f) ?: 1f))
             val height=profile.lensHeight*.01f
             val distortion=profile.distortion.toFloat()
             val bend=density*.068f*distortion/(1f+distortion*.0016f)*(engine?.let {it.power*.018f} ?: 1f)
@@ -231,7 +233,8 @@ internal class ClockGlyphGlass {
             shader.setFloatUniform("contourOpacity",contour.opacity*.01f)
             shader.setFloatUniform("contourSoftness",contourWidth*contour.softness*.004f)
             shader.setFloatUniform("lightOverlaps",if(contour.lightOverlaps)1f else 0f)
-            shader.setFloatUniform("kyantEngine",if(newEngine)1f else 0f)
+            shader.setFloatUniform("kyantEngine",if(newEngine && engine?.softWidth == null)1f else 0f)
+            shader.setFloatUniform("softEngine",if(engine?.softWidth != null)1f else 0f)
             shader.setFloatUniform("engineHighlight",(engine?.edgeWidth ?: 0)*.01f,(engine?.edgeLight ?: 0)*.01f)
             shader.setFloatUniform("backdropGain",profile.backdropBrightness*.01f)
             effect=RenderEffect.createRuntimeShaderEffect(shader,"glyph")

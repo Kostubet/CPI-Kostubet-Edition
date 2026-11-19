@@ -11,8 +11,6 @@ import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.view.Display
 import android.view.View
-import com.cosmod.launcherglass.ui.ShadeGlassSettings.Profile
-import com.cosmod.launcherglass.ui.ShadeGlassSettings.Parameter as P
 import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.PerformancePolicy
 import com.cosmod.launcherglass.util.ShadeGlassRenderer.Frame
@@ -23,7 +21,7 @@ import kotlin.math.ceil
 /** Main-thread lifecycle, one shared frame and one compositor request in flight. */
 internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> Unit,
     private val onFailure: (Throwable) -> Unit) {
-    private class Reader(val material: Profile, val visible: (View) -> Boolean) {
+    private class Reader(val visible: (View) -> Boolean) {
         val bounds = RectF()
         var padding = 0
     }
@@ -47,13 +45,10 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
 
     fun diagnostics() = "frames=$captures, readers=${readers.size}, busy=$busy, misses=$consecutiveFailures"
 
-    fun frameFor(view: View, bounds: RectF, material: Profile, visible: (View) -> Boolean): Frame? {
+    fun frameFor(view: View, bounds: RectF, padding: Int, visible: (View) -> Boolean): Frame? {
         if (view.display?.displayId != Display.DEFAULT_DISPLAY) return null
-        val reader = readers[view]?.takeIf { it.material === material && it.visible === visible }
-            ?: Reader(material,visible).also {
-                it.padding = ceil((material[P.RADIUS] * 3 + 112) * view.resources.displayMetrics.density).toInt()
-                readers[view] = it
-            }
+        val reader = readers[view]?.takeIf { it.visible === visible } ?: Reader(visible).also { readers[view] = it }
+        reader.padding = padding
         reader.bounds.set(bounds)
         schedule()
         return frame?.takeIf { rotation == view.display?.rotation }

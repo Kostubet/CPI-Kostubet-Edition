@@ -8,11 +8,13 @@ import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
-/** Runtime of the second engine. The ColorOS transaction adapter is shared by both engines. */
+/** Spring motion and settings shared by the ColorOS transaction adapters. */
 internal object Ba31kAppTransitions {
-    data class Config(val opening: Boolean, val closing: Boolean, val strength: Double,
+    data class Config(val opening: Boolean, val closing: Boolean, val strength: Double, val tilt: Double,
         val droplet: Double, val openSpeed: Double, val closeSpeed: Double, val bounce: Double,
-        val stiffness: Double, val damping: Double, val initialVelocity: Double, val backdrop: Boolean) {
+        val stiffness: Double, val damping: Double, val initialVelocity: Double, val backdrop: Boolean,
+        val trajectory: Boolean) {
+        val projectsWindow get() = strength > 0.0 || tilt > 0.0
         fun speed(opening: Boolean) = if (opening) openSpeed else closeSpeed
     }
 
@@ -53,12 +55,13 @@ internal object Ba31kAppTransitions {
         val next = if (flag(Settings.ENABLED)) Config(
             flag(Settings.OPEN), flag(Settings.CLOSE),
             if (flag(Settings.GENIE)) ratio(Settings.GENIE_STRENGTH) else 0.0,
+            ratio(Settings.TILT),
             if (flag(Settings.DROPLET)) ratio(Settings.DROPLET_STRENGTH) else 0.0,
             (ratio(Settings.OPEN_SPEED) * ratio(Settings.SPEED) / ratio(Settings.DURATION)).coerceIn(.35, 2.0),
             (ratio(Settings.CLOSE_SPEED) * ratio(Settings.SPEED) / ratio(Settings.DURATION)).coerceIn(.35, 2.0),
             ratio(Settings.BOUNCE),
             ratio(Settings.STIFFNESS), ratio(Settings.DAMPING), ratio(Settings.INITIAL_VELOCITY),
-            flag(Settings.APP_BLUR),
+            flag(Settings.APP_BLUR), flag(Settings.TRAJECTORY),
         ) else null
         synchronized(springs) {
             if (next != config) springs.clear()
@@ -73,7 +76,7 @@ internal object Ba31kAppTransitions {
             springs.getOrPut(owner) { Ba31kGenieMotion() }
         }.sample(fraction, iconLeft, iconWidth, iconRow, values.strength,
             (if (opening) .240 else .336) / sqrt(values.stiffness) / values.speed(opening),
-            values.damping + if (swipe) .10 else 0.0, values.initialVelocity, opening, now)
+            values.damping + if (swipe) .10 else 0.0, values.initialVelocity, opening, now, tilt = values.tilt)
 
     /** Time-scale the existing channels together. Their native stiffness ratios shape the crop. */
     fun tuneSpring(args: Array<Any?>, values: Config, opening: Boolean, swipe: Boolean) {

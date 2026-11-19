@@ -2,12 +2,21 @@ package com.cosmod.launcherglass.ui
 
 /** Defaults for absent keys only. Existing installations retain their saved values. */
 object SettingsDefaults {
+    @Volatile private var factory: Map<String, Any>? = null
+
+    @Synchronized
     fun initialize(context: android.content.Context, prefs: android.content.SharedPreferences) {
+        if (factory == null) {
+            factory = runCatching {
+                context.assets.open("factory-settings.json").use {
+                    SettingsTransfer.readDocument(it, acceptOutdated = true).values
+                }
+            }.onFailure { android.util.Log.e("CPI.Settings", "Factory settings unavailable", it) }.getOrDefault(emptyMap())
+        }
         EditionMigration.copy(context,prefs)
+        val hadSavedValues = prefs.all.isNotEmpty()
         if(!prefs.getBoolean("island_view_discovery_v2",false))prefs.edit()
             .putBoolean("island_glass_enabled",false).putBoolean("island_view_discovery_v2",true).commit()
-        // Capture this before migrations populate an otherwise fresh preference file.
-        val hadSavedValues = prefs.all.isNotEmpty()
         val removed=listOf("refraction_before_blur","folder_refraction_before_blur","photo_widget_refraction_before_blur")
         if(removed.any(prefs::contains))prefs.edit().apply {removed.forEach {remove(it)}}.apply()
         if(prefs.contains("blur_dither") || prefs.contains("blur_dither_strength"))prefs.edit().apply {
@@ -31,11 +40,23 @@ object SettingsDefaults {
             putBoolean("glass_engine_type_revision",true)
         }.apply()
         WidgetSettings.migrate(prefs)
+        val motion=com.cosmod.launcherglass.util.Ba31kAnimationSettings
+        if(prefs.contains("app_tilt_enabled"))prefs.edit().apply {
+            motion.migrateClassic(prefs.all).forEach { (key,value)->
+                when(value){is Boolean->putBoolean(key,value);is Int->putInt(key,value)}
+            }
+            motion.classicKeys.forEach {remove(it)}
+        }.apply()
         if(!prefs.getBoolean("glass_blur_controls_revision",false))prefs.edit().apply {
             GlassEngineSettings.legacyRadii(prefs.all).forEach { (key,value)->putInt(key,value) }
             putBoolean("glass_blur_controls_revision",true)
         }.apply()
-        if (prefs.getInt("defaults_revision", 0) >= 38) { initializeColors(prefs); initializeTone(prefs); return }
+        if (prefs.getInt("defaults_revision", 0) >= 38) {
+            initializeColors(prefs); initializeTone(prefs)
+            applyFactoryDefaults(prefs, fresh = false)
+            migrateShadeMaterial(prefs)
+            return
+        }
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
         val upgrade = info.firstInstallTime != info.lastUpdateTime || hadSavedValues
         val editor = prefs.edit()
@@ -48,13 +69,43 @@ object SettingsDefaults {
             val oldIntegers = mapOf(SettingsProvider.KEY_BG_OPACITY to 35,
                 SettingsProvider.KEY_BLUR_RADIUS to 25, SettingsProvider.KEY_BLUR_MODE to SettingsProvider.BLUR_MODE_LIVE,
                 SettingsProvider.KEY_LIVE_FPS to 30, SettingsProvider.KEY_STROKE_OPACITY to 70,
-                SettingsProvider.KEY_SHADOW_OPACITY to 60, SettingsProvider.KEY_GRADIENT_OPACITY to 60)
+                SettingsProvider.KEY_GRADIENT_OPACITY to 60)
             oldBooleans.forEach { (key, value) -> if (!prefs.contains(key)) editor.putBoolean(key, value) }
             oldIntegers.forEach { (key, value) -> if (!prefs.contains(key)) editor.putInt(key, value) }
         }
         editor.remove("force_themed").putInt("defaults_revision", 38).apply()
         initializeColors(prefs)
         initializeTone(prefs)
+        applyFactoryDefaults(prefs, fresh = !upgrade)
+        migrateShadeMaterial(prefs)
+    }
+
+    private fun migrateShadeMaterial(prefs: android.content.SharedPreferences) {
+        if (prefs.getBoolean("soft_glass_shade_revision", false)) return
+        prefs.edit().apply {
+            for ((panel, surface) in listOf(ShadeGlassSettings.Panel.CONTROL to SoftGlassSettings.Surface.CONTROL,
+                ShadeGlassSettings.Panel.NOTIFICATIONS to SoftGlassSettings.Surface.SHADE)) {
+                if (!prefs.contains(surface.enabled) && prefs.getBoolean(panel.enabled, false)) {
+                    putBoolean(surface.enabled, true)
+                }
+            }
+            putBoolean("soft_glass_shade_revision", true)
+        }.apply()
+    }
+
+    private fun applyFactoryDefaults(prefs: android.content.SharedPreferences, fresh: Boolean) {
+        if (prefs.getBoolean("factory_profile_422", false)) return
+        val values = factory.orEmpty()
+        if (values.isEmpty()) return
+        val editor = prefs.edit()
+        for ((key, value) in values) {
+            if (!fresh && (prefs.contains(key) || SettingsTransfer.isOptionalFolder(key))) continue
+            when (value) {
+                is Boolean -> editor.putBoolean(key, value)
+                is Int -> editor.putInt(key, value)
+            }
+        }
+        editor.putBoolean("factory_profile_422", true).apply()
     }
     private fun initializePhoto(prefs:android.content.SharedPreferences){
         val editor=prefs.edit()
@@ -114,7 +165,9 @@ object SettingsDefaults {
         }
         editor.remove("color_theme").putInt("color_profiles_revision", 1).apply()
     }
-    private val booleans = OpticalSettings.booleans + mapOf(
+    private val booleans = OpticalSettings.booleans + com.cosmod.launcherglass.camera.CameraZoomSettings.booleans + mapOf(
+        WinterEffects.SNOW to true,
+        WinterEffects.MELODY to true,
         SettingsProvider.KEY_BOOT_RESTART to true,
         SettingsProvider.KEY_BOOT_RESTART_TOAST to true,
         SettingsProvider.KEY_DEVELOPER_MODE to false,
@@ -138,11 +191,10 @@ object SettingsDefaults {
         SettingsProvider.KEY_DRAWER_BLUR_ENABLED to false,
         SettingsProvider.KEY_IDLE_PAUSE to true,
         SettingsProvider.KEY_ICON_STROKE to true,
-        SettingsProvider.KEY_GLYPH_SHADOW to true,
         SettingsProvider.KEY_DESIGN_ENABLED to true,
         SettingsProvider.KEY_VOLUME_ENABLED to true
     )
-    private val integers = OpticalSettings.integers + WallpaperGlowSettings.defaults + mapOf(
+    private val integers = OpticalSettings.integers + WallpaperGlowSettings.defaults + com.cosmod.launcherglass.camera.CameraZoomSettings.integers + mapOf(
         SettingsProvider.KEY_PHOTO_WIDGET_MATERIAL to 1,
         SettingsProvider.KEY_DOCK_BLUR to 14,
 
@@ -190,20 +242,23 @@ object SettingsDefaults {
         SettingsProvider.KEY_BLUR_MODE to SettingsProvider.BLUR_MODE_LIVE,
         SettingsProvider.KEY_LIVE_FPS to 60,
         SettingsProvider.KEY_STROKE_OPACITY to 40,
-        SettingsProvider.KEY_SHADOW_OPACITY to 40,
         SettingsProvider.KEY_GRADIENT_OPACITY to 50
     )
     /** Only portable module preferences. Device reports, language and migration keys stay local. */
-    fun portable(): Map<String, Any> = ((booleans - SettingsProvider.KEY_BOOT_RESTART - SettingsProvider.KEY_BOOT_RESTART_TOAST - SettingsProvider.KEY_MD3_UI) + integers + mapOf(FolderSettingsKeys.OWN to false) +
-        FolderSettingsKeys.booleans.associate { FolderSettingsKeys.key(it) to boolean(it) } +
-        FolderSettingsKeys.integers.associate { FolderSettingsKeys.key(it) to integer(it) }) - retiredBlurKeys
+    internal fun schema(): Map<String, Any> = ((booleans - SettingsProvider.KEY_BOOT_RESTART - SettingsProvider.KEY_BOOT_RESTART_TOAST - SettingsProvider.KEY_MD3_UI) + integers + mapOf(FolderSettingsKeys.OWN to false) +
+        FolderSettingsKeys.booleans.associate { FolderSettingsKeys.key(it) to booleans.getValue(it) } +
+        FolderSettingsKeys.integers.associate { FolderSettingsKeys.key(it) to integers.getValue(it) }) - retiredBlurKeys -
+        com.cosmod.launcherglass.camera.CameraZoomSettings.ENABLED - com.cosmod.launcherglass.camera.CameraZoomSettings.DIAGNOSTICS
+
+    fun portable(): Map<String, Any> = schema() + factory.orEmpty()
+    internal fun hasFactoryValue(key: String) = factory?.containsKey(key) == true
 
     private val retiredBlurKeys = setOf(SettingsProvider.KEY_BLUR_RADIUS_ENABLED, SettingsProvider.KEY_BLUR_MODE,
         SettingsProvider.KEY_BLUR_QUALITY, SettingsProvider.KEY_LIVE_FPS, SettingsProvider.KEY_IDLE_PAUSE,
         FolderSettingsKeys.key(SettingsProvider.KEY_BLUR_RADIUS_ENABLED), FolderSettingsKeys.key(SettingsProvider.KEY_BLUR_QUALITY),
         "performance_resolution", "performance_alert_rate", "performance_adaptive_alerts", "performance_glass_120fps",
         ShadeGlassSettings.CONTROL_NATIVE_BLUR)
-    fun boolean(key: String): Boolean = if(key==FolderSettingsKeys.OWN)false else booleans[key] ?: if(key.startsWith("folder_"))boolean(key.removePrefix("folder_"))else booleans.getValue(key)
-    fun integer(key: String): Int = integers[key] ?: if(key.startsWith("folder_"))integer(key.removePrefix("folder_"))else integers.getValue(key)
-    fun value(key: String): Any = if(key==FolderSettingsKeys.OWN)false else booleans[key] ?: integers[key] ?: if(key.startsWith("folder_"))value(key.removePrefix("folder_"))else integers.getValue(key)
+    fun boolean(key: String): Boolean = (factory?.get(key) as? Boolean) ?: if(key==FolderSettingsKeys.OWN)false else booleans[key] ?: if(key.startsWith("folder_"))boolean(key.removePrefix("folder_"))else booleans.getValue(key)
+    fun integer(key: String): Int = (factory?.get(key) as? Int) ?: integers[key] ?: if(key.startsWith("folder_"))integer(key.removePrefix("folder_"))else integers.getValue(key)
+    fun value(key: String): Any = factory?.get(key) ?: if(key==FolderSettingsKeys.OWN)false else booleans[key] ?: integers[key] ?: if(key.startsWith("folder_"))value(key.removePrefix("folder_"))else integers.getValue(key)
 }

@@ -128,5 +128,8 @@ internal object ShadeGlassSettings {
     }
 
     fun panelKeys(panel: Panel) = (booleans.keys + integers.keys + GlassEngineSettings.integers.keys)
-        .filter { it.startsWith(panel.prefix) }
+        .filter { it.startsWith(panel.prefix) } + SoftGlassSettings.Surface.entries
+            .filter { it.prefix.startsWith(panel.prefix) }
+            .flatMap { surface -> listOf(surface.enabled, surface.white, surface.tilt) +
+                SoftGlassSettings.Parameter.entries.map(surface::key) }
 }

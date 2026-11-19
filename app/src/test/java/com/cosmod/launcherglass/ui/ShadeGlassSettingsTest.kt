@@ -7,6 +7,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ShadeGlassSettingsTest {
+    @Test fun softLightWidthIsPortableAndIndependentForEachSurface() {
+        val scopes = listOf(GlassEngineSettings.ICONS, GlassEngineSettings.FOLDERS,
+            GlassEngineSettings.LARGE_FOLDERS, GlassEngineSettings.WIDGETS,
+            GlassEngineSettings.DOCK, GlassEngineSettings.INDICATOR, GlassEngineSettings.BANNERS,
+            GlassEngineSettings.LIVE, GlassEngineSettings.VOLUME) +
+            LockscreenSettings.Surface.entries.map { it.key("new_engine") }
+        val defaults = SettingsDefaults.portable()
+        for (scope in scopes) {
+            val enabled = GlassEngineSettings.softKey(scope)
+            val width = GlassEngineSettings.softWidthKey(scope)
+            assertEquals(false, defaults[enabled])
+            assertEquals(100, defaults[width])
+            assertEquals(300, OpticalSettings.maximum(width))
+            assertNull(GlassEngineSettings.read(scope) { _, default -> default }.softWidth)
+        }
+        assertEquals(scopes.size, scopes.map(GlassEngineSettings::softWidthKey).toSet().size)
+    }
+
     @Test fun panelPreviewOnlyReadsKeysRegisteredForThatPanel() {
         val engineDefaults=GlassEngineSettings.integers
         for(panel in Panel.entries){

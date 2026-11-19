@@ -52,7 +52,7 @@ fun ColorOsTopBarButton(
     val motion = remember(density) { ColorOsTopBarMotion(density) }
     val darkTheme = COUITheme.colorScheme.background.luminance() < 0.5f
     val fallbackColor = ColorOsToolbarGlass.fallbackColor(
-        COUITheme.colorScheme.surfaceContainer,
+        COUITheme.colorScheme.surfaceContainerHighest,
         COUITheme.colorScheme.surface,
     )
     val maskColor = if (darkTheme) {

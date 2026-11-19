@@ -1,0 +1,16 @@
+<resources>
+    <string name="cpi_updates_title">Updates</string>
+    <string name="cpi_updates_available">CPI update available</string>
+    <string name="cpi_updates_current">Installed · %1$s (build %2$d)</string>
+    <string name="cpi_updates_version">Available · %1$s (build %2$d)</string>
+    <string name="cpi_updates_check">Check for updates</string>
+    <string name="cpi_updates_checking">Checking GitHub…</string>
+    <string name="cpi_updates_notifications">New release notifications</string>
+    <string name="cpi_updates_current_latest">You have the latest available build</string>
+    <string name="cpi_updates_check_error">Could not check for updates</string>
+    <string name="cpi_updates_install">Install</string>
+    <string name="cpi_updates_download">Downloading · %1$d%%</string>
+    <string name="cpi_updates_installing">Installing update…</string>
+    <string name="cpi_updates_install_error">Could not download, verify, or install the update</string>
+    <string name="cpi_updates_confirm">Confirm the CPI update</string>
+</resources>

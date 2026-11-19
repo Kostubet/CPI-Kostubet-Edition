@@ -37,17 +37,21 @@ object GlassEngineSettings {
 
     data class Optics(val power:Int=125,val edgeWidth:Int=34,val edgeLight:Int=62,
         val blur:Blur=Blur(),val radius:Int=10,val backdropBrightness:Int=100,
-        val lensHeight:Int=Parameter.LENS_HEIGHT.default) {
+        val lensHeight:Int=Parameter.LENS_HEIGHT.default,val softWidth:Int?=null) {
         val heightScale get()=lensHeight*.01f
     }
 
     private val lockKeys get()=LockscreenSettings.Surface.entries.map {it.key("new_engine")}
-    val booleans get()=(listOf(ICONS,FOLDERS,LARGE_FOLDERS,WIDGETS,DOCK,INDICATOR,BANNERS,LIVE,VOLUME,LOCKSCREEN)+lockKeys)
-        .associateWith {false}
+    internal val materialScopes get() = listOf(ICONS,FOLDERS,LARGE_FOLDERS,WIDGETS,DOCK,INDICATOR,BANNERS,LIVE,VOLUME) + lockKeys
+    val booleans get() = (materialScopes + LOCKSCREEN + materialScopes.map(::softKey)).associateWith { false }
+    fun softKey(scope: String) = "${scope}_soft"
+    fun softWidthKey(scope: String) = "${scope}_soft_width"
+    const val SOFT_WIDTH_DEFAULT = 100
+    const val SOFT_WIDTH_MAX = 300
     fun blurOpacityKey(scope:String)=key(scope,Parameter.BLUR_OPACITY)
 
     private val parameters by lazy {
-        (booleans.keys - LOCKSCREEN + ShadeGlassSettings.Panel.entries.map {it.newEngine}).flatMap {scope->
+        (materialScopes + ShadeGlassSettings.Panel.entries.map {it.newEngine}).flatMap {scope->
             Parameter.entries.filter {parameter->
                 when {
                     parameter==Parameter.BLUR_RADIUS->scope==LARGE_FOLDERS
@@ -60,21 +64,47 @@ object GlassEngineSettings {
             }.map {key(scope,it) to it}
         }.toMap()
     }
-    val integers get()=parameters.mapValues {it.value.default}
-    fun maximum(key:String)=parameters[key]?.max
+    private val softWidths by lazy { materialScopes.map(::softWidthKey).toSet() }
+    val integers get()=parameters.mapValues {it.value.default} + softWidths.associateWith { SOFT_WIDTH_DEFAULT }
+    fun maximum(key:String)=parameters[key]?.max ?: SOFT_WIDTH_MAX.takeIf { key in softWidths }
     fun key(scope:String,parameter:Parameter)="${scope}_${parameter.id}"
 
-    fun read(scope:String,read:(String,Int)->Int):Optics {
+    fun read(scope:String, read:(String,Int)->Int):Optics = read(scope, false, read)
+
+    private fun read(scope:String, soft:Boolean, read:(String,Int)->Int):Optics {
         fun value(parameter:Parameter):Int {
             val key=key(scope,parameter)
             return if(key in parameters)read(key,parameter.default).coerceIn(0,parameter.max) else parameter.default
         }
         return Optics(value(Parameter.POWER),value(Parameter.EDGE_WIDTH),value(Parameter.EDGE_LIGHT),
             Blur(opacity=value(Parameter.BLUR_OPACITY)),value(Parameter.BLUR_RADIUS),
-            value(Parameter.BACKDROP_BRIGHTNESS),value(Parameter.LENS_HEIGHT))
+            value(Parameter.BACKDROP_BRIGHTNESS),value(Parameter.LENS_HEIGHT),
+            if (soft) read(softWidthKey(scope), SOFT_WIDTH_DEFAULT).coerceIn(0, SOFT_WIDTH_MAX) else null)
     }
 
-    fun optics(bundle:Bundle,scope:String)=read(scope,bundle::getInt)
+    fun optics(bundle:Bundle,scope:String)=read(scope,bundle.getBoolean(softKey(scope)),bundle::getInt)
+
+    internal fun legacyIconMaterial(values: Map<String, Any?>): Map<String, Any> {
+        val style = values[SettingsProvider.KEY_BLUR_STYLE]
+        if (style != 3 && style != 3L) return emptyMap()
+        return buildMap {
+            // Older CherryPick files encoded the Kyant engine as a material ID.
+            put(SettingsProvider.KEY_BLUR_STYLE, SettingsProvider.BLUR_STYLE_LIQUID)
+            put(ICONS, true)
+            for ((oldKey, parameter) in listOf(
+                "kyant_distortion" to Parameter.POWER,
+                "kyant_width" to Parameter.EDGE_WIDTH,
+                "kyant_highlight" to Parameter.EDGE_LIGHT,
+            )) {
+                val key = key(ICONS, parameter)
+                if (key in values) continue
+                val old = values[oldKey]
+                if (old is Int || old is Long) {
+                    put(key, (old as Number).toLong().coerceIn(0, parameter.max.toLong()).toInt())
+                }
+            }
+        }
+    }
 
     /** Keep the effective radius of configurations saved before the single blur slider. */
     internal fun legacyRadii(values:Map<String,Any?>):Map<String,Int> = buildMap {

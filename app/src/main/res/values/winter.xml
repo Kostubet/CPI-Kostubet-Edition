@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_winter_snow">Snow in the app</string>
+    <string name="ui_winter_snow_hint">Snowflakes settle on card edges, slide down and gently melt. Animation stops when the app is hidden.</string>
+    <string name="ui_winter_melody">Festive banner melody</string>
+    <string name="ui_winter_melody_hint">Hold the CPI home banner for half a second. Gentle taps follow the melody and end with a smooth slide. Turn off to restore the original sound and vibration.</string>
+</resources>

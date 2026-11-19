@@ -17,6 +17,7 @@ import android.util.Log
 import android.view.View
 import java.lang.reflect.Method
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** App-bar gradient blur with compositor background blur and theme tint. */
 // High-API effects are guarded at creation and have a plain fallback.
@@ -32,6 +33,8 @@ internal class ColorOsAppBarBlurView(
     private var baseColor = baseColor
     private var blurFactor = Float.NaN
     private var nativeEffectApplied = false
+    private var appliedBlurLevel = 0
+    private val effects = arrayOfNulls<RenderEffect>(BLUR_LEVELS + 1)
     val hasNativeBlur get() = nativeEffectApplied
     private var gradientDrawable = createGradientDrawable()
 
@@ -80,27 +83,32 @@ internal class ColorOsAppBarBlurView(
     private fun applyNativeGradientBlur() {
         if (!isAttachedToWindow || width <= 0 || height <= 0) return
         val factor = if (blurFactor.isNaN()) 1f else blurFactor.coerceIn(0f, 1f)
+        val level = (factor * BLUR_LEVELS).roundToInt()
+        if (level == appliedBlurLevel) return
+        if (level == 0) {
+            clearNativeGradientBlur()
+            return
+        }
         val api = NativeApi.instance ?: return
-        nativeEffectApplied = runCatching {
-            // AppBarBlurHelper.updateGradientBlurFraction scales the radius with the same
-            // factor used for the tint drawable. The remaining parameters are the C17 defaults.
-            val effect = api.createGradientBlurEffect.invoke(
+        runCatching {
+            val effect = effects[level] ?: (api.createGradientBlurEffect.invoke(
                 null,
-                maxRadius * factor,
+                maxRadius * level / BLUR_LEVELS,
                 0f,
                 true,
                 3f,
                 0,
                 0,
                 0,
-            ) as RenderEffect
+            ) as RenderEffect).also { effects[level] = it }
             api.setBackgroundRenderEffect.invoke(null, effect, this)
-            true
+            nativeEffectApplied = true
+            appliedBlurLevel = level
         }.onFailure {
             if (!nativeEffectApplied) {
                 Log.w(TAG, "Unable to apply native ColorOS app-bar blur", it)
             }
-        }.getOrDefault(false)
+        }
     }
 
     private fun clearNativeGradientBlur() {
@@ -110,6 +118,7 @@ internal class ColorOsAppBarBlurView(
             api.setBackgroundRenderEffect.invoke(null, null, this)
         }
         nativeEffectApplied = false
+        appliedBlurLevel = 0
     }
 
     private fun createGradientDrawable(): ColorOsAppBarGradientDrawable {
@@ -130,6 +139,7 @@ internal class ColorOsAppBarBlurView(
 
     internal companion object {
         private const val TAG = "ONextBoxAppBarBlur"
+        private const val BLUR_LEVELS = 24
 
         fun isSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             NativeApi.instance != null
