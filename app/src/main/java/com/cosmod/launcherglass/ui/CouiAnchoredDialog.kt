@@ -30,6 +30,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnPreDraw
+import com.cosmod.launcherglass.ui.onextbox.ColorOsPopupMaterialView
+import com.cosmod.launcherglass.ui.onextbox.applyOplusPopupBlur
+import com.cosmod.launcherglass.ui.onextbox.colorOsPopupFallback
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot
@@ -531,7 +534,9 @@ internal class CouiAnchoredDialog(
 
     private class Panel(context:Context,val content:View,private val dark:Boolean):FrameLayout(context) {
         private val density=resources.displayMetrics.density
-        private val material=CouiPopupBackground(context,dark)
+        private val legacyMaterial = if (CouiAppearance.read(context) == CouiAppearance.ORIGINAL)
+            ColorOsPopupMaterialView(context, dark) else null
+        private val material: View = legacyMaterial ?: CouiPopupBackground(context, dark)
         private val shade=View(context).apply {
             background=CouiCardEdgeShade(dark,density)
             outlineProvider=material.outlineProvider
@@ -625,7 +630,7 @@ internal class CouiAnchoredDialog(
 
         fun presentContext(next:ContextMenuMotion.Frame){
             contextMotion=next
-            material.renderProgress(next.materialAlpha)
+            renderMaterial(next.materialAlpha)
             shade.alpha=next.materialAlpha
             content.alpha=next.contentAlpha
             replica.alpha=sourceAlpha*next.rowAlpha
@@ -642,7 +647,7 @@ internal class CouiAnchoredDialog(
             this.frame=frame
             this.dragOffset=dragOffset
             this.dragScale=dragScale
-            material.renderProgress(opacity)
+            renderMaterial(opacity)
             shade.alpha=opacity
             content.alpha=opacity
             if(frame!=null){
@@ -655,6 +660,21 @@ internal class CouiAnchoredDialog(
                 replica.scaleY=rowScale
             }
             updateBounds()
+        }
+
+        private fun renderMaterial(opacity: Float) {
+            legacyMaterial?.updateTransition(opacity, 1f, 1f)
+                ?: (material as CouiPopupBackground).renderProgress(opacity)
+        }
+
+        override fun onAttachedToWindow() {
+            super.onAttachedToWindow()
+            val original = legacyMaterial ?: return
+            original.background = ColorDrawable(colorOsPopupFallback(dark))
+            original.syncTransitionAlpha()
+            if (couiMaterialEnabled(context)) original.doOnPreDraw {
+                applyOplusPopupBlur(original, dark, density)
+            }
         }
 
         private fun updateBounds(){

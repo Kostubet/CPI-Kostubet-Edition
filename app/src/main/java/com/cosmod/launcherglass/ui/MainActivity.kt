@@ -432,7 +432,8 @@ class MainActivity : AppCompatActivity() {
     private fun card(content:View,inner:Boolean=false):FrameLayout {
         val color=if(coloredFeatures)withAlpha(Color.WHITE,if(darkUi)27 else 154)else if(inner)raised else panel
         val radius=if(inner)16 else 20
-        val edge=if(bool("coloros_ui_effects"))withAlpha(onSurface,if(darkUi)33 else 23)else Color.TRANSPARENT
+        val edge=if(bool("coloros_ui_effects") && CouiAppearance.read(this)==CouiAppearance.MODERN)
+            withAlpha(onSurface,if(darkUi)33 else 23) else Color.TRANSPARENT
         return CouiCardHost(this,color,radius,edge,content)
     }
 
@@ -3956,6 +3957,24 @@ class MainActivity : AppCompatActivity() {
         add(tools,previews)
         divider(tools)
         add(tools,preferenceLink(getString(R.string.ui_theme_system),if(theme==0)getString(R.string.ui_theme) else null){selectTheme(0)})
+        divider(tools)
+        val styles = listOf(CouiAppearance.ORIGINAL.value to R.string.ui_coui_original,
+            CouiAppearance.MODERN.value to R.string.ui_coui_modern)
+        val currentStyle = CouiAppearance.read(this).value
+        add(tools,optionRow(getString(R.string.ui_coui_appearance),getString(styles.first { it.first == currentStyle }.second)).apply {
+            setOnClickListener {
+                haptic(it)
+                choicePopup(it,styles,currentStyle) { style ->
+                    if (style != currentStyle) {
+                        val scrollY = currentScroll?.scrollY ?: 0
+                        prefs.edit().putInt(CouiAppearance.KEY,style).apply()
+                        rootNavigation?.let(page::removeView)
+                        rootNavigation = null
+                        rebuildThemedPage(scrollY)
+                    }
+                }
+            }
+        })
         divider(tools)
         add(tools,switchRow(getString(R.string.ui_coloros_effects),"coloros_ui_effects",getString(R.string.ui_coloros_effects_hint)))
         val backgrounds=listOf(0 to R.string.ui_background_off,1 to R.string.ui_background_classic,2 to R.string.ui_background_flowing)

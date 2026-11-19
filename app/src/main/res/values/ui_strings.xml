@@ -300,6 +300,9 @@
     <string name="ui_device_display">Display</string>
     <string name="ui_device_patch">Security patch</string>
     <string name="ui_settings_display">Display</string>
+    <string name="ui_coui_appearance">COUI appearance</string>
+    <string name="ui_coui_original">Original COUI</string>
+    <string name="ui_coui_modern">COUI 2.0</string>
     <string name="ui_export_diagnostics">Export diagnostics</string>
     <string name="ui_status_restart_pending">Active. Restart %1$s.</string>
     <string name="ui_about_contributors">Contributors</string>

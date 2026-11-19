@@ -12,8 +12,10 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
+import com.cosmod.launcherglass.ui.onextbox.ColorOs17BottomNavigationBar
 import io.github.suqi8.coui.kmp.basic.FloatingNavigationBar
 import io.github.suqi8.coui.kmp.basic.FloatingNavigationBarItem
+import io.github.suqi8.coui.kmp.basic.NavigationItem
 import kotlin.math.roundToInt
 
 /** Persistent upstream COUI navigation; restart actions live in the page toolbar. */
@@ -26,29 +28,41 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
     private val backdrop = CouiChromeBackdrop(context, dark) { hardwareBackdrop = it }
 
     init {
-        addView(backdrop, 0, LayoutParams(0, 0))
+        if (appearance == CouiAppearance.MODERN) addView(backdrop, 0, LayoutParams(0, 0))
         composition.layoutParams=LayoutParams(-1,-1)
         composition.clipChildren=false;composition.clipToPadding=false
         content {
             Box(Modifier.fillMaxSize(),contentAlignment=Alignment.BottomCenter){
-                FloatingNavigationBar(
-                    defaultWindowInsetsPadding = false,
-                    color = Color(surfaceColor).copy(alpha = if (hardwareBackdrop) .20f else 1f),
-                    backgroundModifier = Modifier.onGloballyPositioned { coordinates ->
-                        val bounds = coordinates.boundsInRoot()
-                        capsuleBounds.set(bounds.left.roundToInt(), bounds.top.roundToInt(),
-                            bounds.right.roundToInt(), bounds.bottom.roundToInt())
-                        placeBackdrop()
-                    },
-                ) {
-                    labels.forEachIndexed { index, label ->
-                        val active = selected.intValue == index
-                        FloatingNavigationBarItem(
-                            selected = active,
-                            onClick = { onSelected(index) },
-                            icon = ImageVector.vectorResource(if (active) icons[index] else outlineIcons[index]),
-                            label = label,
-                        )
+                if (appearance == CouiAppearance.ORIGINAL) {
+                    ColorOs17BottomNavigationBar(
+                        items = labels.mapIndexed { index, label ->
+                            NavigationItem(label, ImageVector.vectorResource(icons[index]))
+                        },
+                        selectedIndex = selected.intValue,
+                        onItemSelected = onSelected,
+                        modifier = Modifier.fillMaxWidth().height(88.dp),
+                        unselectedIcons = outlineIcons.map { ImageVector.vectorResource(it) },
+                    )
+                } else {
+                    FloatingNavigationBar(
+                        defaultWindowInsetsPadding = false,
+                        color = Color(surfaceColor).copy(alpha = if (hardwareBackdrop) .20f else 1f),
+                        backgroundModifier = Modifier.onGloballyPositioned { coordinates ->
+                            val bounds = coordinates.boundsInRoot()
+                            capsuleBounds.set(bounds.left.roundToInt(), bounds.top.roundToInt(),
+                                bounds.right.roundToInt(), bounds.bottom.roundToInt())
+                            placeBackdrop()
+                        },
+                    ) {
+                        labels.forEachIndexed { index, label ->
+                            val active = selected.intValue == index
+                            FloatingNavigationBarItem(
+                                selected = active,
+                                onClick = { onSelected(index) },
+                                icon = ImageVector.vectorResource(if (active) icons[index] else outlineIcons[index]),
+                                label = label,
+                            )
+                        }
                     }
                 }
             }
@@ -62,7 +76,7 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         composition.layout(0, 0, right - left, bottom - top)
-        placeBackdrop()
+        if (appearance == CouiAppearance.MODERN) placeBackdrop()
     }
 
     private fun placeBackdrop() {

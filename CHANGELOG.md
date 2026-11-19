@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 417
+
+- В настройках можно выбрать оригинальное оформление COUI или COUI 2.0 независимо от светлой и тёмной темы. «Общие», «Цвета» и «Стиль» в разделах функций сохраняют оформление COUI 2.0.
+
 ### Сборка 416
 
 - Поиск и нижняя панель снова используют кромку, подсветку и упругое движение COUI. Заголовок «Функции» возвращается синхронно с поиском.
@@ -94,6 +98,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 417
+
+- Choose Original COUI or COUI 2.0 in settings independently of light and dark mode. The General, Colors and Style tabs in feature pages keep the COUI 2.0 design.
 
 ### Build 416
 

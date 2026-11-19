@@ -15,6 +15,7 @@
 ### Возможности
 
 - Разделы «Функций» сгруппированы в System Launcher, System UI и общие настройки. Поиск по русским и английским названиям показывает найденную настройку под названием раздела.
+- В «О модуле → Настройки → Оформление COUI» можно переключаться между оригинальным COUI и COUI 2.0 независимо от светлой или тёмной темы.
 - Стекло для иконок, папок, виджетов, докбара и индикатора страниц. Для разных элементов доступны свои настройки.
 - Стекло для баннеров уведомлений, развёрнутых «Живых оповещений», панели громкости и элементов экрана блокировки.
 - Независимое стекло центра управления и центра уведомлений ColorOS 17 с живым фоном, настройками отдельных компонентов и предпросмотром.
@@ -78,6 +79,7 @@ git push origin v0.2.78-build328
 An LSPosed module written in Kotlin that brings Frosted and Liquid Glass design to launcher icons. A beautiful icon backdrop engine with nice customisation. A fork of [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
 
 - Frosted and Liquid Glass for icons, folders, widgets, the dock and page indicators.
+- In About → Settings → COUI appearance, choose Original COUI or COUI 2.0 independently of light or dark mode.
 - Glass settings for notification banners, expanded Live Alerts, the volume panel and lock screen elements.
 - Independent glass controls and live material previews for the original ColorOS 17 Control and Notification Centers.
 - Each glass section puts Blur and Blur transparency directly below the material picker. AndroidLiquidGlass optics are optional. Moving backdrops target up to 120 FPS, subject to the display and capture performance.

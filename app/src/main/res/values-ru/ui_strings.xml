@@ -300,6 +300,9 @@
     <string name="ui_device_display">Экран</string>
     <string name="ui_device_patch">Патч безопасности</string>
     <string name="ui_settings_display">Дисплей</string>
+    <string name="ui_coui_appearance">Оформление COUI</string>
+    <string name="ui_coui_original">Оригинальный COUI</string>
+    <string name="ui_coui_modern">COUI 2.0</string>
     <string name="ui_export_diagnostics">Экспорт диагностики</string>
     <string name="ui_status_restart_pending">Включён. Перезапусти %1$s.</string>
     <string name="ui_about_contributors">Участники</string>

@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import com.cosmod.launcherglass.ui.onextbox.createOplusPopupBackdrop
+import com.cosmod.launcherglass.ui.onextbox.ColorOsDropdownPopup
 import io.github.suqi8.coui.kmp.basic.DropdownDefaults
 import io.github.suqi8.coui.kmp.basic.DropdownEntry
 import io.github.suqi8.coui.kmp.basic.DropdownItem
@@ -38,39 +39,52 @@ internal class CouiPopup(context: Context, dark: Boolean, accent: Int, surface: 
                     })
                 })
             }
-            val color = Color(surface)
-            val material = remember(color) {
-                MaterialBlurProvider { spec, _ ->
-                    Modifier.composed {
-                        val view = LocalView.current
-                        drawWithCache {
-                            val tinted = spec.copy(
-                                mixColor = lerp(spec.mixColor, color.copy(alpha = spec.mixColor.alpha), .45f),
-                            )
-                            val drawable = if (view.isHardwareAccelerated)
-                                createOplusPopupBackdrop(view, tinted, COUIRoundCorner.XXXL.toPx()) else null
-                            drawable?.setBounds(0, 0, size.width.roundToInt(), size.height.roundToInt())
-                            onDrawBehind {
-                                drawIntoCanvas { canvas ->
-                                    if (drawable != null && canvas.nativeCanvas.isHardwareAccelerated) {
-                                        drawable.draw(canvas.nativeCanvas)
-                                    } else drawRect(color)
+            if (appearance == CouiAppearance.ORIGINAL) {
+                ColorOsDropdownPopup(showing, entry, maxHeight = 440.dp, onDismissRequest = ::close,
+                    onDismissFinished = { finish(onPick) }, onItemClick = { index ->
+                        if (showing) {
+                            picked = options[index].first
+                            close()
+                        }
+                    })
+            } else {
+                val color = Color(surface)
+                val material = remember(color) {
+                    MaterialBlurProvider { spec, _ ->
+                        Modifier.composed {
+                            val view = LocalView.current
+                            drawWithCache {
+                                val tinted = spec.copy(
+                                    mixColor = lerp(spec.mixColor, color.copy(alpha = spec.mixColor.alpha), .45f),
+                                )
+                                val drawable = if (view.isHardwareAccelerated)
+                                    createOplusPopupBackdrop(view, tinted, COUIRoundCorner.XXXL.toPx()) else null
+                                drawable?.setBounds(0, 0, size.width.roundToInt(), size.height.roundToInt())
+                                onDrawBehind {
+                                    drawIntoCanvas { canvas ->
+                                        if (drawable != null && canvas.nativeCanvas.isHardwareAccelerated) {
+                                            drawable.draw(canvas.nativeCanvas)
+                                        } else drawRect(color)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            CompositionLocalProvider(LocalPopupMaterialBlur provides material) {
-                // Applying a choice can rebuild the page that hosts this popup.
-                WindowDropdownPopup(entry, showing, onDismiss = ::close, onDismissFinished = {
-                    val choice = picked
-                    picked = null
-                    onDismiss()
-                    choice?.let(onPick)
-                }, maxHeight = 440.dp, dropdownColors = DropdownDefaults.dropdownColors(), backgroundColor = color)
+                CompositionLocalProvider(LocalPopupMaterialBlur provides material) {
+                    // Applying a choice can rebuild the page that hosts this popup.
+                    WindowDropdownPopup(entry, showing, onDismiss = ::close, onDismissFinished = { finish(onPick) },
+                        maxHeight = 440.dp, dropdownColors = DropdownDefaults.dropdownColors(), backgroundColor = color)
+                }
             }
         }
     }
     fun close() { showing = false }
+
+    private fun finish(onPick: (Int) -> Unit) {
+        val choice = picked
+        picked = null
+        onDismiss()
+        choice?.let(onPick)
+    }
 }

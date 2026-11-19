@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.cosmod.launcherglass.ui.onextbox.ColorOsTopBarButton
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.IconButton
 import io.github.suqi8.coui.kmp.basic.SmallTopAppBar
@@ -40,8 +41,15 @@ internal class CouiDetailToolbar(
                 actionIconPadding = 0.dp,
                 titlePadding = 6.dp,
                 navigationIcon = {
-                    IconButton(onClick = onBack, modifier = Modifier.size(46.dp), cornerRadius = 23.dp) {
-                        Icon(COUIIcons.Back, backLabel, Modifier.size(22.dp), tint = Color(foreground))
+                    if (appearance == CouiAppearance.ORIGINAL) {
+                        ColorOsTopBarButton(onClick = onBack, modifier = Modifier.size(46.dp),
+                            nativeBlurEnabled = couiMaterialEnabled(context), buttonWidth = 46.dp) {
+                            Icon(COUIIcons.Back, backLabel, Modifier.size(22.dp), tint = Color(foreground))
+                        }
+                    } else {
+                        IconButton(onClick = onBack, modifier = Modifier.size(46.dp), cornerRadius = 23.dp) {
+                            Icon(COUIIcons.Back, backLabel, Modifier.size(22.dp), tint = Color(foreground))
+                        }
                     }
                 },
                 actions = {

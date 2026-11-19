@@ -3,6 +3,7 @@ package com.cosmod.launcherglass.ui
 import android.content.Context
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -10,6 +11,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import com.cosmod.launcherglass.ui.onextbox.ColorOsSearchSurface
 import io.github.suqi8.coui.kmp.basic.InputField
 import io.github.suqi8.coui.kmp.basic.SearchBarDefaults
 
@@ -34,33 +36,39 @@ internal class CouiSearchHost(
     private val backdrop = CouiChromeBackdrop(context, dark) {}
 
     init {
-        addView(backdrop, 0, LayoutParams(0, 0))
+        if (appearance == CouiAppearance.MODERN) addView(backdrop, 0, LayoutParams(0, 0))
         composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
             val focus = LocalFocusManager.current
             val keyboard = LocalSoftwareKeyboardController.current
             clearInputFocus = { keyboard?.hide(); focus.clearFocus() }
 
-            InputField(
-                query = queryText,
-                onQueryChange = ::setQuery,
-                onSearch = { onSearch() },
-                expanded = inputFocused,
-                onExpandedChange = { if (!it) closeKeyboard() },
-                label = label,
-                colors = SearchBarDefaults.searchBarColors(
-                    backgroundColor = Color(surface),
-                    labelColor = Color(foreground).copy(alpha = .74f),
-                    iconColor = Color(foreground).copy(alpha = .8f),
-                    clearIconColor = Color(foreground).copy(alpha = .5f),
-                ),
-                modifier = Modifier.fillMaxSize().onFocusChanged {
-                    if (inputFocused != it.hasFocus) {
-                        inputFocused = it.hasFocus
-                        post { onFocusChanged() }
-                    }
-                },
-            )
+            val input: @Composable () -> Unit = {
+                InputField(
+                    query = queryText,
+                    onQueryChange = ::setQuery,
+                    onSearch = { onSearch() },
+                    expanded = inputFocused,
+                    onExpandedChange = { if (!it) closeKeyboard() },
+                    label = label,
+                    material = appearance == CouiAppearance.MODERN && couiMaterialEnabled(context),
+                    colors = SearchBarDefaults.searchBarColors(
+                        backgroundColor = if (appearance == CouiAppearance.ORIGINAL) Color.Transparent else Color(surface),
+                        labelColor = Color(foreground).copy(alpha = .74f),
+                        iconColor = Color(foreground).copy(alpha = .8f),
+                        clearIconColor = Color(foreground).copy(alpha = .5f),
+                    ),
+                    modifier = Modifier.fillMaxSize().onFocusChanged {
+                        if (inputFocused != it.hasFocus) {
+                            inputFocused = it.hasFocus
+                            post { onFocusChanged() }
+                        }
+                    },
+                )
+            }
+            if (appearance == CouiAppearance.ORIGINAL) {
+                ColorOsSearchSurface(Modifier.fillMaxSize(), Color(surface), inputFocused, queryText.isEmpty()) { input() }
+            } else input()
         }
     }
 
@@ -89,14 +97,14 @@ internal class CouiSearchHost(
         val visibleWidth = if (requestedWidth < 0) width else requestedWidth.coerceIn(0, width)
         val widthSpec = MeasureSpec.makeMeasureSpec(visibleWidth, MeasureSpec.EXACTLY)
         val heightSpec = MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
-        backdrop.measure(widthSpec, heightSpec)
+        if (appearance == CouiAppearance.MODERN) backdrop.measure(widthSpec, heightSpec)
         composition.measure(widthSpec, heightSpec)
     }
 
     private fun placeCapsule(width: Int, height: Int) {
         val visibleWidth = composition.measuredWidth
         val left = if (layoutDirection == LAYOUT_DIRECTION_RTL) width - visibleWidth else 0
-        backdrop.layout(left, 0, left + visibleWidth, height)
+        if (appearance == CouiAppearance.MODERN) backdrop.layout(left, 0, left + visibleWidth, height)
         composition.layout(left, 0, left + visibleWidth, height)
     }
 

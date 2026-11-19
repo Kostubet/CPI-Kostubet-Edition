@@ -7,8 +7,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.cosmod.launcherglass.ui.onextbox.ColorOs17Button
+import com.cosmod.launcherglass.ui.onextbox.ColorOs17ConfirmDialog
 import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.CardDefaults
@@ -22,7 +25,8 @@ import io.github.suqi8.coui.kmp.window.WindowDialog
 
 @Composable
 internal fun CouiGroup(content: @Composable ColumnScope.() -> Unit) {
-    val edge = if (LocalCOUIMaterialEffectEnabled.current) {
+    val edge = if (LocalCOUIMaterialEffectEnabled.current &&
+        CouiAppearance.read(LocalContext.current) == CouiAppearance.MODERN) {
         val color = COUITheme.colorScheme
         Modifier.border(1.dp, color.labelPrimary.copy(alpha = if (color.isDark) .13f else .09f),
             SquircleShape(CardDefaults.CornerRadius))
@@ -40,6 +44,11 @@ internal fun CouiAction(
     minimumHeight: Dp = ButtonDefaults.MinHeight,
     enabled: Boolean = true,
 ) {
+    if (CouiAppearance.read(LocalContext.current) == CouiAppearance.ORIGINAL) {
+        ColorOs17Button(text, primary, onClick = onClick, modifier = modifier,
+            minimumHeight = minimumHeight, enabled = enabled)
+        return
+    }
     TextButton(
         text = text,
         onClick = onClick,
@@ -65,6 +74,11 @@ internal fun CouiConfirmation(
     onDismissFinished: () -> Unit,
     content: (@Composable () -> Unit)?,
 ) {
+    if (CouiAppearance.read(LocalContext.current) == CouiAppearance.ORIGINAL) {
+        ColorOs17ConfirmDialog(show, title, summary, negativeText, positiveText, onDismissRequest,
+            onNegative, onPositive, onDismissFinished, content)
+        return
+    }
     WindowDialog(
         show = show,
         title = title,

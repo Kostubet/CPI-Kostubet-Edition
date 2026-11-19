@@ -89,10 +89,15 @@ import io.github.suqi8.coui.kmp.theme.COUIRoundCorner
 import io.github.suqi8.coui.kmp.theme.darkColorScheme
 import io.github.suqi8.coui.kmp.theme.lightColorScheme
 import com.cosmod.launcherglass.R
+import com.cosmod.launcherglass.ui.onextbox.ColorOs17SettingsSlider
+import com.cosmod.launcherglass.ui.onextbox.ColorOsSwitch
+import com.cosmod.launcherglass.ui.onextbox.ColorOsTopBarButton
+import com.cosmod.launcherglass.ui.onextbox.LocalChromeNativeBlurEnabled
 import kotlin.math.roundToInt
 
 /** Connects the COUI controls to CPI's View-based feature pages. */
 internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int, barSurface: Int? = null) : FrameLayout(context) {
+    protected val appearance = CouiAppearance.read(context)
     private val surface = Color(ContextCompat.getColor(context, R.color.cpi_ui_panel))
     private val bar = barSurface?.let { Color(it) } ?: surface
     private val colors = if (dark) {
@@ -116,7 +121,12 @@ internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int
     protected fun content(draw: @Composable () -> Unit) {
         composition.setContent {
             COUITheme(colors = colors) {
-                CompositionLocalProvider(LocalCOUIMaterialEffectEnabled provides couiMaterialEnabled(context), content = draw)
+                val effects = couiMaterialEnabled(context)
+                CompositionLocalProvider(
+                    LocalCOUIMaterialEffectEnabled provides effects,
+                    LocalChromeNativeBlurEnabled provides effects,
+                    content = draw,
+                )
             }
         }
     }
@@ -216,7 +226,17 @@ internal class CouiSwitchRow(
 
     init {
         content {
-            if (onExpand == null) {
+            if (appearance == CouiAppearance.ORIGINAL) {
+                BasicComponent(title = title, summary = summary, enabled = controlEnabled,
+                    onClick = if (onExpand == null) { { change(!checked); haptic() } } else ::toggleExpansion,
+                    onClickLabel = if (onExpand == null) null else context.getString(
+                        if (expanded) R.string.ui_collapse else R.string.ui_expand
+                    ),
+                    endActions = {
+                        if (onExpand != null) ExpandableGroupArrow(expanded)
+                        ColorOsSwitch(checked = checked, onCheckedChange = ::change, enabled = controlEnabled)
+                    })
+            } else if (onExpand == null) {
                 SwitchPreference(checked = checked, onCheckedChange = ::change, title = title,
                     summary = summary, enabled = controlEnabled)
             } else {
@@ -275,6 +295,22 @@ internal class CouiSlider(context: Context, dark: Boolean, accent: Int, private 
                             val hsv = remember(color) { FloatArray(3).also { android.graphics.Color.colorToHSV(color, it) } }
                             HsvValueSlider(hsv[0], hsv[1], progress.toFloat() / range.coerceAtLeast(1),
                                 onValueChanged = { change(it * range) })
+                        }
+                    })
+            } else if (appearance == CouiAppearance.ORIGINAL) {
+                BasicComponent(title = label, summary = hint, enabled = controlEnabled,
+                    endActions = { Text(format(progress), color = COUITheme.colorScheme.labelSecondary) },
+                    bottomAction = {
+                        Box(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp),
+                            contentAlignment = Alignment.Center) {
+                            ColorOs17SettingsSlider(
+                                value = progress.toFloat(),
+                                onValueChange = ::change,
+                                modifier = Modifier.fillMaxWidth().semantics { contentDescription = label },
+                                enabled = controlEnabled,
+                                valueRange = 0f..range.coerceAtLeast(1).toFloat(),
+                                onValueChangeFinished = { if (!cancelled) onTouchFinished?.invoke(progress) },
+                            )
                         }
                     })
             } else {
@@ -530,15 +566,22 @@ internal class CouiIconButton(context: Context, dark: Boolean, accent: Int, fore
     init {
         composition.layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
         content {
-            IconButton(
-                onClick={performClick()}, modifier=Modifier.fillMaxSize(), enabled=controlEnabled,
-                material=effects, backgroundColor=when {
-                    !effects -> Color(surface)
-                    chrome -> Color(surface).copy(alpha = .27f)
-                    else -> Color.Unspecified
-                },
-                cornerRadius=50.dp, minHeight=0.dp, minWidth=0.dp) {
-                Icon(painterResource(icon),label,Modifier.size(22.dp),tint=Color(foreground))
+            if (appearance == CouiAppearance.ORIGINAL) {
+                ColorOsTopBarButton(onClick = { if (controlEnabled) performClick() },
+                    modifier = Modifier.fillMaxSize(), nativeBlurEnabled = effects, buttonWidth = 46.dp) {
+                    Icon(painterResource(icon), label, Modifier.size(22.dp), tint = Color(foreground))
+                }
+            } else {
+                IconButton(
+                    onClick={performClick()}, modifier=Modifier.fillMaxSize(), enabled=controlEnabled,
+                    material=effects, backgroundColor=when {
+                        !effects -> Color(surface)
+                        chrome -> Color(surface).copy(alpha = .27f)
+                        else -> Color.Unspecified
+                    },
+                    cornerRadius=50.dp, minHeight=0.dp, minWidth=0.dp) {
+                    Icon(painterResource(icon),label,Modifier.size(22.dp),tint=Color(foreground))
+                }
             }
         }
     }
