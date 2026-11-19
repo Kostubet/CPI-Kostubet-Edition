@@ -21,6 +21,7 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -82,7 +83,7 @@ class HapticStudioActivity : AppCompatActivity() {
     private var compare = false
     private var previewAudio = true
     private var channel = HapticChannel.AMPLITUDE
-    private var drawMode = HapticDrawMode.NAVIGATE
+    private var drawMode = HapticDrawMode.POINT
     private var graph: HapticTimeline? = null
     private var playback: HapticPlaybackBar? = null
     private var labCursor = 0
@@ -136,7 +137,7 @@ class HapticStudioActivity : AppCompatActivity() {
             IntentCompat.getParcelableExtra(it, RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
         } ?: return@registerForActivityResult
         val actual = if (RingtoneManager.isDefault(uri)) actualRingtone() else uri
-        actual?.let { analyze(it, false) } ?: message(t("No system ringtone selected", "Системный рингтон не выбран"))
+        actual?.let(::importRingtone) ?: message(t("No system ringtone selected", "Системный рингтон не выбран"))
     }
     private val openPattern = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
@@ -340,15 +341,15 @@ class HapticStudioActivity : AppCompatActivity() {
     private fun generatorPage() {
         card(body, t("Audio source", "Источник аудио"), divided = true) { box ->
             link(box, t("Choose audio file", "Выбрать аудиофайл")) { if (!busy) openAudio.launch(arrayOf("audio/*")) }
-            link(box, t("Choose ringtone", "Выбрать рингтон")) {
+            link(box, t("Import ringtone vibration", "Импортировать вибрацию рингтона")) {
                 if (!busy) runCatching { ringtonePicker.launch(Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
                     putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_RINGTONE)
                     putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
                     putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, audio)
-                }) }.onFailure { actualRingtone()?.let { analyze(it, false) } }
+                }) }.onFailure { message(t("Ringtone picker unavailable", "Выбор рингтонов недоступен")) }
             }
-            link(box, t("Use current system ringtone", "Взять текущий рингтон системы")) {
-                if (!busy) actualRingtone()?.let { analyze(it, false) }
+            link(box, t("Import current ringtone vibration", "Взять вибрацию текущего рингтона")) {
+                if (!busy) actualRingtone()?.let(::importRingtone)
                     ?: message(t("No system ringtone selected", "Системный рингтон не выбран"))
             }
             waveform?.let { track ->
@@ -400,19 +401,25 @@ class HapticStudioActivity : AppCompatActivity() {
                 channel = channels[it]; show(preserveScroll = true)
             }
             option(box, t("Timeline tool", "Инструмент"), drawMode.ordinal,
-                listOf(t("Navigate", "Навигация"), t("Point", "Точка"), t("Brush", "Кисть"))) {
+                listOf(t("Navigate", "Навигация"), t("Edit points", "Перемещение точек"), t("Freehand", "Рисование кривой"))) {
                 player.stop()
                 drawMode = HapticDrawMode.entries[it]
                 show(preserveScroll = true)
             }
+            box.addView(summary(t("Tap to place the playhead. Drag a point to edit its time and strength. Pinch to zoom.",
+                "Тап ставит курсор. Потяни точку, чтобы изменить её время и силу. Сведи или разведи два пальца для масштаба.")))
             addGraph(box, pattern, true)
+            buttons(box, t("+ Click", "+ Щелчок"), t("+ Slide", "+ Слайд"),
+                { addQuickEffect(HapticSlide.TAPS) }, { addQuickEffect(lastContinuousSlide) })
             buttons(box, t("Zoom out", "Уменьшить"), t("Zoom in", "Увеличить"),
                 { graph?.zoomBy(.5f) }, { graph?.zoomBy(2f) })
             previewControls(box)
         }
         card(body, t("Add effect at cursor", "Добавить эффект в позицию курсора"), divided = true) { box ->
-            link(box, t("Vibration slide", "Слайд вибрации")) { openLab(lastContinuousSlide) }
-            link(box, t("Taps", "Постукивания")) { openLab(HapticSlide.TAPS) }
+            link(box, t("Record a rhythm by tapping", "Настучать свой ритм")) { recordRhythm() }
+            link(box, t("Configure a slide", "Настроить слайд")) { openLab(lastContinuousSlide) }
+            link(box, t("Configure a sequence of clicks", "Настроить серию щелчков")) { openLab(HapticSlide.TAPS) }
+            link(box, t("Sync or import a ringtone", "Автосинхронизация и импорт рингтона")) { player.stop(); show(Page.GENERATOR) }
         }
         card(body, t("Control points", "Контрольные точки")) { box ->
             displayPointBox = column()
@@ -712,7 +719,7 @@ class HapticStudioActivity : AppCompatActivity() {
 
     private fun addGraph(box: LinearLayout, project: HapticPattern, editable: Boolean) {
         val timeline = HapticTimeline(this, ink, accent, ::drawStroke, if (editable) ::seek else ::seekLab,
-            ::cancelStroke).apply {
+            ::cancelStroke, ::dragPoint).apply {
             pattern = project
             source = if (editable && project.audio == audio?.toString()) waveform else null
             channel = if (editable) this@HapticStudioActivity.channel else HapticChannel.AMPLITUDE
@@ -792,14 +799,109 @@ class HapticStudioActivity : AppCompatActivity() {
             if (points != null) {
                 val project = snapshot.copy(length = source.length, points = points, audio = uri.toString(),
                     style = selectedStyle, generator = options)
+                if (snapshot.audio != uri.toString()) {
+                    original = null
+                    selectedId = null
+                }
                 changePattern(project)
-                original = project
                 cursor = 0
                 resetSelection()
                 show(Page.EDITOR)
             } else show(preserveScroll = true)
         }
         if (page == Page.GENERATOR) show(preserveScroll = true)
+    }
+
+    private fun importRingtone(uri: Uri) {
+        if (busy) return
+        player.stop()
+        task({
+            val name = runCatching {
+                contentResolver.query(uri, arrayOf(android.provider.MediaStore.Audio.Media.TITLE),
+                    null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+            }.getOrNull()
+            HapticAudio.readRingtone(this, uri) to name
+        }) { (source, name) ->
+            audio = uri
+            waveform = source.track
+            val points = source.vibration
+            if (points == null) {
+                show(Page.GENERATOR)
+                message(t("This ringtone has no readable vibration track. Use Generate to sync from audio.",
+                    "Дорожка вибрации недоступна. Нажми «Сгенерировать», чтобы синхронизировать по звуку."))
+                return@task
+            }
+            val project = HapticPattern(name?.trim()?.take(80)?.takeIf { it.isNotEmpty() }
+                ?: t("System ringtone", "Системный рингтон"), source.track.length, points, audio = uri.toString())
+            changePattern(project)
+            original = project
+            selectedId = null
+            compare = false
+            cursor = 0
+            resetSelection()
+            show(Page.EDITOR)
+            message(t("System vibration envelope imported", "Огибающая системной вибрации импортирована"))
+        }
+        if (page == Page.GENERATOR) show(preserveScroll = true)
+    }
+
+    private fun addQuickEffect(type: HapticSlide) {
+        val length = if (type == HapticSlide.TAPS) 80 else 320
+        val points = if (type == HapticSlide.TAPS) tapPoints(length, listOf(HapticClick(0, .8f)))
+            else slidePoints(type, 0, length, .72f, .65f, 0f, 0f, 2, HapticAdsr(40, 60, 65, 90),
+                HapticCurve.SMOOTH_STEP)
+        insertEditorEffect(length, points, if (type == HapticSlide.TAPS) 180 else length)
+    }
+
+    private fun recordRhythm() {
+        player.stop()
+        showDialog(t("Record a rhythm", "Запись ритма")) { box, dialog ->
+            val clicks = ArrayList<HapticClick>()
+            var first = 0L
+            val count = mutableIntStateOf(0)
+            box.addView(CouiSlot(this, dark, accent) {
+                Text(t("${count.intValue} clicks", "Щелчков: ${count.intValue}"),
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    style = COUITheme.textStyles.bodyM, color = COUITheme.colorScheme.labelSecondary)
+            })
+            box.addView(button(t("Tap here", "Стучи здесь"), primary = true) {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (clicks.isEmpty()) first = now
+                val time = now - first
+                val previous = clicks.lastOrNull()?.time ?: -70
+                if (time <= MAX_TRACK_MS - 80 - pattern.sourceTimeAt(cursor) && time - previous >= 70) {
+                    val strength = .7f
+                    clicks += HapticClick(time.toInt(), strength)
+                    motor.auditionClick(strength)
+                    count.intValue = clicks.size
+                }
+            }, actionMargin())
+            buttons(box, t("Cancel", "Отмена"), t("Insert", "Вставить"), { dialog.dismiss() }, {
+                val last = clicks.lastOrNull()
+                if (last != null) {
+                    val length = last.time + 80
+                    dialog.dismiss()
+                    insertEditorEffect(length, tapPoints(length, clicks), length)
+                }
+            })
+        }
+    }
+
+    private fun insertEditorEffect(length: Int, points: List<HapticPoint>, advance: Int) {
+        val at = cursor
+        val inserted = pattern.insertEffect(at, HapticPattern(pattern.name, length, points))
+        if (inserted == null) {
+            message(t("No room for the effect", "На шкале нет места для эффекта"))
+            return
+        }
+        changePattern(inserted)
+        // Advance past the effect so repeated presses build a sequence with a clear pause.
+        cursor = (at + advance).coerceAtMost(pattern.length)
+        selected = points.maxBy { it.amplitude }.ms.plus(pattern.sourceTimeAt(at))
+        graph?.selected = selected
+        graph?.cursor = cursor
+        playback?.update(cursor, false)
+        refreshPointControls()
     }
 
     private fun acceptImport(project: HapticPattern, id: String? = null) {
@@ -855,6 +957,29 @@ class HapticStudioActivity : AppCompatActivity() {
         if (finished) {
             dragBefore?.takeIf { it != pattern }?.let(::record)
             dragBefore = null
+            refreshPointControls()
+        }
+    }
+
+    private fun dragPoint(source: Int, time: Int, value: Float, finished: Boolean) {
+        if (dragBefore == null) {
+            player.stop()
+            dragBefore = pattern
+        }
+        val snapshot = requireNotNull(dragBefore)
+        val (updated, movedTo) = snapshot.movePoint(source, time, channel, value)
+        pattern = updated
+        selected = movedTo
+        cursor = (movedTo + pattern.offset).coerceIn(0, pattern.length)
+        graph?.apply {
+            pattern = this@HapticStudioActivity.pattern
+            selected = this@HapticStudioActivity.selected
+            cursor = this@HapticStudioActivity.cursor
+        }
+        playback?.update(cursor, false)
+        if (finished) {
+            dragBefore = null
+            if (pattern != snapshot) record(snapshot)
             refreshPointControls()
         }
     }

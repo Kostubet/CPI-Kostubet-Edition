@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 418
+
+- Haptic Studio импортирует встроенную дорожку вибрации рингтона как редактируемую огибающую. Можно выбрать рингтон или взять текущий.
+- В редакторе можно перетаскивать точки, вставлять щелчки и слайды с курсора или настучать ритм. Предпросмотр использует системные щелчки на поддерживаемых моторах.
+- Автосинхронизация выбирает реальные атаки звука, исключает тактильный канал из звукового анализа и сохраняет короткие акценты при воспроизведении.
+
 ### Сборка 417
 
 - В настройках можно выбрать оригинальное оформление COUI или COUI 2.0 независимо от светлой и тёмной темы. «Общие», «Цвета» и «Стиль» в разделах функций сохраняют оформление COUI 2.0.
@@ -98,6 +104,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 418
+
+- Haptic Studio imports a ringtone's embedded haptic track as an editable envelope. Pick a ringtone or use the current one.
+- Drag timeline points, insert clicks and slides at the playhead, or tap out a rhythm. Preview uses system click effects when supported.
+- Auto-sync follows audio attacks, excludes the haptic channel from audio analysis, and preserves short accents during playback.
 
 ### Build 417
 

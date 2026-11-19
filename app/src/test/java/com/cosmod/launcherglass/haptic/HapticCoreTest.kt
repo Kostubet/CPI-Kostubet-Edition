@@ -9,6 +9,43 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 class HapticCoreTest {
+    @Test fun importedRingtoneEnvelopeKeepsItsAmplitudeAndSilence() {
+        val envelope = requireNotNull(ringtoneEnvelope(floatArrayOf(0f, .001f, .72f, .35f, 0f, 0f), 120))
+        val pattern = HapticPattern("Ringtone", 120, envelope)
+        assertEquals(0f, pattern.at(20).amplitude, .0001f)
+        assertEquals(.72f, pattern.at(40).amplitude, .0001f)
+        assertEquals(.35f, pattern.at(60).amplitude, .0001f)
+        assertEquals(0f, pattern.at(100).amplitude, .0001f)
+        assertNull(ringtoneEnvelope(FloatArray(6), 120))
+    }
+
+    @Test fun movingAHandleCrossesOtherPointsWithoutReplacingThem() {
+        val pattern = HapticPattern("Editor", 800, listOf(
+            HapticPoint(0, 0f), HapticPoint(100, .7f, pitch = 30f, tapKind = HapticTap.NATIVE),
+            HapticPoint(240, .4f), HapticPoint(500, 0f), HapticPoint(800, 0f),
+        ), offset = 20)
+        val (edited, time) = pattern.movePoint(100, 520, HapticChannel.AMPLITUDE, .8f)
+        assertEquals(499, time)
+        assertEquals(.8f, edited.sourcePoint(time).amplitude, .0001f)
+        assertEquals(30f, edited.sourcePoint(time).pitch, 0f)
+        assertEquals(HapticTap.NATIVE, edited.sourcePoint(time).tapKind)
+        assertEquals(pattern.sourcePoint(240), edited.sourcePoint(240))
+        assertEquals(pattern.sourcePoint(500), edited.sourcePoint(500))
+        assertEquals(listOf(519), edited.tapHits(0, edited.length).map { it.time })
+    }
+
+    @Test fun automaticSyncSelectsTheRealAttackAndDoesNotRepeatOnASustainedTone() {
+        val quiet = HapticAnalysis.Frame(0f, 0f, 0f, 0f, 0f, 0f, 0)
+        val steady = quiet.copy(rms = .4f, flux = .025f)
+        val frames = MutableList(30) { quiet }
+        frames[5] = steady.copy(rms = .18f, rise = .07f, onsetMs = 5)
+        frames[6] = steady.copy(rise = .33f, onsetMs = 15)
+        for (i in 7..18) frames[i] = steady
+        val track = HapticAnalysis.Track(frames, 600, null)
+        val points = HapticAnalysis.generate(track, HapticStyle.TAPS, HapticStyle.TAPS.options())
+        assertEquals(listOf(139), points.filter { it.tap }.map { it.ms })
+    }
+
     @Test fun waveformPreservesDurationAcrossSilenceAndAppliesSyncOffset() {
         val pattern = HapticPattern("pulse", 700, listOf(
             HapticPoint(0, 0f), HapticPoint(80, 0f), HapticPoint(100, 1f),

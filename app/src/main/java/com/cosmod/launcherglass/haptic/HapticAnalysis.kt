@@ -1,7 +1,6 @@
 package com.cosmod.launcherglass.haptic
 
 import kotlin.math.PI
-import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.ln
@@ -117,66 +116,51 @@ internal object HapticAnalysis {
         val attack = .36f + .58f * (1 - options.smoothness * .01f)
         val decay = .09f + (100 - options.smoothness) * .0025f
         val onsetDecay = exp(-HOP_MS.toFloat() / options.impulseMs)
-        val minimumGap = (1000 / options.repetitions / HOP_MS).coerceAtLeast(1)
-        val beatGap = track.bpm?.let { 60_000 / it / HOP_MS }
-        var baseline = .02f
+        val accents = findAccents(track, peak, gate, options.sensitivity, options.repetitions)
+        val taps = if (style == HapticStyle.TAPS || style == HapticStyle.MIXED) {
+            findAccents(track, peak, gate, options.tapSensitivity, options.repetitions).mapNotNull {
+                val strength = (.24f + it.strength * .76f) * options.tapStrength * .01f
+                HapticClick(it.time, strength).takeIf { strength > 0f }
+            }
+        } else emptyList()
+        if (style == HapticStyle.TAPS) return tapPoints(track.length, taps)
         var flowing = 0f
         var accent = 0f
-        var lastAccent = -1000
+        var nextAccent = 0
         val points = ArrayList<HapticPoint>(frames.size + 1)
-        val taps = if (style == HapticStyle.TAPS || style == HapticStyle.MIXED) ArrayList<HapticClick>() else null
-        var lastTap = -1000
         points += HapticPoint(0, 0f)
         for (i in frames.indices) {
             val f = frames[i]
-            val ms = i * HOP_MS + f.onsetMs + 1
+            val hit = accents.getOrNull(nextAccent)?.takeIf { it.time / HOP_MS == i }
+            val ms = (hit?.time ?: (i * HOP_MS + HOP_MS / 2)).coerceAtLeast(1)
             if (ms >= track.length) break
             val level = (f.rms / peak).coerceIn(0f, 1.25f)
             val bass = (f.low / peak).coerceIn(0f, 1f)
             val melody = (f.mid / peak).coerceIn(0f, 1f)
             val brightness = (f.high / peak).coerceIn(0f, 1f)
-            val t = options.sensitivity * .01f
-            val periodic = beatGap != null && abs(i - lastAccent - beatGap) <= 2
-            val threshold = baseline * (1.75f - .78f * t) * if (periodic) .87f else 1f
-            val transient = f.flux * (.75f + .5f * bass) + (f.rise / peak).coerceAtMost(1f) * .14f
-            baseline += .072f * (transient - baseline)
             val quiet = f.rms <= gate
             accent *= onsetDecay
-            val hit = !quiet && i - lastAccent >= minimumGap && transient > threshold.coerceAtLeast(.009f)
-            if (hit) {
-                accent = (.24f + (transient - threshold) * .85f + bass * .42f).coerceAtMost(.9f)
-                lastAccent = i
+            if (hit != null) {
+                // Keep the preceding frame flat right up to the real attack.
+                if (ms - 1 > points.last().ms) points += points.last().copy(ms = ms - 1)
+                accent = maxOf(accent, hit.strength)
+                nextAccent++
             }
             val body = level * .28f + bass * options.bass * .0062f + melody * options.melody * .006f
             val strong = (body + accent * (.26f + options.detail * .007f) + brightness * options.detail * .0012f)
                 .coerceIn(0f, 1f)
             val target = if (quiet) 0f else (strong + options.dynamics * .01f * (strong * strong - strong)) *
                 options.strength * .01f * if (style == HapticStyle.PRECISION && accent < .12f) .43f else 1f
-            if (taps != null) {
-                val sensitivity = options.tapSensitivity * .01f
-                val onset = (f.rise / peak).coerceAtMost(1f)
-                val spectralHit = f.flux > maxOf(.009f, baseline * (1.65f - .68f * sensitivity))
-                if (!quiet && i - lastTap >= minimumGap &&
-                    (onset > .24f - .18f * sensitivity || spectralHit && onset > .025f)) {
-                    val strength = ((.30f + onset * .52f + bass * .25f) * options.tapStrength * .01f).coerceAtMost(1f)
-                    if (strength > 0f) taps += HapticClick(i * HOP_MS + f.onsetMs, strength)
-                    lastTap = i
-                }
-                if (style == HapticStyle.TAPS) continue
-            }
             flowing += (target - flowing) * if (target > flowing) attack else decay
             if (quiet && flowing < .018f) flowing = 0f
             points += HapticPoint(ms, flowing.coerceIn(0f, 1f), sharpness = (.24f + brightness * .46f + accent * .3f)
                 .coerceIn(0f, 1f))
         }
-        if (style == HapticStyle.TAPS) return tapPoints(track.length, requireNotNull(taps))
         points += HapticPoint(track.length, 0f)
-        if (taps.isNullOrEmpty()) return points
+        if (taps.isEmpty()) return fitPointBudget(points, MAX_HAPTIC_POINTS)
         val mixed = java.util.TreeMap<Int, HapticPoint>()
-        val slideBudget = (MAX_HAPTIC_POINTS - taps.size * 3 - 1).coerceAtLeast(2)
-        val step = (points.size + slideBudget - 1) / slideBudget
-        for (i in points.indices step step) mixed[points[i].ms] = points[i]
-        mixed[track.length] = points.last()
+        val slideBudget = (MAX_HAPTIC_POINTS - taps.size * 3).coerceAtLeast(2)
+        for (point in fitPointBudget(points, slideBudget)) mixed[point.ms] = point
         for (tap in taps) {
             val from = tap.time
             val to = from + 32
@@ -187,6 +171,46 @@ internal object HapticAnalysis {
             mixed[to] = HapticPoint(to, 0f, curve = HapticCurve.EASE_OUT)
         }
         return mixed.values.toList()
+    }
+
+    private data class Accent(val time: Int, val strength: Float)
+
+    private fun findAccents(track: Track, peak: Float, gate: Float, sensitivity: Int, repetitions: Int): List<Accent> {
+        val minimumGap = 1000 / repetitions
+        val response = sensitivity * .01f
+        val scoreFloor = .14f - .09f * response
+        var baseline = 0f
+        val peaks = ArrayList<Accent>()
+        for ((index, frame) in track.frames.withIndex()) {
+            val time = index * HOP_MS + frame.onsetMs
+            if (time >= track.length) break
+            val rise = (frame.rise / peak).coerceAtMost(1f)
+            val spectrum = (frame.flux * 5f).coerceAtMost(1f)
+            val score = rise * (.80f + spectrum * .20f)
+            val limit = maxOf(scoreFloor, baseline * (2.4f - response))
+            baseline += .11f * (score - baseline)
+            if (frame.rms <= gate || score < limit) continue
+            val accent = Accent(time, (score * 1.3f + .12f).coerceAtMost(1f))
+            // Choose the strongest onset during the refractory period, even if a
+            // quieter transient arrived first. The surviving timestamp stays unquantized.
+            val previous = peaks.lastOrNull()
+            if (previous == null || time - previous.time >= minimumGap) peaks += accent
+            else if (time - previous.time <= 2 * HOP_MS && accent.strength > previous.strength) peaks[peaks.lastIndex] = accent
+        }
+        return peaks
+    }
+
+    private fun fitPointBudget(points: List<HapticPoint>, budget: Int): List<HapticPoint> {
+        if (points.size <= budget) return points
+        // Keep abrupt attacks, ends of silent regions and the timeline's endpoints.
+        val important = points.indices.drop(1).dropLast(1).sortedByDescending { index ->
+            val current = points[index]
+            val before = points[index - 1]
+            val after = points[index + 1]
+            val fraction = (current.ms - before.ms).toFloat() / (after.ms - before.ms)
+            kotlin.math.abs(current.amplitude - (before.amplitude + (after.amplitude - before.amplitude) * fraction))
+        }.take(budget - 2)
+        return (important + listOf(0, points.lastIndex)).sorted().map(points::get)
     }
 
     private fun tempo(frames: List<Frame>): Int? {

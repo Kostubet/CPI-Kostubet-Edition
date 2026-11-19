@@ -19,16 +19,22 @@ import java.util.concurrent.CancellationException
 
 internal object HapticAudio {
     private const val MAX_SAMPLES = HapticAnalysis.SAMPLE_RATE * (MAX_TRACK_MS / 1000)
+    private const val CACHE_VERSION = 3
+    private const val HAPTIC_BLOCK = HapticAnalysis.SAMPLE_RATE * HapticAnalysis.HOP_MS / 1000
+
+    data class Decoded(val track: HapticAnalysis.Track, val vibration: List<HapticPoint>?)
 
     fun analyze(context: Context, uri: Uri): HapticAnalysis.Track {
         val cache = cacheFile(context, uri)
         if (cache != null) readCached(cache)?.let { return it }
-        val track = readAudio(context, uri)
+        val track = readAudio(context, uri, importVibration = false).track
         if (cache != null) writeCached(cache, track)
         return track
     }
 
-    private fun readAudio(context: Context, uri: Uri): HapticAnalysis.Track {
+    fun readRingtone(context: Context, uri: Uri): Decoded = readAudio(context, uri, importVibration = true)
+
+    private fun readAudio(context: Context, uri: Uri, importVibration: Boolean): Decoded {
         val extractor = MediaExtractor()
         try {
             extractor.setDataSource(context, uri, null)
@@ -41,7 +47,7 @@ internal object HapticAudio {
             try {
                 decoder.configure(format, null, null, 0)
                 decoder.start()
-                return decode(extractor, decoder, format)
+                return decode(extractor, decoder, format, importVibration)
             } finally {
                 decoder.release()
             }
@@ -67,7 +73,7 @@ internal object HapticAudio {
 
     private fun readCached(file: AtomicFile): HapticAnalysis.Track? = runCatching {
         DataInputStream(file.openRead().buffered()).use { input ->
-            require(input.readInt() == 2)
+            require(input.readInt() == CACHE_VERSION)
             val duration = input.readInt()
             val bpm = input.readInt().takeIf { it in 40..240 }
             val count = input.readInt()
@@ -86,7 +92,7 @@ internal object HapticAudio {
             val output = file.startWrite()
             try {
                 val stream = DataOutputStream(output.buffered())
-                stream.writeInt(2)
+                stream.writeInt(CACHE_VERSION)
                 stream.writeInt(track.length)
                 stream.writeInt(track.bpm ?: 0)
                 stream.writeInt(track.frames.size)
@@ -110,8 +116,10 @@ internal object HapticAudio {
         }
     }
 
-    private fun decode(extractor: MediaExtractor, decoder: MediaCodec, initial: MediaFormat): HapticAnalysis.Track {
+    private fun decode(extractor: MediaExtractor, decoder: MediaCodec, initial: MediaFormat, importVibration: Boolean): Decoded {
         val samples = FloatArray(MAX_SAMPLES)
+        val hapticChannels = initial.getInteger(MediaFormat.KEY_HAPTIC_CHANNEL_COUNT, 0)
+        val peaks = if (importVibration && hapticChannels > 0) FloatArray(MAX_SAMPLES / HAPTIC_BLOCK) else null
         val info = MediaCodec.BufferInfo()
         var count = 0
         var inputEnded = false
@@ -119,6 +127,7 @@ internal object HapticAudio {
         var format = initial
         var phase = 0
         var sum = 0f
+        var hapticPeak = 0f
         var mixed = 0
         var idle = 0
         while (!outputEnded && count < samples.size) {
@@ -156,6 +165,10 @@ internal object HapticAudio {
                         val rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         val channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                         require(rate in 4000..384000 && channels in 1..32)
+                        // Android stores the haptic channels after the audible PCM channels.
+                        val audible = (channels - hapticChannels).takeIf {
+                            channels >= initial.getInteger(MediaFormat.KEY_CHANNEL_COUNT) && it > 0
+                        } ?: channels
                         val encoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING))
                             format.getInteger(MediaFormat.KEY_PCM_ENCODING) else AudioFormat.ENCODING_PCM_16BIT
                         val sampleBytes = when (encoding) {
@@ -170,25 +183,30 @@ internal object HapticAudio {
                         }
                         while (buffer.remaining() >= sampleBytes * channels && count < samples.size) {
                             var mono = 0f
-                            repeat(channels) {
-                                mono += when (encoding) {
+                            repeat(channels) { channel ->
+                                val level = when (encoding) {
                                     AudioFormat.ENCODING_PCM_FLOAT -> buffer.float.let { if (it.isFinite()) it else 0f }
                                     AudioFormat.ENCODING_PCM_8BIT -> ((buffer.get().toInt() and 255) - 128) / 128f
                                     else -> buffer.short / 32768f
                                 }
+                                if (channel < audible) mono += level
+                                else if (peaks != null) hapticPeak = maxOf(hapticPeak, kotlin.math.abs(level))
                             }
-                            val sample = (mono / channels).coerceIn(-1f, 1f)
+                            val sample = (mono / audible).coerceIn(-1f, 1f)
                             sum += sample
                             mixed++
                             phase += HapticAnalysis.SAMPLE_RATE
                             if (phase >= rate) {
                                 val downsampled = sum / mixed
                                 do {
+                                    val block = count / HAPTIC_BLOCK
+                                    if (peaks != null && audible < channels) peaks[block] = maxOf(peaks[block], hapticPeak)
                                     samples[count++] = downsampled
                                     phase -= rate
                                 } while (phase >= rate && count < samples.size)
                                 sum = 0f
                                 mixed = 0
+                                hapticPeak = 0f
                             }
                         }
                     }
@@ -197,6 +215,7 @@ internal object HapticAudio {
                 }
             }
         }
-        return HapticAnalysis.analyze(samples, count)
+        val track = HapticAnalysis.analyze(samples, count)
+        return Decoded(track, peaks?.let { ringtoneEnvelope(it, track.length) })
     }
 }

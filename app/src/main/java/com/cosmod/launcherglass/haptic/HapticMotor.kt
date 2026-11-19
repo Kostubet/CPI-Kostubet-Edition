@@ -3,6 +3,9 @@ package com.cosmod.launcherglass.haptic
 import android.content.Context
 import android.media.AudioAttributes
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -26,6 +29,12 @@ internal class HapticMotor(context: Context) {
     private val vendor = if (present) RichTapHaptics.discover() else null
     val richTap get() = vendor != null
     private var richTapActive = false
+    private val scheduledClicks = Handler(Looper.getMainLooper())
+    private val clickPresets = intArrayOf(VibrationEffect.EFFECT_TICK, VibrationEffect.EFFECT_CLICK, VibrationEffect.EFFECT_HEAVY_CLICK)
+    private val supportedClicks = runCatching { vibrator?.let { motor ->
+        val supported = motor.areEffectsSupported(*clickPresets)
+        clickPresets.filterIndexed { index, _ -> supported[index] == Vibrator.VIBRATION_EFFECT_SUPPORT_YES }
+    }.orEmpty() }.getOrDefault(emptyList())
 
     data class Envelope(val minimum: Int, val maximum: Int, val points: Int, val duration: Int,
         val frequency: ClosedFloatingPointRange<Float>?, val resonant: Float)
@@ -50,7 +59,6 @@ internal class HapticMotor(context: Context) {
     private fun previewEffect(pattern: HapticPattern, start: Int, end: Int): PreviewEffect? {
         if (!present || end <= start) return null
         val useFrequency = frequency != null && pattern.points.any { it.hz > 0f }
-        val useRichTap = vendor != null && pattern.points.any { it.pitch != 0f }
         if (pattern.hasTapPoints) {
             pattern.nativeTaps(start, end)?.let { taps ->
                 clickEffect(taps)?.let { return PreviewEffect(it) }
@@ -62,12 +70,22 @@ internal class HapticMotor(context: Context) {
             }
             return frequencyWithTaps(pattern, start, end)
         }
-        if (useRichTap) vendor.effect(pattern, start, end)?.let { return PreviewEffect(it, richTap = true) }
+        return continuousEffect(pattern, start, end, useFrequency)
+    }
+
+    private fun continuousEffect(pattern: HapticPattern, start: Int, end: Int, useFrequency: Boolean): PreviewEffect? {
+        if (end <= start) return null
+        if (vendor != null && pattern.points.any { it.pitch != 0f }) {
+            vendor.effect(pattern, start, end)?.let { return PreviewEffect(it, richTap = true) }
+        }
         if (Build.VERSION.SDK_INT >= 36 && envelope != null) {
             val effect = nativeEnvelope(pattern, start, end, envelope, useFrequency)
             if (effect != null) return PreviewEffect(effect)
         }
-        if (!useRichTap && end - start <= 5000) vendor?.effect(pattern, start, end)?.let { return PreviewEffect(it, richTap = true) }
+        // The sparse RichTap sweep can miss the accents of a generated audio envelope.
+        if (!amplitude && end - start <= 5000) {
+            vendor?.effect(pattern, start, end)?.let { return PreviewEffect(it, richTap = true) }
+        }
         return HapticWaveform.sample(pattern, start, end, amplitude).effect(false)?.let(::PreviewEffect)
     }
 
@@ -146,10 +164,61 @@ internal class HapticMotor(context: Context) {
     }.getOrNull()
 
     fun prepare(pattern: HapticPattern, start: Int, end: Int): (() -> Unit)? {
+        val taps = pattern.tapHits(start, end)
+        if (taps.isNotEmpty()) {
+            if (pattern.nativeTaps(start, end) != null) {
+                clickEffect(taps)?.let { return { play(it) } }
+            }
+            if (supportedClicks.isNotEmpty()) return preparePresetClicks(pattern, taps, start, end)
+        }
         val preview = previewEffect(pattern, start, end) ?: return null
+        return { playPreview(preview) }
+    }
+
+    private fun preparePresetClicks(pattern: HapticPattern, taps: List<HapticClick>, start: Int, end: Int): () -> Unit {
+        val useFrequency = frequency != null && pattern.points.any { it.hz > 0f }
+        val steps = buildList {
+            var cursor = start
+            val onlyClicks = pattern.nativeTaps(start, end) != null
+            for (tap in taps) {
+                val time = start + tap.time
+                if (!onlyClicks) {
+                    val finish = time - 4
+                    continuousEffect(pattern, cursor, finish, useFrequency)?.let { add(cursor - start to it) }
+                }
+                add(tap.time to PreviewEffect(predefinedClick(tap.strength)))
+                cursor = time + 36
+            }
+            if (!onlyClicks) continuousEffect(pattern, cursor, end, useFrequency)?.let { add(cursor - start to it) }
+        }
         return {
-            richTapActive = preview.richTap
-            play(preview.effect)
+            val clock = SystemClock.uptimeMillis()
+            for ((delay, effect) in steps) {
+                if (delay == 0) playPreview(effect)
+                else scheduledClicks.postAtTime({ runCatching { playPreview(effect) } }, clock + delay)
+            }
+        }
+    }
+
+    private fun playPreview(preview: PreviewEffect) {
+        // A native click may interrupt an earlier vendor sweep on this same actuator.
+        richTapActive = richTapActive || preview.richTap
+        play(preview.effect)
+    }
+
+    private fun predefinedClick(strength: Float): VibrationEffect {
+        val desired = when {
+            strength < .42f -> 0
+            strength < .78f -> 1
+            else -> 2
+        }
+        val closest = supportedClicks.minByOrNull { kotlin.math.abs(clickPresets.indexOf(it) - desired) }
+        return VibrationEffect.createPredefined(closest ?: clickPresets[desired])
+    }
+
+    fun auditionClick(strength: Float) {
+        if (present) runCatching {
+            play(clickEffect(listOf(HapticClick(0, strength))) ?: predefinedClick(strength))
         }
     }
 
@@ -159,6 +228,7 @@ internal class HapticMotor(context: Context) {
     }
 
     fun stop() {
+        scheduledClicks.removeCallbacksAndMessages(null)
         val wasRichTap = richTapActive
         richTapActive = false
         runCatching { vibrator?.cancel() }

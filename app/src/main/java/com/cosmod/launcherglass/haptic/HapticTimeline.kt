@@ -20,6 +20,7 @@ internal class HapticTimeline(
     private val change: (stroke: List<Pair<Int, Float>>, finished: Boolean) -> Unit,
     private val seek: (Int) -> Unit,
     private val cancelChange: () -> Unit,
+    private val dragPoint: (source: Int, time: Int, value: Float, finished: Boolean) -> Unit,
 ) : View(context) {
     var pattern: HapticPattern? = null
         set(value) {
@@ -40,6 +41,8 @@ internal class HapticTimeline(
     var drawMode = HapticDrawMode.NAVIGATE
     private val stroke = java.util.TreeMap<Int, Float>()
     private var editTime: Int? = null
+    private var originalPointValue = 0f
+    private var pointDrag: Pair<Int, Float>? = null
     private var previousSample: Pair<Int, Float>? = null
     private var drawing = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -60,7 +63,7 @@ internal class HapticTimeline(
     private val graphHeight get() = (height - 25 * density).coerceAtLeast(1f)
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-            finishStroke()
+            finishEditing()
             pinched = true
             return true
         }
@@ -163,30 +166,34 @@ internal class HapticTimeline(
                 downX = event.x
                 downY = event.y
                 lastX = event.x
-                if (drawMode != HapticDrawMode.NAVIGATE && downY < graphHeight) {
+                if (drawMode == HapticDrawMode.BRUSH && downY < graphHeight) {
                     parent.requestDisallowInterceptTouchEvent(true)
-                    if (drawMode == HapticDrawMode.POINT) {
-                        val touched = time(event.x)
-                        val nearest = pattern?.points?.minByOrNull { abs(it.ms + (pattern?.offset ?: 0) - touched) }
-                        editTime = nearest?.ms?.plus(pattern?.offset ?: 0)?.takeIf {
-                            abs(it - touched) <= 16 * density * visible / width.coerceAtLeast(1)
-                        } ?: touched
-                    }
                     sampleStroke(event.x, event.y, publish = false)
+                } else if (drawMode == HapticDrawMode.POINT && downY < graphHeight) {
+                    editTime = hitPoint(event.x, event.y)
+                    editTime?.let { source ->
+                        originalPointValue = value(requireNotNull(pattern).sourcePoint(source))
+                        parent.requestDisallowInterceptTouchEvent(true)
+                    }
                 }
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                finishStroke()
+                finishEditing()
                 pinched = true
                 parent.requestDisallowInterceptTouchEvent(true)
             }
             MotionEvent.ACTION_MOVE -> {
                 if (pinched) return true
-                if (stroke.isNotEmpty()) {
+                val grabbed = editTime
+                if (grabbed != null && (pointDrag != null || kotlin.math.hypot(event.x - downX, event.y - downY) > 5 * density)) {
+                    val (at, level) = movedPoint(grabbed, event.x, event.y)
+                    pointDrag = at to level
+                    dragPoint(grabbed, at, level, false)
+                } else if (stroke.isNotEmpty()) {
                     for (i in 0 until event.historySize) sampleStroke(event.getHistoricalX(i), event.getHistoricalY(i), publish = false)
                     sampleStroke(event.x, event.y)
                 }
-                else if (abs(event.x - downX) > 8 * density) {
+                else if (grabbed == null && abs(event.x - downX) > 8 * density) {
                     parent.requestDisallowInterceptTouchEvent(true)
                     if (downY >= graphHeight) seek(time(event.x))
                     else {
@@ -199,18 +206,22 @@ internal class HapticTimeline(
             }
             MotionEvent.ACTION_UP -> {
                 if (!pinched && !panning) {
-                    if (stroke.isNotEmpty()) {
+                    val grabbed = editTime
+                    if (grabbed != null && pointDrag != null) {
+                        pointDrag = movedPoint(grabbed, event.x, event.y)
+                        finishEditing()
+                    } else if (stroke.isNotEmpty()) {
                         sampleStroke(event.x, event.y, publish = false)
                         drawing = true
-                        finishStroke()
-                    }
-                    else seek(time(event.x))
+                        finishEditing()
+                    } else seek(grabbed?.plus(pattern?.offset ?: 0)?.coerceIn(0, length.toInt()) ?: time(event.x))
                     performClick()
                 }
+                clearStroke()
                 parent.requestDisallowInterceptTouchEvent(false)
             }
             MotionEvent.ACTION_CANCEL -> {
-                if (drawing) cancelChange()
+                if (drawing || pointDrag != null) cancelChange()
                 clearStroke()
                 parent.requestDisallowInterceptTouchEvent(false)
             }
@@ -230,10 +241,45 @@ internal class HapticTimeline(
         curvesChanged()
     }
 
-    private fun sampleStroke(x: Float, y: Float, publish: Boolean = true) {
+    private fun hitPoint(x: Float, y: Float): Int? {
+        val project = pattern ?: return null
+        val touchedTime = leftMs + visible * x / width.coerceAtLeast(1)
+        val maxDistance = 19 * density
+        var nearest: Int? = null
+        var best = maxDistance
+        for (point in project.points) {
+            val time = point.ms + project.offset
+            val dx = (time - touchedTime) * width / visible
+            if (dx < -maxDistance) continue
+            if (dx > maxDistance) break
+            val amplitude = if (channel == HapticChannel.AMPLITUDE) project.at(time).amplitude else value(point)
+            val normalized = ((amplitude - limits.start) / (limits.endInclusive - limits.start)).coerceIn(0f, 1f)
+            val pointY = 8 * density + (1 - normalized) * (graphHeight - 16 * density).coerceAtLeast(1f)
+            val distance = kotlin.math.hypot(dx, pointY - y)
+            if (distance < best) {
+                best = distance
+                nearest = point.ms
+            }
+        }
+        return nearest
+    }
+
+    private fun valueAt(y: Float): Float {
         val normalized = (1 - (y - 8 * density) / (graphHeight - 16 * density).coerceAtLeast(1f)).coerceIn(0f, 1f)
-        val value = limits.start + normalized * (limits.endInclusive - limits.start)
-        val at = editTime ?: time(x)
+        return limits.start + normalized * (limits.endInclusive - limits.start)
+    }
+
+    private fun movedPoint(source: Int, x: Float, y: Float): Pair<Int, Float> {
+        val delta = ((x - downX) * visible / width.coerceAtLeast(1)).roundToInt()
+        val at = (source + (pattern?.offset ?: 0) + delta).coerceIn(0, length.toInt())
+        val valueDelta = (downY - y) / (graphHeight - 16 * density).coerceAtLeast(1f) *
+            (limits.endInclusive - limits.start)
+        return at to (originalPointValue + valueDelta).coerceIn(limits.start, limits.endInclusive)
+    }
+
+    private fun sampleStroke(x: Float, y: Float, publish: Boolean = true) {
+        val value = valueAt(y)
+        val at = time(x)
         previousSample?.let { (before, lastValue) ->
             val step = maxOf(8f, visible / 260f)
             val segments = ceil(abs(at - before) / step).toInt()
@@ -259,7 +305,9 @@ internal class HapticTimeline(
         change(samples.filter { it.first != at } + (at to stroke.getValue(at)), finished)
     }
 
-    private fun finishStroke() {
+    private fun finishEditing() {
+        val source = editTime
+        if (source != null) pointDrag?.let { (time, level) -> dragPoint(source, time, level, true) }
         if (drawing) publishStroke(true)
         clearStroke()
     }
@@ -269,6 +317,7 @@ internal class HapticTimeline(
         stroke.clear()
         previousSample = null
         editTime = null
+        pointDrag = null
     }
 
     private fun value(point: HapticPoint): Float = when (channel) {

@@ -100,6 +100,27 @@ internal data class HapticPattern(
         return copy(points = updated)
     }
 
+    fun movePoint(source: Int, playbackTime: Int, channel: HapticChannel, value: Float): Pair<HapticPattern, Int> {
+        val index = points.binarySearchBy(source) { it.ms }
+        if (index < 0) return this to source
+        val point = points[index].withValue(channel, value)
+        var time = sourceTimeAt(playbackTime).coerceIn(1, length - 1)
+        if (source == 0 || source == length) time = source
+        val direction = if (time >= source) -1 else 1
+        while (time != source && points.binarySearchBy(time) { it.ms } >= 0) time += direction
+        if (time == source) return replace(point) to source
+        var moved = copy(points = points.toMutableList().apply { removeAt(index) }).replace(point.copy(ms = time))
+        if (point.tap) {
+            val shoulders = listOf((time - 4).coerceAtLeast(1), (time + 28).coerceAtMost(length - 1))
+            for (shoulder in shoulders) {
+                if (shoulder != time && points.binarySearchBy(shoulder) { it.ms } < 0) {
+                    moved = moved.replace(HapticPoint(shoulder, 0f))
+                }
+            }
+        }
+        return moved to time
+    }
+
     val hasTapPoints get() = points.any { it.tap && it.amplitude > 0f }
 
     fun nativeTaps(start: Int, end: Int): List<HapticClick>? {
@@ -145,12 +166,7 @@ internal data class HapticPattern(
                     lerp(left.value, right.value, (time - left.key).toFloat() / (right.key - left.key))
                 }
                 val point = sourcePoint(time)
-                add(when (channel) {
-                    HapticChannel.AMPLITUDE -> point.copy(amplitude = value)
-                    HapticChannel.FREQUENCY -> point.copy(hz = value)
-                    HapticChannel.RICHTAP -> point.copy(pitch = value)
-                    HapticChannel.SHARPNESS -> point.copy(sharpness = value)
-                })
+                add(point.withValue(channel, value))
             }
             addAll(points.dropWhile { it.ms <= last })
         }
@@ -162,6 +178,29 @@ internal data class HapticPattern(
 
     companion object {
         fun empty(name: String) = HapticPattern(name, 2_000, listOf(HapticPoint(0, 0f), HapticPoint(2_000, 0f)))
+    }
+}
+
+private fun HapticPoint.withValue(channel: HapticChannel, value: Float): HapticPoint = when (channel) {
+    HapticChannel.AMPLITUDE -> copy(amplitude = value)
+    HapticChannel.FREQUENCY -> copy(hz = value)
+    HapticChannel.RICHTAP -> copy(pitch = value)
+    HapticChannel.SHARPNESS -> copy(sharpness = value)
+}
+
+/** Convert the recorded carrier into editable amplitude points on the same media timeline. */
+internal fun ringtoneEnvelope(peaks: FloatArray, length: Int): List<HapticPoint>? {
+    val active = peaks.maxOrNull()?.takeIf { it > .004f } ?: return null
+    val noise = (active * .015f).coerceAtLeast(.002f)
+    return buildList {
+        for (time in 0 until length step HapticAnalysis.HOP_MS) {
+            val peak = peaks.getOrElse(time / HapticAnalysis.HOP_MS) { 0f }
+            val value = if (peak > noise) peak.coerceIn(0f, 1f) else 0f
+            if (value == 0f && size >= 2 && last().amplitude == 0f && this[lastIndex - 1].amplitude == 0f) {
+                this[lastIndex] = HapticPoint(time, value)
+            } else add(HapticPoint(time, value))
+        }
+        add(HapticPoint(length, 0f))
     }
 }
 

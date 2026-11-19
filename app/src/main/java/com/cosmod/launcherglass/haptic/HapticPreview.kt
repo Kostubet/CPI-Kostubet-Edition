@@ -95,6 +95,7 @@ internal class HapticPreview(
         val player = MediaPlayer()
         media = player
         player.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+            .setHapticChannelsMuted(true)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
         player.setDataSource(context, next.audio)
         player.setOnPreparedListener {
