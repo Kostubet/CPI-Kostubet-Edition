@@ -432,7 +432,7 @@ class HapticStudioActivity : AppCompatActivity() {
         renderEditorTools()
         val tabs = CouiSectionTabs(this, dark, accent, listOf(
             t("Points", "Точки"), t("Effects", "Эффекты"), t("Range", "Фрагмент"), t("Mix", "Микс"),
-        ), editorTool.ordinal, commitOnRelease = true) { index ->
+        ), editorTool.ordinal, commitOnRelease = true, floating = true) { index ->
             editorTool = EditorTool.entries[index]
             renderEditorTools()
         }
