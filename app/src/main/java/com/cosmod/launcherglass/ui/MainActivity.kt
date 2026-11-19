@@ -157,6 +157,7 @@ class MainActivity : AppCompatActivity() {
         LIVE(R.string.ui_catalog_live, R.drawable.ic_catalog_island, 0x926DF5, R.string.ui_catalog_keywords_live),
         VOLUME(R.string.ui_volume_glass, R.drawable.ic_catalog_bell, 0x628EF1, R.string.ui_volume_glass_hint),
         SHADE(R.string.shade_glass_title, R.drawable.ic_cpi_features, 0x628EF1, R.string.shade_glass_keywords),
+        SIDEBAR(R.string.soft_glass_sidebar, R.drawable.ic_catalog_island, 0x926DF5, R.string.soft_glass_sidebar_hint),
         LOCKSCREEN(R.string.lock_glass_title, R.drawable.ic_catalog_lock, 0x7665EF, R.string.lock_glass_keywords),
         LIGHT(R.string.ui_catalog_light, R.drawable.ic_nav_light, 0xE5AA27, R.string.ui_catalog_keywords_light),
         MOTION(R.string.ui_ba31k_title, R.drawable.ic_catalog_motion, 0x55A4ED, R.string.ui_catalog_keywords_motion),
@@ -250,6 +251,7 @@ class MainActivity : AppCompatActivity() {
         prefs = getSharedPreferences(SettingsProvider.PREFS_NAME, MODE_PRIVATE)
         prefs.registerOnSharedPreferenceChangeListener(supportListener)
         SettingsDefaults.initialize(this, prefs)
+        com.cosmod.launcherglass.update.CpiUpdateService.reconcile(this)
         screen = Screen.entries.firstOrNull { it.name == savedInstanceState?.getString("catalogScreen") } ?: if(savedInstanceState?.getString("catalogScreen")=="BA31K_MOTION")Screen.MOTION else Screen.OVERVIEW
         detailParent=Screen.entries.firstOrNull {it.name==savedInstanceState?.getString("catalogParent") && it in rootTabs} ?: Screen.HOME
         for(tab in rootTabs)tabScroll[tab]=savedInstanceState?.getInt("catalogScroll_"+tab.name)
@@ -773,15 +775,7 @@ class MainActivity : AppCompatActivity() {
             add(controls,preferenceLink(getString(R.string.ui_reset_section)){anchor->
                 choicePopup(anchor,listOf(0 to R.string.ui_cancel,1 to R.string.ui_reset_section_confirm),-1){
                     if(it==1){
-                        val defaults=if(section==Screen.FOLDERS.name)mapOf(
-                            SettingsProvider.KEY_FOLDER_BLUR_ENABLED to bool(SettingsProvider.KEY_FOLDER_BLUR_ENABLED),
-                            FeatureSections.key(Screen.FOLDERS.name) to bool(FeatureSections.key(Screen.FOLDERS.name)),
-                            FolderSettingsKeys.OWN to true,
-                            FolderSettingsKeys.key(SettingsProvider.KEY_BLUR_TONE_ENABLED) to true,
-                            FolderSettingsKeys.key(SettingsProvider.KEY_BG_OPACITY) to 16,
-                            FolderSettingsKeys.key(SettingsProvider.KEY_BLUR_SATURATION) to 110
-                        ) else emptyMap()
-                        applySavedSettings(keys,defaults)
+                        applySavedSettings(keys,emptyMap())
                     }
                 }
             })
@@ -1141,7 +1135,7 @@ class MainActivity : AppCompatActivity() {
         val groups=listOf(
             R.string.ui_catalog_launcher to listOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,
                 Screen.MOTION),
-            R.string.ui_catalog_systemui to listOf(Screen.LOCKSCREEN,Screen.SHADE,Screen.LIVE,Screen.BANNERS,Screen.VOLUME),
+            R.string.ui_catalog_systemui to listOf(Screen.LOCKSCREEN,Screen.SHADE,Screen.SIDEBAR,Screen.LIVE,Screen.BANNERS,Screen.VOLUME),
             R.string.camera_tab to listOf(Screen.CAMERA_ZOOM),
             R.string.ui_catalog_general to listOf(Screen.GLASS,Screen.LIGHT,Screen.PERFORMANCE)
         )
@@ -1478,6 +1472,7 @@ class MainActivity : AppCompatActivity() {
             Screen.LIVE->liveAlertSection(body,colors)
             Screen.VOLUME->volumeSection(body,general,colors)
             Screen.SHADE->buildShadeGlass(body,general,colors,pageBody)
+            Screen.SIDEBAR->sidebarGlass(body)
             Screen.LOCKSCREEN->lockscreenSection(body,general,colors)
             Screen.LIGHT->buildLight(body)
             Screen.MOTION->buildBa31kMotion(body)
@@ -1505,6 +1500,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildShadeGlass(body:LinearLayout,general:LinearLayout,colors:LinearLayout,pageBody:LinearLayout) {
         val panel=shadePanel
+        softGlassSection(body, if(panel==ShadeGlassSettings.Panel.CONTROL)
+            SoftGlassSettings.Surface.CONTROL else SoftGlassSettings.Surface.SHADE)
         val components=panel.components
         val panelTitles=listOf(getString(R.string.shade_glass_control),getString(R.string.shade_glass_notifications))
         val titles=listOf(R.string.shade_glass_round,R.string.shade_glass_large,R.string.shade_glass_media,
@@ -1892,6 +1889,7 @@ class MainActivity : AppCompatActivity() {
         val about=CouiAboutPage(this,darkUi,primary,master(),
             onEnabled={save(SettingsProvider.KEY_ENABLED,it)},
             onSettings={openScreen(Screen.SETTINGS)},
+            onUpdates={startActivity(Intent(this,com.cosmod.launcherglass.update.CpiUpdateActivity::class.java))},
             onContributors={openScreen(Screen.CONTRIBUTORS)},onLink=::openLink)
         body.addView(about,LinearLayout.LayoutParams(-1,-2).apply {marginStart=-dp(16);marginEnd=-dp(16)})
         buildSupport(body)
@@ -2109,6 +2107,7 @@ class MainActivity : AppCompatActivity() {
         val appearance=listOf(LockscreenSettings.Surface.CLOCK,LockscreenSettings.Surface.WIDGETS,
             LockscreenSettings.Surface.SHORTCUTS,LockscreenSettings.Surface.NOTIFICATIONS,LockscreenSettings.Surface.CAPSULE)
         for(surface in appearance)lockscreenMaterialGroup(body,colors,surface)
+        softGlassSection(body, SoftGlassSettings.Surface.LOCK)
         lockscreenMaterialGroup(body,colors,LockscreenSettings.Surface.PIN)
         add(general,card(switchRow(getString(R.string.lock_glass_clear_bouncer),LockscreenSettings.CLEAR_BOUNCER_BLUR))
             .also {gate(it,::master)},top=8,bottom=4)
@@ -2157,6 +2156,36 @@ class MainActivity : AppCompatActivity() {
         refreshers.add {reveal(lens,showLens())}
         add(style,lens)
         accordionCard(body,R.string.ui_feature_tab_style,style)
+    }
+
+    private fun sidebarGlass(body: LinearLayout) {
+        add(body, card(informationRow(R.string.soft_glass_sidebar, getString(R.string.soft_glass_sidebar_hint))))
+        softGlassSection(body, SoftGlassSettings.Surface.SIDEBAR)
+    }
+
+    private fun softGlassSection(body: LinearLayout, surface: SoftGlassSettings.Surface) {
+        val controls = column()
+        val available = { master() && Build.VERSION.SDK_INT >= 37 && bool(FeatureSections.key(surface.section)) }
+        val active = { available() && bool(surface.enabled) }
+        val title = if (surface == SoftGlassSettings.Surface.LOCK) R.string.soft_glass_lock else R.string.soft_glass_title
+        add(controls, switchRow(getString(title), surface.enabled, getString(R.string.soft_glass_hint)).also { gate(it, available) })
+        if (surface == SoftGlassSettings.Surface.CONTROL) {
+            divider(controls)
+            add(controls, switchRow(getString(R.string.soft_glass_keep_white), surface.white).also { gate(it, active) })
+        }
+        for (parameter in SoftGlassSettings.Parameter.entries) {
+            if (parameter == SoftGlassSettings.Parameter.RESPONSE) {
+                divider(controls)
+                add(controls, switchRow(getString(R.string.soft_glass_tilt), surface.tilt).also { gate(it, active) })
+            }
+            divider(controls)
+            val unit = if (parameter == SoftGlassSettings.Parameter.ANGLE) "°" else "%"
+            add(controls, slider(getString(parameter.title), surface.key(parameter), parameter.range.first,
+                parameter.range.last, unit).also {
+                    gate(it) { active() && (parameter != SoftGlassSettings.Parameter.RESPONSE || bool(surface.tilt)) }
+                })
+        }
+        accordionCard(body, title, controls)
     }
 
     private fun lockscreenMaterialGroup(body:LinearLayout,colors:LinearLayout,surface:LockscreenSettings.Surface){

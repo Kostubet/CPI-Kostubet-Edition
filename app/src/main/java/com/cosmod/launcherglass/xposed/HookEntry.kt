@@ -52,6 +52,10 @@ class HookEntry : IXposedHookLoadPackage {
             if (lpparam.processName == packageName) runCatching { CameraVideoZoom.install(lpparam.classLoader) }
             return
         }
+        if (packageName == com.cosmod.launcherglass.ui.SoftGlassSettings.SIDEBAR_PACKAGE) {
+            if (lpparam.processName == packageName) SoftGlassNative.installSidebar(lpparam.classLoader)
+            return
+        }
         if(packageName=="com.android.systemui") {
             LiveAlertGlass.install(lpparam.classLoader)
             return

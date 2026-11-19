@@ -1,5 +1,7 @@
 # ONextBox UI motion
 
+`SoftGlassShader.kt` and `SoftGlassTilt.kt` adapt the soft-light optics and tilt response from ONextBox 17.0.1.200 (GPL-3.0). CPI binds them to independent profiles for control center, notification shade, lock-screen cards, and Smart Sidebar. Upstream source is [revision 56d5911](https://github.com/MiToverG422/ONextBox/tree/56d59118a1efc9578c89ea6d6a198985bb8f9150/app/src/main/java/com/mi/onextbox/lsp).
+
 The current COUI 2.0 settings UI uses the ONextBox Android compositor bridge for the app bar, navigation capsule, search field, and anchored popup material.
 
 The CPI View implementations in `OnextMotion.kt` and `ColorosControls.kt` adapt ONextBox by MiToverG422 and contributors, licensed under GPL-3.0. `OnextSliderSpotlight.kt` contains the upstream slider spotlight AGSL.

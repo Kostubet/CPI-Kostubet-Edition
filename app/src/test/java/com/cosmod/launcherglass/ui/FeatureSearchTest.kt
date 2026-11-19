@@ -61,5 +61,8 @@ class FeatureSearchTest {
         assertTrue(R.string.shade_glass_blur_opacity in labels)
         assertTrue(R.string.shade_glass_dispersion_strength in labels)
         assertTrue(R.string.shade_glass_control_background in labels)
+        assertTrue(R.string.soft_glass_title in labels)
+        assertTrue(R.string.soft_glass_direction in FeatureSearch.labels("SIDEBAR"))
+        assertTrue(R.string.soft_glass_lock in FeatureSearch.labels("LOCKSCREEN"))
     }
 }

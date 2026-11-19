@@ -153,6 +153,8 @@ internal object LockscreenGlass {
     private var profiles:Map<Surface,Profile> = emptyMap()
     private var clearBouncer=false
     private var visible=false
+    private var softActivities=false
+    fun activityWallpaper() = if(visible && softActivities) LockscreenBackdrop.frame?.images?.get(0) else null
     private var controller=WeakReference<Any>(null)
     private var wallpaperAnimation=WeakReference<Any>(null)
     private var pinClass:Class<*>?=null
@@ -350,9 +352,14 @@ internal object LockscreenGlass {
         if(tune)runCatching {installUnlockTuning()}.onFailure {
             GlassLogger.limited("LockscreenGlass","unlockTuning"){"Native unlock tuning unavailable: "+it}
         }
-        val next=if(enabled)Surface.entries.associateWith {LockscreenSettings.read(prefs,it)}.filterValues {it.enabled} else emptyMap()
+        val softNotifications=enabled && SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.LOCK)
+        val activityChange=softActivities!=softNotifications
+        softActivities=softNotifications
+        if(activityChange && !softActivities)SoftGlassActivityMaterial.clear()
+        val next=if(enabled)Surface.entries.filterNot {it==Surface.NOTIFICATIONS && softNotifications}
+            .associateWith {LockscreenSettings.read(prefs,it)}.filterValues {it.enabled} else emptyMap()
         val clear=enabled && prefs.getBoolean(LockscreenSettings.CLEAR_BOUNCER_BLUR,false)
-        if(next==profiles && clear==clearBouncer){
+        if(next==profiles && clear==clearBouncer && !activityChange){
             refreshVisibility()
             if(contourChanged)refreshClockMaterial()
             return
@@ -410,13 +417,13 @@ internal object LockscreenGlass {
 
     private fun refreshVisibility(){
         val locked=keyguardShowing ?: (keyguardState==KEYGUARD || keyguard?.isKeyguardLocked==true)
-        val show=profiles.isNotEmpty() && interactive && !dozing && locked
+        val show=(profiles.isNotEmpty() || softActivities) && interactive && !dozing && locked
         if(show==visible){
             if((!interactive || dozing || keyguardOccluded || Surface.CLOCK !in profiles) &&
                 (clockAmount>0f || clockAnimator!=null)){
                 finishClockTransition()
             }
-            if(!show && (!locked || profiles.isEmpty()) && clockAnimator==null && clockHandoff==null)LockscreenBackdrop.stop()
+            if(!show && (!locked || profiles.isEmpty() && !softActivities) && clockAnimator==null && clockHandoff==null)LockscreenBackdrop.stop()
             return
         }
         visible=show
@@ -440,6 +447,7 @@ internal object LockscreenGlass {
             rowMotion.clear()
             movingTargets.clear()
             clearWidgetBackgrounds()
+            SoftGlassActivityMaterial.clear()
         }
         repaint()
     }
@@ -535,8 +543,9 @@ internal object LockscreenGlass {
 
     private fun prepareWallpaper(refresh:Boolean=false){
         val context=context ?: return
-        LockscreenBackdrop.prepare(context,controller.get(),wallpaperAnimation.get(),
-            profiles.entries.mapTo(linkedSetOf()) {(surface,profile)->profile.sourceRadius(surface)},refresh)
+        val radii=profiles.entries.mapTo(linkedSetOf()) {(surface,profile)->profile.sourceRadius(surface)}
+        if(softActivities)radii.add(0)
+        LockscreenBackdrop.prepare(context,controller.get(),wallpaperAnimation.get(),radii,refresh)
     }
 
     fun wallpaperChanged(){
@@ -549,6 +558,7 @@ internal object LockscreenGlass {
         }
         showClockWhenReady()
         showSurfacesWhenReady()
+        if(softActivities)LiveAlertGlass.lockWallpaperChanged()
         repaint()
     }
     private fun repaint(){

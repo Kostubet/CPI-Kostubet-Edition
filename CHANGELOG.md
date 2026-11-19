@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 422
+
+- «Мягкий свет» использует системное стекло ColorOS 17. Профили центра управления, центра уведомлений, уведомлений и активностей на экране блокировки и «Умной боковой панели» настраиваются отдельно.
+- Приложенный профиль стал основой заводских настроек. При обновлении сохраняются уже записанные значения.
+- В «О модуле» появились проверка релизов GitHub, уведомления и установка подписанного APK внутри приложения.
+
 ### Сборка 421
 
 - Нижняя панель инструментов Haptic Studio размывает прокручиваемое содержимое за вкладками на поддерживаемых устройствах.
@@ -117,6 +123,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 422
+
+- Soft-light glass uses the ColorOS 17 system material. Control center, notification shade, lock-screen notifications and live activities, and Smart Sidebar have independent profiles.
+- The supplied profile provides factory defaults. Already saved values survive the update.
+- About now has GitHub release checks, update alerts, and in-app installation of signed APKs.
 
 ### Build 421
 

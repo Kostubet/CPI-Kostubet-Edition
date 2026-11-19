@@ -42,6 +42,10 @@
 
 Фон центра управления использует системную анимацию ColorOS. У него свои настройки радиуса размытия, яркости и затемнения.
 
+У стекла «Мягкий свет» независимые профили для центра управления, центра уведомлений, уведомлений и развёрнутых активностей на экране блокировки и умной боковой панели. Для первых трёх выберите область **System UI**, для боковой панели — **Умная боковая панель** (`com.coloros.smartsidebar`). После первого включения перезапустите соответствующее системное приложение.
+
+Откройте **О модуле → Обновления**, чтобы проверить опубликованные сборки, включить уведомления и установить подписанный APK прямо из CPI. Android может запросить разрешение на установку или показать окно подтверждения.
+
 В каждом разделе стекла настройки «Размытие» и «Прозрачность размытия» находятся сразу после выбора материала. Прозрачность определяет, сколько исходного фона видно через размытый слой. У нового движка остаются настройки оптики. Живой фон обновляется автоматически с целью до 120 к/с. Фактическая частота зависит от дисплея и того, как быстро система отдаёт новые кадры.
 
 Настройки материала сгруппированы по размытию, качеству и частоте обновления, а также оптике. Уровень размытия нового движка регулируется до 200%. Яркость фона можно менять отдельно от размытия и непрозрачности стекла.
@@ -96,6 +100,10 @@ The iOS 27 App Animations page has a separate ba31k engine with independent sett
 Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases). Enable the module in LSPosed and select the system launcher. Some features have limited compatibility with Vector. Select **System UI** for system overlays and the lock screen. Enable the stock **Flux** icon style for icon styling. The main development device is the OnePlus 13 on ColorOS 17 with launcher 17.3.12. Feature availability depends on the firmware. [Full installation guide](INSTALL.md#english)
 
 To test smooth zoom, add stock Camera to the LSPosed scope and reopen it. In CPI, open **Camera → iOS Smooth Video Zoom**, turn it on, and select the controls to smooth. The graph updates with manual adjustments and scales its time axis to the trajectory. Compare saved recordings at 1080p and 4K, at 30 and 60 FPS, while zooming within one lens range and changing direction mid-zoom. Lens switches use the stock camera path.
+
+Soft-light glass has independent profiles for control center, notification shade, lock-screen notifications and expanded live activities, and Smart Sidebar. Select **System UI** in LSPosed for the first three, or **Smart Sidebar** (`com.coloros.smartsidebar`) for the sidebar. Restart the affected system app after enabling the effect for the first time.
+
+Open **About → Updates** to check releases, receive update notifications, and install a signed build from CPI. Android may ask for installation permission or confirmation.
 
 ### Build and release
 

@@ -5,6 +5,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsTransferTest {
+    @Test fun softLightProfilesHaveIndependentPortableControls() {
+        val defaults = SettingsDefaults.portable()
+        val surfaces = SoftGlassSettings.Surface.entries
+        assertEquals(surfaces.size, surfaces.map { it.enabled }.toSet().size)
+        for (surface in surfaces) {
+            assertEquals(false, defaults[surface.enabled])
+            val exposure = surface.key(SoftGlassSettings.Parameter.EXPOSURE)
+            assertEquals(0, defaults[exposure])
+            assertEquals(-100L..100L, SettingsTransfer.range(exposure))
+        }
+    }
+
     @Test fun cameraTuningIsPortableButActivationAndLoggingRequireLocalOptIn() {
         val zoom = com.cosmod.launcherglass.camera.CameraZoomSettings
         val defaults = SettingsDefaults.portable()

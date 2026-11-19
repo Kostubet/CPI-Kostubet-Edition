@@ -31,7 +31,8 @@ import io.github.suqi8.coui.kmp.theme.COUITheme
 
 internal class CouiAboutPage(
     context: Context, dark: Boolean, accent: Int, enabled: Boolean,
-    onEnabled: (Boolean) -> Unit, onSettings: () -> Unit, onContributors: () -> Unit, onLink: (String) -> Unit,
+    onEnabled: (Boolean) -> Unit, onSettings: () -> Unit, onUpdates: () -> Unit,
+    onContributors: () -> Unit, onLink: (String) -> Unit,
 ) : CouiControl(context, dark, accent) {
     init {
         val logo = context.applicationInfo.loadIcon(context.packageManager).toBitmap(186, 186).asImageBitmap()
@@ -62,6 +63,7 @@ internal class CouiAboutPage(
                                 title = context.getString(R.string.ui_module))
                         }
                         item { ArrowPreference(title = context.getString(R.string.ui_cpi_settings), onClick = onSettings) }
+                        item { ArrowPreference(title = context.getString(R.string.cpi_updates_title), onClick = onUpdates) }
                     }
                 }
                 SmallTitle(context.getString(R.string.ui_support_author))

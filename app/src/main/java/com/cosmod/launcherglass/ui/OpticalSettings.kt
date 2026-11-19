@@ -9,7 +9,7 @@ object OpticalSettings {
         "banner_motion_soft" to false,
         "large_folder_glass_own" to false,com.cosmod.launcherglass.util.IconPalette.FOLLOW_WALLPAPER to true,WidgetSettings.WALLPAPER_TINT to false,
         GlobalGlassSettings.ENABLED to false) + EdgeSettings.booleans + LockscreenSettings.booleans + SurfaceTintSettings.booleans + FeatureSections.booleans +
-        com.cosmod.launcherglass.util.Ba31kAnimationSettings.booleans + ShadeGlassSettings.booleans + GlassEngineSettings.booleans
+        com.cosmod.launcherglass.util.Ba31kAnimationSettings.booleans + ShadeGlassSettings.booleans + GlassEngineSettings.booleans + SoftGlassSettings.booleans
     val integers=linkedMapOf("edge_light_strength" to 55,"edge_light_width" to 25,"edge_light_sensitivity" to 50,
         "edge_light_smoothing" to 75,"island_glass_blur" to 12,"island_glass_width" to 40,
         "island_glass_distortion" to 80,"island_glass_opacity" to 25,"island_glass_corner" to 30,
@@ -33,8 +33,8 @@ object OpticalSettings {
         WidgetSettings.SCOPE to WidgetSettings.ALL,"large_folder_glass_style" to 1,"large_folder_glass_width" to 40,
         "large_folder_glass_strength" to 100,"large_folder_glass_opacity" to 15) +
         GlassDispersionSettings.defaults + EdgeSettings.integers + LockscreenSettings.integers + SurfaceTintSettings.integers + GlobalGlassSettings.defaults +
-        com.cosmod.launcherglass.util.Ba31kAnimationSettings.integers + ShadeGlassSettings.integers + GlassEngineSettings.integers
-    fun maximum(key:String)=ShadeGlassSettings.range(key)?.last ?: GlassEngineSettings.maximum(key) ?:
+        com.cosmod.launcherglass.util.Ba31kAnimationSettings.integers + ShadeGlassSettings.integers + GlassEngineSettings.integers + SoftGlassSettings.integers
+    fun maximum(key:String)=SoftGlassSettings.range(key)?.last ?: ShadeGlassSettings.range(key)?.last ?: GlassEngineSettings.maximum(key) ?:
         LockscreenSettings.maximums[key] ?: GlobalGlassSettings.maximums[key] ?: when {
         key in SurfaceTintSettings.integers -> if(key.endsWith("hue"))360 else 100
         else -> maximumLegacy(key)
@@ -63,7 +63,7 @@ object OpticalSettings {
         "banner_plate_hue","photo_widget_tint_hue"->360
         else->100
     }
-    fun minimum(key:String):Int=ShadeGlassSettings.range(key)?.first ?: if(key in SurfaceTintSettings.integers && key.endsWith("lightness"))-100 else when(key){
+    fun minimum(key:String):Int=SoftGlassSettings.range(key)?.first ?: ShadeGlassSettings.range(key)?.first ?: if(key in SurfaceTintSettings.integers && key.endsWith("lightness"))-100 else when(key){
         in com.cosmod.launcherglass.util.Ba31kAnimationSettings.integers->com.cosmod.launcherglass.util.Ba31kAnimationSettings.minimum(key)
         LockscreenSettings.NOTIFICATION_CORNER->-1
         LockscreenSettings.UNLOCK_SPEED->LockscreenSettings.MIN_UNLOCK_SPEED

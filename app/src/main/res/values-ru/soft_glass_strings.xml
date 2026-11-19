@@ -1,0 +1,18 @@
+<resources>
+    <string name="soft_glass_title">Стекло «Мягкий свет»</string>
+    <string name="soft_glass_lock">Стекло «Мягкий свет» для уведомлений</string>
+    <string name="soft_glass_sidebar">Умная боковая панель</string>
+    <string name="soft_glass_sidebar_hint">Добавьте «Умную боковую панель» (com.coloros.smartsidebar) в область CPI в LSPosed. После первого включения эффекта перезапустите панель.</string>
+    <string name="soft_glass_hint">Использует системный материал ColorOS 17. После первого включения перезапустите нужное системное приложение.</string>
+    <string name="soft_glass_strength">Сила эффекта</string>
+    <string name="soft_glass_blur">Размытие стекла</string>
+    <string name="soft_glass_width">Ширина кромки</string>
+    <string name="soft_glass_shine">Яркость блика</string>
+    <string name="soft_glass_exposure">Яркость стекла</string>
+    <string name="soft_glass_dimming">Затемнение стекла</string>
+    <string name="soft_glass_warmth">Теплота оттенка</string>
+    <string name="soft_glass_direction">Направление блика</string>
+    <string name="soft_glass_response">Чувствительность к наклону</string>
+    <string name="soft_glass_keep_white">Сохранять белый цвет активных плиток</string>
+    <string name="soft_glass_tilt">Блик реагирует на наклон</string>
+</resources>

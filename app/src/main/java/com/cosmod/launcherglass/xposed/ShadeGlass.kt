@@ -85,7 +85,10 @@ internal object ShadeGlass {
 
     fun configure(context:Context,loader:ClassLoader?,bundle:Bundle,master:Boolean) {
         if(Build.VERSION.SDK_INT!=37 || loader==null)return
-        val values=ShadeGlassSettings.booleans.mapValues {(k,v)->master && bundle.getBoolean(k,v)} +
+        val softControl=SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.CONTROL)
+        val softShade=SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.SHADE)
+        val values=ShadeGlassSettings.booleans.mapValues {(k,v)->master && bundle.getBoolean(k,v) &&
+            !(k==Panel.CONTROL.enabled && softControl) && !(k==Panel.NOTIFICATIONS.enabled && softShade)} +
             (ShadeGlassSettings.integers+GlassEngineSettings.integers.filterKeys {it.startsWith("shade_glass_")})
                 .mapValues {(k,v)->bundle.getInt(k,v)}
         if(prefs==values)return

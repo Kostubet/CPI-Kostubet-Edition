@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 
 /** Section switches mask runtime values; stored adjustments remain intact. */
 internal object FeatureSections {
-    val sections=setOf("ICONS","FOLDERS","PHOTO","DOCK","BANNERS","LIVE","VOLUME","SHADE","LOCKSCREEN","LIGHT","MOTION","PERFORMANCE")
+    val sections=setOf("ICONS","FOLDERS","PHOTO","DOCK","BANNERS","LIVE","VOLUME","SHADE","LOCKSCREEN","SIDEBAR","LIGHT","MOTION","PERFORMANCE")
     fun key(section:String)="feature_section_${section.lowercase(java.util.Locale.ROOT)}"
     val booleans=sections.associate {key(it) to true}
     fun enabled(prefs:SharedPreferences,section:String)=section !in sections || prefs.getBoolean(key(section),true)
@@ -21,6 +21,7 @@ internal object FeatureSections {
         if(off("VOLUME"))disable("volume_glass_enabled")
         if(off("SHADE"))disable(ShadeGlassSettings.Panel.CONTROL.enabled,
             ShadeGlassSettings.Panel.NOTIFICATIONS.enabled,ShadeGlassSettings.CONTROL_BACKGROUND)
+        SoftGlassSettings.Surface.entries.forEach { if(off(it.section)) disable(it.enabled) }
         if(off("MOTION"))disable(com.cosmod.launcherglass.util.Ba31kAnimationSettings.ENABLED)
         if(off("LOCKSCREEN")){
             LockscreenSettings.Surface.entries.forEach {disable(it.key("enabled"))}
