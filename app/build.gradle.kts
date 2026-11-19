@@ -11,8 +11,8 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 424
-        versionName = "0.3.0"
+        versionCode = 425
+        versionName = "0.3.1"
     }
 
     signingConfigs {

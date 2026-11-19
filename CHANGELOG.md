@@ -1,8 +1,12 @@
-# CPI Kostubet Edition 0.3.0
+# CPI Kostubet Edition 0.3.1
 
 [Русский](#русский) · [English](#english)
 
 ## Русский
+
+### Сборка 425 — релиз 0.3.1
+
+- Опубликовано зимнее обновление со всеми изменениями сборок 405–424. Номер сборки повышен для доставки через встроенные обновления. С наступающим! ❄️🎄
 
 ### Сборка 424
 
@@ -137,6 +141,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 425 — version 0.3.1
+
+- Published the winter update with all changes from builds 405–424. Incremented the build number for in-app update delivery. Happy upcoming holidays! ❄️🎄
 
 ### Build 424
 
