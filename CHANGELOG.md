@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 419
+
+- Предпросмотр штатного рингтона воспроизводит исходный тактильный канал через системное аудио. Изменения интенсивности, затухания и сдвига применяются к исходному сигналу.
+
 ### Сборка 418
 
 - Haptic Studio импортирует встроенную дорожку вибрации рингтона как редактируемую огибающую. Можно выбрать рингтон или взять текущий.
@@ -104,6 +108,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 419
+
+- Ringtone preview plays the original haptic channel through Android audio. Strength, fade and timing offset edits operate on the original signal.
 
 ### Build 418
 

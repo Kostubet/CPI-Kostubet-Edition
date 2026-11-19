@@ -1,7 +1,7 @@
 package com.cosmod.launcherglass.haptic
 
 import android.content.Context
-import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Handler
@@ -14,16 +14,20 @@ internal class HapticPreview(
     private val positionChanged: (Int) -> Unit,
     private val playbackFailed: () -> Unit,
 ) {
+    data class RingtoneSource(val reference: HapticPattern, val pcm: RingtonePcm?)
+
     private data class Request(
         val pattern: HapticPattern,
         val audio: Uri?,
         val end: Int,
         val repeat: Boolean,
         val loopStart: Int,
+        val ringtone: RingtoneSource?,
     )
 
     private val handler = Handler(Looper.getMainLooper())
     private var media: MediaPlayer? = null
+    private var carrier: HapticRingtonePlayback? = null
     private var request: Request? = null
     private var elapsed = 0L
     private var startPosition = 0
@@ -50,10 +54,11 @@ internal class HapticPreview(
         }
     }
 
-    fun play(pattern: HapticPattern, audio: Uri?, start: Int, end: Int, repeat: Boolean, lower: Int = start) {
+    fun play(pattern: HapticPattern, audio: Uri?, start: Int, end: Int, repeat: Boolean, lower: Int = start,
+        ringtone: RingtoneSource? = null) {
         stop()
         if (start >= end) return
-        start(Request(pattern, audio, end, repeat, lower), start)
+        start(Request(pattern, audio, end, repeat, lower, ringtone), start)
     }
 
     fun pause() {
@@ -85,6 +90,20 @@ internal class HapticPreview(
     }
 
     private fun prepare(next: Request, at: Int) {
+        val ringtone = next.ringtone?.takeIf {
+            next.pattern.ringtoneVibration && next.pattern.audio == it.reference.audio &&
+                AudioManager.isHapticPlaybackSupported()
+        }
+        if (ringtone != null && next.pattern.usesOriginalRingtone(ringtone.reference) &&
+            (next.audio != null || ringtone.pcm == null)) {
+            val source = Uri.parse(requireNotNull(ringtone.reference.audio))
+            prepareMedia(next, at, source, nativeHaptics = true)
+            return
+        }
+        if (ringtone?.pcm != null && next.pattern.canEditRingtoneCarrier(ringtone.reference)) {
+            startCarrier(next, at, ringtone)
+            return
+        }
         haptics = motor.prepare(next.pattern, at, endPosition)
         loopHaptics = if (!next.repeat || next.loopStart == at) haptics
             else motor.prepare(next.pattern, next.loopStart, endPosition)
@@ -92,12 +111,25 @@ internal class HapticPreview(
             startCycle()
             return
         }
+        prepareMedia(next, at, next.audio, nativeHaptics = false)
+    }
+
+    private fun startCarrier(next: Request, at: Int, ringtone: RingtoneSource) {
+        lateinit var playback: HapticRingtonePlayback
+        playback = HapticRingtonePlayback(requireNotNull(ringtone.pcm), ringtone.reference,
+            next.pattern, next.audio != null, at, endPosition) {
+            handler.post { if (carrier === playback) fail() }
+        }
+        carrier = playback
+        startCycle()
+    }
+
+    private fun prepareMedia(next: Request, at: Int, uri: Uri, nativeHaptics: Boolean) {
         val player = MediaPlayer()
         media = player
-        player.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
-            .setHapticChannelsMuted(true)
-            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-        player.setDataSource(context, next.audio)
+        player.setAudioAttributes(ringtoneAudioAttributes(nativeHaptics))
+        if (next.audio == null) player.setVolume(0f, 0f)
+        player.setDataSource(context, uri)
         player.setOnPreparedListener {
             if (media === it && playing) {
                 runCatching {
@@ -123,6 +155,7 @@ internal class HapticPreview(
         if (!playing || started) return
         runCatching {
             media?.start()
+            carrier?.start()
             elapsed = SystemClock.uptimeMillis()
             haptics?.let {
                 motorActive = true
@@ -134,6 +167,7 @@ internal class HapticPreview(
     }
 
     private fun currentPosition(): Int {
+        carrier?.let { return it.position }
         val player = media
         return if (player == null) startPosition + (SystemClock.uptimeMillis() - elapsed).toInt()
         else runCatching { player.currentPosition }.getOrDefault(position)
@@ -154,6 +188,12 @@ internal class HapticPreview(
         position = startPosition
         haptics = loopHaptics
         positionChanged(position)
+        if (carrier != null) {
+            carrier?.close()
+            carrier = null
+            startCarrier(active, startPosition, requireNotNull(active.ringtone))
+            return
+        }
         val player = media
         if (player == null) startCycle()
         else runCatching {
@@ -174,6 +214,8 @@ internal class HapticPreview(
         handler.removeCallbacksAndMessages(null)
         val player = media
         media = null
+        carrier?.close()
+        carrier = null
         stopMotor()
         runCatching { player?.release() }
         haptics = null

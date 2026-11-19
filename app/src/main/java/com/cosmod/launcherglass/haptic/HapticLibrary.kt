@@ -18,7 +18,10 @@ internal object HapticPatternCodec {
         put("version", 1)
         put("name", pattern.name)
         put("length", pattern.length)
-        if (includeAudio) put("audio", pattern.audio)
+        if (includeAudio) {
+            put("audio", pattern.audio)
+            if (pattern.ringtoneVibration) put("ringtoneVibration", true)
+        }
         put("intensity", pattern.intensity)
         put("offset", pattern.offset)
         put("fadeIn", pattern.fadeIn)
@@ -66,7 +69,8 @@ internal object HapticPatternCodec {
                 })
         }, root.optString("audio").takeIf { includeAudio && Uri.parse(it).scheme == "content" },
             root.optInt("intensity", 100), root.optInt("offset", 0), root.optInt("fadeIn", 0), root.optInt("fadeOut", 0),
-            root.optString("style").takeIf { it.isNotEmpty() }?.let(HapticStyle::valueOf), generator, root.optBoolean("repeat"))
+            root.optString("style").takeIf { it.isNotEmpty() }?.let(HapticStyle::valueOf), generator,
+            root.optBoolean("repeat"), includeAudio && root.optBoolean("ringtoneVibration"))
     }
 }
 

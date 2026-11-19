@@ -9,6 +9,37 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 class HapticCoreTest {
+    @Test fun originalRingtoneSurvivesRenameAndKeepsCarrierWithGainEdits() {
+        val reference = HapticPattern("Original", 100, listOf(
+            HapticPoint(0, 0f), HapticPoint(20, .5f), HapticPoint(60, .5f), HapticPoint(100, 0f),
+        ), ringtoneVibration = true)
+        assertTrue(reference.copy(name = "Copy", repeat = true).usesOriginalRingtone(reference))
+        val quieter = reference.copy(intensity = 60, offset = 20, fadeIn = 60)
+        assertTrue(quieter.canEditRingtoneCarrier(reference))
+        assertEquals(.4f, quieter.ringtoneGain(reference, 40, true), .0001f)
+        assertEquals(0f, quieter.ringtoneGain(reference, 10, true), 0f)
+        val local = reference.replace(HapticPoint(20, .25f))
+        assertEquals(.5f, local.ringtoneGain(reference, 20, false), .0001f)
+        assertEquals(1f, local.ringtoneGain(reference, 60, false), .0001f)
+        assertTrue(!local.usesOriginalRingtone(reference))
+        assertTrue(!reference.replace(HapticPoint(40, .8f, tapKind = HapticTap.NATIVE)).canEditRingtoneCarrier(reference))
+    }
+
+    @Test fun ringtonePcmKeepsSignedAudioAndHapticSamplesSeparate() {
+        val buffer = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        buffer.putShort(100).putShort(-170).putShort(-100).putShort(170).flip()
+        val collector = RingtonePcm.Collector()
+        collector.append(buffer, rate = 8000, channels = 2, haptics = 1, timestampUs = 125,
+            encoding = android.media.AudioFormat.ENCODING_PCM_16BIT, bytes = 2)
+        val pcm = requireNotNull(collector.finish())
+        assertEquals(3, pcm.frames)
+        assertEquals(0, pcm.sample(0, 1).toInt())
+        assertEquals(100, pcm.sample(1, 0).toInt())
+        assertEquals(-170, pcm.sample(1, 1).toInt())
+        assertEquals(170, pcm.sample(2, 1).toInt())
+        assertEquals(0, buffer.position())
+    }
+
     @Test fun importedRingtoneEnvelopeKeepsItsAmplitudeAndSilence() {
         val envelope = requireNotNull(ringtoneEnvelope(floatArrayOf(0f, .001f, .72f, .35f, 0f, 0f), 120))
         val pattern = HapticPattern("Ringtone", 120, envelope)

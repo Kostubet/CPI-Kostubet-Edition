@@ -58,6 +58,7 @@ internal data class HapticPattern(
     val style: HapticStyle? = null,
     val generator: GeneratorOptions = GeneratorOptions(),
     val repeat: Boolean = false,
+    val ringtoneVibration: Boolean = false,
 ) {
     init {
         require(name.isNotBlank() && name.length <= 80 && length in 80..MAX_TRACK_MS)
@@ -174,11 +175,37 @@ internal data class HapticPattern(
     }
 
     fun resetVibration(): HapticPattern = HapticPattern(name, length,
-        listOf(HapticPoint(0, 0f), HapticPoint(length, 0f)), audio = audio)
+        listOf(HapticPoint(0, 0f), HapticPoint(length, 0f)), audio = audio, ringtoneVibration = ringtoneVibration)
 
     companion object {
         fun empty(name: String) = HapticPattern(name, 2_000, listOf(HapticPoint(0, 0f), HapticPoint(2_000, 0f)))
     }
+}
+
+internal fun HapticPattern.usesOriginalRingtone(reference: HapticPattern): Boolean =
+    points == reference.points && length == reference.length && intensity == 100 && offset == 0 &&
+        fadeIn == 0 && fadeOut == 0
+
+internal fun HapticPattern.canEditRingtoneCarrier(reference: HapticPattern): Boolean {
+    if (points == reference.points) return true
+    return points.none { point ->
+        point.tap || point.hz != 0f || point.pitch != 0f || point.sharpness != .45f ||
+            (point.amplitude > .002f && reference.sourcePoint(point.ms).amplitude <= .002f)
+    }
+}
+
+internal fun HapticPattern.ringtoneGain(reference: HapticPattern, playbackTime: Int, sameEnvelope: Boolean): Float {
+    val sourceTime = playbackTime - offset
+    if (sourceTime !in 0 until reference.length) return 0f
+    val fadeStart = if (fadeIn == 0) 1f else (playbackTime.toFloat() / fadeIn).coerceAtMost(1f)
+    val fadeEnd = if (fadeOut == 0) 1f else ((length - playbackTime).toFloat() / fadeOut).coerceIn(0f, 1f)
+    val gain = intensity * .01f * fadeStart * fadeEnd
+    if (sameEnvelope) return gain
+    val previous = reference.sourcePoint(sourceTime).amplitude
+    val next = sourcePoint(sourceTime).amplitude
+    if (previous == next) return gain
+    // Preserve the recorded carrier rather than replacing it with a vibration at the motor's resonance.
+    return if (previous > .002f) (next / previous * gain).coerceIn(0f, 4f) else 0f
 }
 
 private fun HapticPoint.withValue(channel: HapticChannel, value: Float): HapticPoint = when (channel) {

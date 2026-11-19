@@ -72,6 +72,7 @@ class HapticStudioActivity : AppCompatActivity() {
     private var original: HapticPattern? = null
     private var audio: Uri? = null
     private var waveform: HapticAnalysis.Track? = null
+    private var ringtoneSource: HapticPreview.RingtoneSource? = null
     private var selectedId: String? = null
     private var entries = emptyList<HapticLibrary.Entry>()
     private var style = HapticStyle.BALANCED
@@ -778,10 +779,19 @@ class HapticStudioActivity : AppCompatActivity() {
 
     private fun play() {
         val project = if (compare) original ?: pattern else pattern
+        val source = ringtoneSource?.takeIf { it.reference.audio == project.audio }
+        if (project.ringtoneVibration && source == null && project.audio != null) {
+            if (!busy) loadRingtoneSource(project) {
+                val current = if (compare) original ?: pattern else pattern
+                if (ringtoneSource?.reference?.audio == current.audio) play()
+            }
+            return
+        }
         val end = minOf(regionEnd ?: project.length, project.length)
         val lower = regionStart.coerceAtMost(end - 1)
         val start = cursor.takeIf { it in lower until end } ?: lower
-        player.play(project, if (previewAudio) project.audio?.let(Uri::parse) else null, start, end, pattern.repeat, lower)
+        player.play(project, if (previewAudio) project.audio?.let(Uri::parse) else null,
+            start, end, pattern.repeat, lower, ringtone = source)
     }
 
     private fun analyze(uri: Uri, generate: Boolean) {
@@ -798,7 +808,7 @@ class HapticStudioActivity : AppCompatActivity() {
             waveform = source
             if (points != null) {
                 val project = snapshot.copy(length = source.length, points = points, audio = uri.toString(),
-                    style = selectedStyle, generator = options)
+                    style = selectedStyle, generator = options, ringtoneVibration = false)
                 if (snapshot.audio != uri.toString()) {
                     original = null
                     selectedId = null
@@ -832,7 +842,9 @@ class HapticStudioActivity : AppCompatActivity() {
                 return@task
             }
             val project = HapticPattern(name?.trim()?.take(80)?.takeIf { it.isNotEmpty() }
-                ?: t("System ringtone", "Системный рингтон"), source.track.length, points, audio = uri.toString())
+                ?: t("System ringtone", "Системный рингтон"), source.track.length, points,
+                audio = uri.toString(), ringtoneVibration = true)
+            ringtoneSource = HapticPreview.RingtoneSource(project, source.pcm)
             changePattern(project)
             original = project
             selectedId = null
@@ -840,7 +852,7 @@ class HapticStudioActivity : AppCompatActivity() {
             cursor = 0
             resetSelection()
             show(Page.EDITOR)
-            message(t("System vibration envelope imported", "Огибающая системной вибрации импортирована"))
+            message(t("Original ringtone vibration imported", "Исходная вибрация рингтона импортирована"))
         }
         if (page == Page.GENERATOR) show(preserveScroll = true)
     }
@@ -911,6 +923,7 @@ class HapticStudioActivity : AppCompatActivity() {
         selectedId = id
         audio = project.audio?.let(Uri::parse)
         waveform = null
+        ringtoneSource = null
         style = project.style ?: HapticStyle.BALANCED
         generator = project.generator
         cursor = 0
@@ -918,7 +931,37 @@ class HapticStudioActivity : AppCompatActivity() {
         undo.clear()
         redo.clear()
         show(Page.EDITOR)
-        audio?.let { analyze(it, false) }
+        audio?.let { uri ->
+            // Old imports used these same 20 ms envelope points without storing their source type.
+            if (project.ringtoneVibration || (project.style == null && uri.authority == "media" &&
+                    uri.pathSegments.firstOrNull() == "internal")) {
+                loadRingtoneSource(project) {}
+            } else analyze(uri, false)
+        }
+    }
+
+    private fun loadRingtoneSource(project: HapticPattern, ready: () -> Unit) {
+        val uri = project.audio?.let(Uri::parse) ?: return
+        task({ HapticAudio.readRingtone(this, uri) }) { decoded ->
+            val points = decoded.vibration
+            if (points != null && (project.ringtoneVibration || project.points == points)) {
+                val reference = HapticPattern(project.name, decoded.track.length, points, audio = uri.toString(),
+                    ringtoneVibration = true)
+                ringtoneSource = HapticPreview.RingtoneSource(reference, decoded.pcm)
+                if (pattern.audio == project.audio) {
+                    if (!pattern.ringtoneVibration) pattern = pattern.copy(ringtoneVibration = true)
+                    original = reference
+                }
+            } else if (pattern.audio == project.audio && project.ringtoneVibration) {
+                pattern = pattern.copy(ringtoneVibration = false)
+                message(t("Original vibration track unavailable", "Исходная вибродорожка недоступна"))
+            }
+            if (audio == uri) {
+                waveform = decoded.track
+                graph?.source = decoded.track
+            }
+            ready()
+        }
     }
 
     private fun save(copy: Boolean) {
