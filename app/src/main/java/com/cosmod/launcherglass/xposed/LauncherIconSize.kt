@@ -66,11 +66,10 @@ internal object LauncherIconSize {
     private val percent get()=if(PrefsHelper.enabled)PrefsHelper.launcherIconSize else 100
     private var largeProgress = 0f
     private var largeMotion: ValueAnimator? = null
-    private val workspaceScale get() = 1f + largeProgress *
-        ((DesktopAppearance.LARGE_ICON_PERCENT / 100f).coerceAtMost(130f / percent) - 1f)
+    private val enlargedScale get() = (DesktopAppearance.LARGE_ICON_PERCENT / 100f).coerceAtMost(130f / percent)
 
     private fun updateWorkspaceSizes() {
-        for (view in containers.keys.weakSnapshot()) if (view.isAttachedToWindow) updateContainer(view)
+        for (view in containers.keys.weakSnapshot()) if (view.isAttachedToWindow) runCatching { updateContainer(view) }
         val update = scaleWorkspaceIcon
         if (update != null) for (view in workspaceViews.keys.weakSnapshot()) if (view.isAttachedToWindow) update(view)
         val showLabel = updateLabel
@@ -104,8 +103,8 @@ internal object LauncherIconSize {
             return
         }
         largeMotion = ValueAnimator.ofFloat(largeProgress, target).apply {
-            duration = 350L
-            interpolator = PathInterpolator(.24f, .1f, .28f, 1f)
+            duration = 460L
+            interpolator = PathInterpolator(.30f, 0f, .28f, 1f)
             addUpdateListener {
                 largeProgress = it.animatedValue as Float
                 updateWorkspaceSizes()
@@ -150,11 +149,13 @@ internal object LauncherIconSize {
             ?.takeUnless { it.isEmpty }
         val centerX = bounds?.exactCenterX()?.minus(child?.left ?: 0) ?: plate.width / 2f
         val centerY = bounds?.exactCenterY()?.minus(child?.top ?: 0) ?: plate.height / 2f
-        val label = if (isLargeFolder) null else NativeIconAccess.call(view,
-            if (isShortcut) "getMContainerName" else "getFolderName") as? View
+        val label = NativeIconAccess.call(view, if (isShortcut) "getMContainerName" else "getFolderName") as? View
         if (label != null && labelViews.put(label, true) == null) updateLabel?.invoke(label)
-        val requested = if (isLargeFolder) 1f else workspaceScale * percent / 100f
-        val ratio = fitCell(view, bounds, requested, nativeRatio = 1f)
+        val normal = if (isLargeFolder) 1f else percent / 100f
+        val start = fitCell(view, bounds, normal, nativeRatio = 1f)
+        val end = if (isLargeFolder || largeProgress == 0f) start else
+            fitCell(view, bounds, normal * enlargedScale, nativeRatio = 1f)
+        val ratio = LauncherGridIconScale.interpolate(start, end, largeProgress)
         scaleAround(plate, ratio, centerX, centerY, nativeScale)
     }
 
@@ -236,6 +237,12 @@ internal object LauncherIconSize {
             val oplus=XposedHelpers.findClassIfExists("com.android.launcher3.OplusBubbleTextView",loader)
             val textAlpha = type.getDeclaredMethod("setTextAlpha", Float::class.javaPrimitiveType)
             val nativeText = type.getDeclaredField("mTextAlpha").apply { isAccessible = true }
+            val labelExtension = runCatching { type.getDeclaredField("mOPlusBtvExtV2").apply { isAccessible = true } }.getOrNull()
+            val setLabelEffectAlpha = runCatching {
+                labelExtension?.type?.getMethod("setTextAlphaEntryPoint", Float::class.javaPrimitiveType)
+            }.getOrNull()
+            val refreshShadow = runCatching { type.getMethod("refreshShadowLayer") }.getOrNull()
+            val refreshingLabel = ThreadLocal<View>()
             val getIconBounds = type.getDeclaredMethod("getIconBounds", Rect::class.java)
             val iconBounds = Rect()
             fun isWorkspaceIcon(view: View) = display.getInt(view) == workspace || DockMaterial.containingDock(view) != null
@@ -246,9 +253,12 @@ internal object LauncherIconSize {
                 iconBounds.setEmpty()
                 getIconBounds.invoke(view, iconBounds)
                 if (iconBounds.isEmpty) return
-                val ratioInCell = fitCell(view, iconBounds, workspaceScale, 100f / percent)
-                val dock = if (ratioInCell > 1f) DockMaterial.containingDock(view) else null
-                val ratio = if (dock == null) ratioInCell else DockMaterial.limitIconScale(dock, view, iconBounds, ratioInCell)
+                val nativeRatio = 100f / percent
+                val start = fitCell(view, iconBounds, 1f, nativeRatio)
+                val target = if (largeProgress == 0f) start else fitCell(view, iconBounds, enlargedScale, nativeRatio)
+                val dock = if (target > 1f) DockMaterial.containingDock(view) else null
+                val end = if (dock == null) target else DockMaterial.limitIconScale(dock, view, iconBounds, target)
+                val ratio = LauncherGridIconScale.interpolate(start, end, largeProgress)
                 scaleAround(view, ratio, iconBounds.exactCenterX(), iconBounds.exactCenterY())
             }
             scaleWorkspaceIcon = { view -> runCatching { resizeWorkspaceIcon(view) } }
@@ -282,23 +292,67 @@ internal object LauncherIconSize {
                     view.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> scaleWorkspaceIcon?.invoke(v) }
                 }
                 resizeWorkspaceIcon(view)
+                if (largeProgress > 0f) updateLabel?.invoke(view)
             }
+            fun refreshLabelEffects(view: View, alpha: Float) {
+                labelExtension?.get(view)?.let { setLabelEffectAlpha?.invoke(it, alpha) }
+                refreshShadow?.invoke(view)
+            }
+
+            fun applyLabel(view: View, rebind: Boolean = false) {
+                val current = nativeText.getFloat(view)
+                val wanted = labelAlpha.getOrPut(view) { current }
+                val alpha = wanted * (1f - largeProgress)
+                if (!rebind && current == alpha) return
+                val previous = refreshingLabel.get()
+                refreshingLabel.set(view)
+                try {
+                    textAlpha.invoke(view, alpha)
+                    if (rebind || alpha == 0f || current == 0f) refreshLabelEffects(view, alpha)
+                } finally {
+                    refreshingLabel.set(previous)
+                }
+            }
+
             ModuleHooks.hookMethod(textAlpha, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val view = param.thisObject as View
+                    if (refreshingLabel.get() === view) return
                     if (view !in labelViews && (!isWorkspaceIcon(view) || hasScaledContainer(view, targets))) return
                     val wanted = param.args[0] as Float
                     labelViews[view] = true
                     labelAlpha[view] = wanted
                     param.args[0] = wanted * (1f - largeProgress)
                 }
-            })
-            updateLabel = { view ->
-                runCatching {
-                    val wanted = labelAlpha[view] ?: nativeText.getFloat(view)
-                    textAlpha.invoke(view, wanted)
+
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val view = param.thisObject as View
+                    if (!param.hasThrowable() && refreshingLabel.get() !== view && largeProgress > 0f &&
+                        param.args[0] == 0f && view in labelViews) {
+                        runCatching { refreshLabelEffects(view, 0f) }
+                    }
                 }
-            }
+            })
+            // ColorOS re-creates the text layer and resets its effects to full opacity.
+            type.declaredMethods.firstOrNull { it.name == "setMultiNodeEnable" && it.parameterCount == 3 }
+                ?.let { method ->
+                    ModuleHooks.hookMethod(method, object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val view = param.thisObject as View
+                            if (largeProgress == 0f || view !in labelViews) return
+                            param.setObjectExtra("cpiLabelRebind", true)
+                            param.setObjectExtra("cpiPreviousLabel", refreshingLabel.get())
+                            refreshingLabel.set(view)
+                        }
+
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            if (param.getObjectExtra("cpiLabelRebind") != true) return
+                            refreshingLabel.set(param.getObjectExtra("cpiPreviousLabel") as? View)
+                            if (!param.hasThrowable()) runCatching { applyLabel(param.thisObject as View, rebind = true) }
+                        }
+                    })
+                }
+            updateLabel = { view -> runCatching { applyLabel(view) } }
             // Adjust the stock size after the device profile and any XML override have been resolved.
             val initialize=object:XC_MethodHook(){
                 override fun afterHookedMethod(param:MethodHookParam){

@@ -11,6 +11,20 @@ import java.util.concurrent.Executors
 internal class NativeFluxIconStyle private constructor(loader: ClassLoader) {
     companion object {
         private val writer by lazy { Executors.newSingleThreadExecutor() }
+        private const val THEME_SHIFT = 4
+        private const val THEME_MASK = 0xfL shl THEME_SHIFT
+        private const val CLASSIC = 2L
+        private const val GRADIENT = 3L
+        private const val ALWAYS_DARK = 1L shl 10
+        private const val ENABLE_DARK_MODE = 1L shl 61
+
+        internal fun requiredConfig(current: Long): Long {
+            if (current <= 0L) return current
+            val theme = (current and THEME_MASK) ushr THEME_SHIFT
+            val display = current and (ALWAYS_DARK or ENABLE_DARK_MODE)
+            if (theme != CLASSIC && (theme != GRADIENT || display != 0L)) return current
+            return (current and THEME_MASK.inv()) or (GRADIENT shl THEME_SHIFT) or ALWAYS_DARK or ENABLE_DARK_MODE
+        }
 
         fun request(context: Context) {
             val launcher = context.applicationContext
@@ -37,20 +51,15 @@ internal class NativeFluxIconStyle private constructor(loader: ClassLoader) {
         val current = XposedHelpers.callMethod(service, "getConfiguration") as? Configuration ?: return
         val original = extraConfig.invoke(current) ?: return
         val iconConfig = XposedHelpers.getLongField(original, "mUxIconConfig")
-        if (iconConfig <= 0L) return
-        // CPI supplies the tone. Keep native geometry and use a plain Flux base for every profile.
-        val previousStyle = (0xfL shl 4) or (0x3L shl 60) or (0x3L shl 10)
-        val flux = (iconConfig and previousStyle.inv()) or (3L shl 4)
-        val activePack = XposedHelpers.getObjectField(original, "mIconPackName") as? String
-        if (iconConfig == flux && activePack.isNullOrEmpty()) return
+        val flux = requiredConfig(iconConfig)
+        if (iconConfig == flux) return
         val updated = Configuration(current)
         val extra = extraConfig.invoke(updated) ?: return
         XposedHelpers.setLongField(extra, "mUxIconConfig", flux)
-        XposedHelpers.setObjectField(extra, "mIconPackName", "")
         XposedHelpers.callMethod(service, "updateConfiguration", updated)
         val manager = XposedHelpers.callStaticMethod(themeManager, "getInstance") ?: return
         val userId = XposedHelpers.callMethod(context, "getUserId") as Int
         writeSettings.invoke(manager, context.contentResolver, flux, userId)
-        GlassLogger.i("DesktopAppearance", "Applied native ColorOS Flux icons")
+        GlassLogger.i("DesktopAppearance", "Selected ColorOS Gradient with Dark display")
     }
 }

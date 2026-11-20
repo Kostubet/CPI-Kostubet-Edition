@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 439
+
+- В «Оформлении» CPI переключает классические значки и светлый вариант Flux на «Градиент → Тёмный». Уже настроенный тёмный или автоматический режим Flux сохраняется.
+- Увеличение иконок и папок плавно доходит до границы ячейки. Подписи продолжают исчезать при пересоздании текстового слоя лаунчером.
+
 ### Сборка 438
 
 - Все стили «Оформления» используют нативные иконки Flux. Исправлены образцы «Погоды» для тёмного, прозрачного и однотонного стилей.
@@ -221,6 +226,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 439
+
+- CPI Appearance switches Classic and bright Flux icons to Gradient → Dark. Existing dark and automatic Gradient modes are preserved.
+- Icons and folders scale smoothly to their grid limit, and launcher label fades survive text layer rebinds.
 
 ### Build 438
 

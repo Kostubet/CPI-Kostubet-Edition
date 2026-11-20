@@ -1,6 +1,9 @@
 package com.cosmod.launcherglass.util
 
 internal object LauncherGridIconScale {
+    fun interpolate(normal: Float, enlarged: Float, progress: Float): Float =
+        normal + (enlarged - normal) * progress
+
     fun fit(
         requested: Float, nativeRatio: Float, slotWidth: Int, slotHeight: Int,
         centerX: Float, centerY: Float, iconWidth: Int, iconHeight: Int, gap: Float,
