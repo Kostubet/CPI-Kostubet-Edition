@@ -23,6 +23,7 @@ internal object MultiIconMaterialHook {
         override fun draw(canvas:Canvas){
             val view=owner.get() ?: return native.draw(canvas)
             if(!enabled()){native.draw(canvas);return}
+            if (PrefsHelper.desktopTransparentIconPlate) return
             try {drawMaterial(canvas,view)}catch(t:Throwable){
                 if(failures.add(t.javaClass.name+":"+t.message))GlassLogger.e("MultiIcons","Normal shortcut material unavailable",t)
                 native.draw(canvas)

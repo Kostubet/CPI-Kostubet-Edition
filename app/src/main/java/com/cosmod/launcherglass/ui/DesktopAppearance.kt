@@ -61,6 +61,8 @@ internal object DesktopAppearance {
         }
 
         fun iconDark(systemDark: Boolean) = dark(systemDark)
+
+        fun hideIconPlate(systemDark: Boolean) = mode == Mode.CLEAR && !iconDark(systemDark)
     }
 
     fun read(settings: Bundle, systemDark: Boolean): Profile {
@@ -121,8 +123,11 @@ internal object DesktopAppearance {
                     settings.putInt(Keys.KEY_BLUR_STYLE, Keys.BLUR_STYLE_LIQUID)
                     if (tinted) settings.putInt(Keys.KEY_BLUR_SATURATION, 100)
                     val opacity = settings.getInt(Keys.KEY_BG_OPACITY, SettingsDefaults.integer(Keys.KEY_BG_OPACITY))
-                    settings.putInt(Keys.KEY_BG_OPACITY, if (transparent) opacity.coerceIn(0, if (dark) 16 else 10)
-                        else opacity.coerceIn(16, if (dark) 62 else 45))
+                    settings.putInt(Keys.KEY_BG_OPACITY, when {
+                        !transparent -> opacity.coerceIn(16, if (dark) 62 else 45)
+                        dark -> opacity.coerceIn(32, 54)
+                        else -> 0
+                    })
                 }
                 else -> Unit
             }

@@ -603,6 +603,29 @@ object WallpaperHelper {
                 NeutralBackdrop.indicatorImage?.isRecycled==false)
 
 
+    internal fun getPickerWallpaper(context: Context): Bitmap? {
+        val maxSide = maxOf(context.resources.displayMetrics.widthPixels,
+            context.resources.displayMetrics.heightPixels).coerceIn(1920, 3072)
+        if (!hasSystemWallpaperEffect(context)) {
+            val manager = WallpaperManager.getInstance(context)
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            runCatching {
+                manager.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)?.use {
+                    BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
+                    if (options.outWidth > 0 && options.outHeight > 0) {
+                        options.inSampleSize = Integer.highestOneBit(
+                            (maxOf(options.outWidth, options.outHeight) / maxSide).coerceAtLeast(1))
+                        options.inJustDecodeBounds = false
+                        BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
+                    } else null
+                }
+            }.getOrNull()?.let { forSoftwareCanvas(it)?.let { image -> return image } }
+        }
+        val bitmap = readSystemSnapshot(context, fresh = true, maxSide = maxSide)
+            ?: loadRawWallpaper(context) ?: return null
+        return forSoftwareCanvas(bitmap)
+    }
+
     fun getRawScaledWallpaper(context: Context): Bitmap? {
 
         val raw = loadRawWallpaper(context) ?: return null

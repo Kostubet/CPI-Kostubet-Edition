@@ -130,7 +130,10 @@ internal object DesktopAppearanceToolbar {
             if (!PrefsHelper.enabled || dialog?.isShowing == true) return@setOnClickListener
             val host = activity(context) ?: return@setOnClickListener
             if (host.isFinishing || host.isDestroyed) return@setOnClickListener
-            runCatching { dialog = DesktopAppearancePanel.open(host, sheet) }.onFailure { report(it) }
+            runCatching {
+                dialog = DesktopAppearancePanel.open(host, sheet)
+                if (dialog?.isShowing == true) done.performClick()
+            }.onFailure { report(it) }
         }
         copy.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) {
@@ -143,8 +146,6 @@ internal object DesktopAppearanceToolbar {
             }
             override fun onViewDetachedFromWindow(view: View) {
                 view.viewTreeObserver.removeOnPreDrawListener(listener)
-                dialog?.dismiss()
-                dialog = null
             }
         })
         parent.addView(copy, parent.indexOfChild(done), params)

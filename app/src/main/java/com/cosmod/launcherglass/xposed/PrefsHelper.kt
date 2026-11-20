@@ -82,6 +82,8 @@ object PrefsHelper {
         private set
     @Volatile var desktopLargeIcons = false
         private set
+    @Volatile var desktopTransparentIconPlate = false
+        private set
     @Volatile var desktopDimWallpaper = false
         private set
 
@@ -154,6 +156,8 @@ object PrefsHelper {
             val actualSystemDark = systemDark ?: IconPalette.isSystemDark(context)
             val appearance = DesktopAppearance.read(stored, actualSystemDark)
             val appearanceChanged = appearance.mode != appearanceMode
+            val hideIconPlate = appearance.hideIconPlate(actualSystemDark)
+            val iconPlateVisibilityChanged = desktopTransparentIconPlate != hideIconPlate
             val bundle = if (appearance.mode == DesktopAppearance.Mode.MANUAL) stored else Bundle(stored)
             DesktopAppearance.apply(bundle, appearance, actualSystemDark)
 
@@ -277,15 +281,12 @@ object PrefsHelper {
             val paletteChanged = newPalette != iconPalette
             val masterChanged = newEnabled != enabled
 
-            if (newBgOpacity != bgOpacity || newEnabled != enabled) {
-                IconBitmapProcessor.clearCache()
-            }
             val blurRadiusChanged=newBlurRadius!=blurRadius
             val blurModeChanged=newBlurMode!=blurMode
             val blurEnabledChanged=newBlurEnabled!=blurEnabled
             val drawerChanged=newDrawerBlurEnabled!=drawerBlurEnabled
             val folderEnabledChanged=newFolderBlurEnabled!=folderBlurEnabled
-            val materialChanged=iconsSectionChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
+            val materialChanged=iconsSectionChanged || iconPlateVisibilityChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
                 newFolderBlurEnabled!=folderBlurEnabled || newFolderIconsBlurEnabled!=folderIconsBlurEnabled || newDrawerBlurEnabled!=drawerBlurEnabled ||
                 newIconStroke != iconStroke || newStrokeOpacity != strokeOpacity ||
                 newGradientOpacity != gradientOpacity || glyphOutlineChanged || paletteChanged ||
@@ -301,6 +302,7 @@ object PrefsHelper {
             enabled = newEnabled
             gpuEffects=newGpuEffects
             bgOpacity = newBgOpacity
+            desktopTransparentIconPlate = hideIconPlate
             blurEnabled = newBlurEnabled
             colorDepthBits=newColorDepth
             colorDepthStage=newDepthStage
@@ -350,21 +352,15 @@ object PrefsHelper {
             if (materialChanged || folderChanged) {
                 IconGlassHook.invalidateShaders()
             }
-            if (paletteChanged) {
-                IconBitmapProcessor.clearTintCache()
-                IconMaterialRenderer.clear()
-            }
             if(materialChanged || folderChanged || paletteChanged){
                 IconGlassHook.invalidateFolderPreviews()
                 IconGlassHook.invalidateActiveIcons()
             }
-            if (masterChanged || backendChanged || iconsSectionChanged) {
+            // Quick appearance profiles use the same native drawables. Preserve
+            // their source layers and skip a native model reload when entering or leaving Stock.
+            if (masterChanged || backendChanged || (iconsSectionChanged && !appearanceChanged)) {
                 IconGlassHook.onIconThemeChanged()
-                // Switching appearance in edit mode only changes draw-time
-                // materials. A native model reload would exit the edit session.
-                if (!appearanceChanged || !LiveBlurEngine.isEditing || masterChanged || backendChanged) {
-                    IconGlassHook.reloadNativeIcons()
-                }
+                IconGlassHook.reloadNativeIcons()
             }
 
             if(enabled){

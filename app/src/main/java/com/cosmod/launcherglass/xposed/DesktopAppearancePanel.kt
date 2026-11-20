@@ -1,5 +1,6 @@
 package com.cosmod.launcherglass.xposed
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.app.Dialog
 import android.content.Context
@@ -7,42 +8,35 @@ import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
-import android.graphics.drawable.StateListDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.transition.ChangeBounds
-import android.transition.Fade
-import android.transition.TransitionManager
-import android.transition.TransitionSet
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.Window
 import android.view.WindowManager.LayoutParams.FLAG_BLUR_BEHIND
 import android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND
-import android.view.animation.DecelerateInterpolator
+import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Space
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.animation.doOnEnd
 import androidx.core.graphics.ColorUtils
+import androidx.core.view.doOnLayout
 import androidx.core.view.doOnPreDraw
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.DesktopAppearance
 import com.cosmod.launcherglass.ui.DesktopAppearance.Mode
 import com.cosmod.launcherglass.ui.DesktopAppearance.Theme
-import com.cosmod.launcherglass.ui.FeatureSections
-import com.cosmod.launcherglass.ui.GlassDispersionSettings
-import com.cosmod.launcherglass.ui.GlassPreview
-import com.cosmod.launcherglass.ui.SettingsDefaults
 import com.cosmod.launcherglass.ui.SettingsProvider.Companion as Keys
 import com.cosmod.launcherglass.ui.onextbox.ColorOsPopupMaterialView
 import com.cosmod.launcherglass.ui.onextbox.applyOplusPopupBlur
@@ -50,27 +44,31 @@ import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.IconPalette
 import com.cosmod.launcherglass.util.PreviewIcons
 import com.cosmod.launcherglass.util.WallpaperHelper
-import java.lang.reflect.Constructor
-import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** The original CPI COUI material on an explicitly bottom-aligned launcher panel. */
 internal object DesktopAppearancePanel {
-    private const val COUI_SEEK = "com.coui.appcompat.seekbar.COUISeekBar"
+    private val writes by lazy { Executors.newSingleThreadExecutor() }
+    private val wallpapers by lazy { Executors.newSingleThreadExecutor() }
+    private val enter = PathInterpolator(.22f, .76f, .25f, 1f)
+    private val exit = PathInterpolator(.35f, .04f, .7f, .52f)
 
     class Contract(loader: ClassLoader) {
-        private val seekType = loader.loadClass(COUI_SEEK)
-        val seek: Constructor<*> = seekType.getConstructor(Context::class.java)
-        val max: Method = seekType.getMethod("setMax", Int::class.javaPrimitiveType)
-        val progress: Method = seekType.getMethod("setProgress", Int::class.javaPrimitiveType)
-        val track: Method = seekType.getMethod("setSeekBarBackgroundColor", ColorStateList::class.java)
-        val fill: Method = seekType.getMethod("setProgressColor", ColorStateList::class.java)
-        val thumb: Method? = runCatching { seekType.getMethod("setThumbColor", ColorStateList::class.java) }.getOrNull()
+        private val seekType = loader.loadClass("com.coui.appcompat.seekbar.COUISeekBar")
+        val seek = seekType.getConstructor(Context::class.java)
+        val max = seekType.getMethod("setMax", Int::class.javaPrimitiveType)
+        val progress = seekType.getMethod("setProgress", Int::class.javaPrimitiveType)
+        val start = runCatching { seekType.getMethod("getProgressStart") }.getOrNull()
+        val length = runCatching { seekType.getMethod("getSeekBarLength") }.getOrNull()
         val listenerType: Class<*> = seekType.declaredClasses.single {
-            it.isInterface && it.declaredMethods.any { method -> method.parameterTypes.contentEquals(arrayOf(seekType, Int::class.javaPrimitiveType)) }
+            it.isInterface && it.declaredMethods.any { method ->
+                method.parameterTypes.contentEquals(arrayOf(seekType, Int::class.javaPrimitiveType))
+            }
         }
-        val listener: Method = seekType.getMethod("setOnSeekBarChangeListener", listenerType)
+        val listener = seekType.getMethod("setOnSeekBarChangeListener", listenerType)
+        val segments = runCatching { AppearanceSegmentContract(loader) }.getOrNull()
     }
 
     fun contract(loader: ClassLoader) = Contract(loader)
@@ -80,420 +78,446 @@ internal object DesktopAppearancePanel {
         if (!stored.getBoolean(Keys.KEY_ENABLED, true)) return null
         var backAction: () -> Unit = {}
         val dialog = object : Dialog(host) {
-            @Deprecated("Used by the host Dialog to dispatch Back on older firmware.")
+            @Deprecated("Used by the host dialog to dispatch Back on older firmware.")
             override fun onBackPressed() = backAction()
         }
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val context = host
         val labels = host.createPackageContext(BuildConfig.APPLICATION_ID, 0)
         val systemDark = IconPalette.isSystemDark(host)
         var profile = DesktopAppearance.read(stored, systemDark)
-        var wallpaper: Bitmap? = null
         var darken = stored.getInt(DesktopAppearance.DIM_WALLPAPER) == 1
-        var large = stored.getInt(DesktopAppearance.LARGE_ICONS) == 1
+        var wallpaper: Bitmap? = null
         val handler = Handler(Looper.getMainLooper())
         val pending = Bundle()
+        val app = host.applicationContext
         val flush = Runnable {
             if (pending.isEmpty) return@Runnable
             val change = Bundle(pending)
             pending.clear()
-            runCatching {
-                host.contentResolver.call(Keys.CONTENT_URI, Keys.METHOD_SET_DESKTOP_APPEARANCE, null, change)
-            }.onFailure { GlassLogger.limited("DesktopAppearance", "save") { "Could not save appearance: ${it.message}" } }
-        }
-        fun save(vararg values: Pair<String, Int>, dragging: Boolean = false) {
-            for ((key, value) in values) pending.putInt(key, value)
-            if (!dragging) {
-                handler.removeCallbacks(flush)
-                flush.run()
-            } else if (!handler.hasCallbacks(flush)) handler.postDelayed(flush, 120)
-        }
-
-        fun dp(value: Int) = DesktopAppearanceToolbar.dp(context, value)
-        val foreground = if (systemDark) Color.WHITE else 0xff17181a.toInt()
-        val panelColor = if (systemDark) 0xe626272c.toInt() else 0xeaf6f6f9.toInt()
-        val density = context.resources.displayMetrics.density
-        val root = FrameLayout(context)
-        val scroll = ScrollView(context).apply {
-            isVerticalScrollBarEnabled = false
-            isFillViewport = true
-        }
-        val material = ColorOsPopupMaterialView(context, systemDark).apply {
-            setBackgroundColor(panelColor)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            doOnPreDraw { applyOplusPopupBlur(this, systemDark, density) }
-        }
-        val card = object : FrameLayout(context) {
-            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                measureChild(scroll, widthMeasureSpec, heightMeasureSpec)
-                val aspect = when {
-                    profile.hasTintControls -> 1.14f
-                    profile.themeChoices.isNotEmpty() -> .69f
-                    else -> .53f
+            writes.execute {
+                runCatching {
+                    app.contentResolver.call(Keys.CONTENT_URI, Keys.METHOD_SET_DESKTOP_APPEARANCE, null, change)
+                }.onFailure {
+                    GlassLogger.limited("DesktopAppearance", "save") { "Could not save appearance: ${it.message}" }
                 }
-                val targetHeight = (scroll.measuredWidth * aspect).roundToInt()
-                    .coerceAtMost(MeasureSpec.getSize(heightMeasureSpec))
-                if (scroll.measuredHeight < targetHeight) {
-                    scroll.measure(
-                        MeasureSpec.makeMeasureSpec(scroll.measuredWidth, MeasureSpec.EXACTLY),
-                        MeasureSpec.makeMeasureSpec(targetHeight, MeasureSpec.EXACTLY),
-                    )
-                }
-                setMeasuredDimension(scroll.measuredWidth, scroll.measuredHeight)
-                material.measure(
-                    MeasureSpec.makeMeasureSpec(measuredWidth, MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY),
-                )
             }
         }
-        fun label(text: String, size: Float) = TextView(context).apply {
+        fun save(vararg values: Pair<String, Int>) {
+            for ((key, value) in values) pending.putInt(key, value)
+            handler.removeCallbacks(flush)
+            handler.postDelayed(flush, 72L)
+        }
+
+        fun dp(value: Int) = DesktopAppearanceToolbar.dp(host, value)
+        val density = host.resources.displayMetrics.density
+        val foreground = if (systemDark) Color.WHITE else 0xff17181a.toInt()
+        val contrast = ColorUtils.setAlphaComponent(foreground, 190)
+        val accent = android.util.TypedValue().let { value ->
+            if (host.theme.resolveAttribute(android.R.attr.colorAccent, value, true) && Color.alpha(value.data) > 0)
+                value.data else 0xff1677ff.toInt()
+        }
+        val root = FrameLayout(host)
+        val scroll = ScrollView(host).apply {
+            isVerticalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+        }
+        val radius = 34f
+        val material = ColorOsPopupMaterialView(host, systemDark, radius).apply {
+            setBackgroundColor(if (systemDark) 0xe624252a.toInt() else 0xebf6f6f9.toInt())
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            doOnPreDraw { applyOplusPopupBlur(this, systemDark, density, radius) }
+        }
+        var visibleHeight = 0
+        var heightMotion: ValueAnimator? = null
+        var swipe: (Float, Boolean) -> Unit = { _, _ -> }
+        val card = object : FrameLayout(host) {
+            private val slop = ViewConfiguration.get(host).scaledTouchSlop
+            private var startX = 0f
+            private var startY = 0f
+            private var candidate = false
+
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                measureChild(scroll, widthMeasureSpec, heightMeasureSpec)
+                val height = if (visibleHeight > 0)
+                    visibleHeight.coerceAtMost(MeasureSpec.getSize(heightMeasureSpec)) else scroll.measuredHeight
+                setMeasuredDimension(scroll.measuredWidth, height)
+                material.measure(MeasureSpec.makeMeasureSpec(measuredWidth, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY))
+            }
+
+            private fun downwardDistance(event: MotionEvent) = (event.rawY - startY - slop).coerceAtLeast(0f)
+
+            override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        startX = event.rawX
+                        startY = event.rawY
+                        candidate = !scroll.canScrollVertically(-1)
+                    }
+                    MotionEvent.ACTION_MOVE -> if (candidate) {
+                        val dx = abs(event.rawX - startX)
+                        val dy = event.rawY - startY
+                        if (dy > slop && dy > dx * 1.3f) return true
+                        if (dx > slop || dy < -slop) candidate = false
+                    }
+                }
+                return super.onInterceptTouchEvent(event)
+            }
+
+            override fun onTouchEvent(event: MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_MOVE -> if (candidate) {
+                        val distance = downwardDistance(event)
+                        if (distance > 0 && distance + slop > abs(event.rawX - startX) * 1.3f) swipe(distance, false)
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (candidate) {
+                        swipe(if (event.actionMasked == MotionEvent.ACTION_UP) downwardDistance(event) else 0f, true)
+                        candidate = false
+                    }
+                }
+                return super.onTouchEvent(event)
+            }
+        }.apply {
+            isClickable = true
+            clipToOutline = true
+            outlineProvider = material.outlineProvider
+        }
+        fun label(text: String, size: Float) = TextView(host).apply {
             this.text = text
             textSize = size
             gravity = Gravity.CENTER
             setTextColor(foreground)
         }
-        fun roundButton(icon: Int, title: Int, diameter: Int, action: () -> Unit): FrameLayout {
-            val surface = ColorOsPopupMaterialView(context, systemDark, diameter / 2f).apply {
-                setBackgroundColor(ColorUtils.setAlphaComponent(foreground, 23))
+        fun ripple(radius: Int, color: Int) = RippleDrawable(ColorStateList.valueOf(color), null,
+            GradientDrawable().apply {
+                cornerRadius = dp(radius).toFloat()
+                setColor(Color.WHITE)
+            })
+        fun roundButton(icon: Int, title: Int, action: () -> Unit): FrameLayout {
+            val surface = ColorOsPopupMaterialView(host, systemDark, 18f)
+            fun update(selected: Boolean) {
+                surface.setBackgroundColor(ColorUtils.setAlphaComponent(
+                    if (selected) accent else foreground, if (selected) 102 else 28))
             }
-            val glyph = ImageView(context).apply {
+            update(false)
+            val glyph = ImageView(host).apply {
                 setImageDrawable(labels.getDrawable(icon))
                 setColorFilter(foreground)
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            return FrameLayout(context).apply {
-                addView(surface, FrameLayout.LayoutParams(-1, -1))
-                addView(glyph, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
-                this.foreground = RippleDrawable(ColorStateList.valueOf(ColorUtils.setAlphaComponent(
-                    if (systemDark) Color.WHITE else Color.BLACK, 45)), null, GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.WHITE)
-                })
+            return object : FrameLayout(host) {
+                override fun setSelected(selected: Boolean) {
+                    super.setSelected(selected)
+                    update(selected)
+                }
+            }.apply {
+                addView(surface, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+                addView(glyph, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
+                this.foreground = ripple(22, ColorUtils.setAlphaComponent(foreground, 40))
                 contentDescription = labels.getString(title)
                 setOnClickListener { action() }
                 isFocusable = true
             }
         }
-        val body = LinearLayout(context).apply {
+        val body = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(8), dp(12), dp(10))
+            setPadding(dp(12), dp(5), dp(12), dp(12))
         }
-        val header = FrameLayout(context)
+        val header = FrameLayout(host)
         header.addView(label(labels.getString(R.string.desktop_appearance_title), 16f).apply {
             typeface = Typeface.DEFAULT_BOLD
             isAccessibilityHeading = true
-        }, FrameLayout.LayoutParams(-1, -1).apply { marginStart = dp(48); marginEnd = dp(48) })
+        }, FrameLayout.LayoutParams(-1, -1).apply { marginStart = dp(46); marginEnd = dp(46) })
         lateinit var shadeButton: FrameLayout
-        shadeButton = roundButton(R.drawable.ic_nav_light, R.string.desktop_appearance_dim_wallpaper, 38) {
+        shadeButton = roundButton(R.drawable.ic_nav_light, R.string.desktop_appearance_dim_wallpaper) {
             darken = !darken
             shadeButton.isSelected = darken
-            shadeButton.alpha = if (darken) 1f else .72f
             save(DesktopAppearance.DIM_WALLPAPER to if (darken) 1 else 0)
         }
         shadeButton.isSelected = darken
-        shadeButton.alpha = if (darken) 1f else .72f
-        lateinit var sizeButton: FrameLayout
-        sizeButton = roundButton(R.drawable.ic_desktop_icon_size, R.string.desktop_appearance_icon_size_toggle, 38) {
-            large = !large
-            sizeButton.isSelected = large
-            sizeButton.alpha = if (large) 1f else .72f
-            save(DesktopAppearance.LARGE_ICONS to if (large) 1 else 0)
-        }
-        sizeButton.isSelected = large
-        sizeButton.alpha = if (large) 1f else .72f
-        header.addView(shadeButton, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.START or Gravity.CENTER_VERTICAL))
-        header.addView(sizeButton, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.END or Gravity.CENTER_VERTICAL))
-        body.addView(header, LinearLayout.LayoutParams(-1, dp(50)))
-        body.addView(Space(context), LinearLayout.LayoutParams(-1, dp(5), 1f))
+        header.addView(shadeButton, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.START or Gravity.CENTER_VERTICAL))
+        body.addView(header, LinearLayout.LayoutParams(-1, dp(47)))
+
         val weather = sequenceOf("net.oneplus.weather", "com.coloros.weather2", "com.oplus.weather", "com.coloros.weather.service")
             .mapNotNull { name -> runCatching {
-                val pm = host.packageManager
-                val info = pm.getApplicationInfo(name, 0)
-                pm.getResourcesForApplication(info).getDrawable(info.icon, null)
-            }.getOrNull() }
-            .firstOrNull() ?: labels.getDrawable(R.drawable.ic_nav_light)
-        val icons = listOfNotNull(weather?.let { runCatching { PreviewIcons.fromDrawable(it) }.getOrNull() })
-        val previews = mutableMapOf<Mode, GlassPreview>()
-        val modeButtons = mutableMapOf<Mode, Choice>()
-        val themeButtons = mutableMapOf<Theme, Choice>()
-        val colorControls = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        val themeControls = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-        val sampleRow = FrameLayout(context)
-        val accent = android.util.TypedValue().let { value ->
-            if (context.theme.resolveAttribute(android.R.attr.colorAccent, value, true)) value.data else 0xff1677ff.toInt()
-        }
-        val labelColor = label("", 14f).currentTextColor
-        val secondary = ColorUtils.setAlphaComponent(labelColor, 170)
-        val choiceRipple = ColorStateList.valueOf(ColorUtils.setAlphaComponent(accent, 32))
-        fun choice(text: String, sample: View, height: Int, action: () -> Unit): Choice {
-            val item = LinearLayout(context).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_HORIZONTAL
-                this.foreground = RippleDrawable(choiceRipple, null,
-                    GradientDrawable().apply {
-                        cornerRadius = dp(16).toFloat()
-                        setColor(Color.WHITE)
-                    })
-                contentDescription = text
-                isFocusable = true
-                setOnClickListener { action() }
-            }
-            val caption = label(text, 11f).apply {
-                maxLines = 2
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                minHeight = dp(32)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }
-            val frame = FrameLayout(context).apply {
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-                addView(sample, FrameLayout.LayoutParams(-1, -1))
-                this.foreground = StateListDrawable().apply {
-                    addState(intArrayOf(android.R.attr.state_selected), GradientDrawable().apply {
-                        cornerRadius = dp(15).toFloat()
-                        setColor(Color.TRANSPARENT)
-                        setStroke(dp(1).coerceAtLeast(1), ColorUtils.setAlphaComponent(accent, 200))
-                    })
-                    addState(intArrayOf(), ColorDrawable(Color.TRANSPARENT))
+                val manager = host.packageManager
+                val info = manager.getApplicationInfo(name, 0)
+                manager.getResourcesForApplication(info).getDrawable(info.icon, null)
+            }.getOrNull() }.firstOrNull() ?: labels.getDrawable(R.drawable.ic_nav_light)
+        val weatherIcon = weather?.let { runCatching { PreviewIcons.fromDrawable(it) }.getOrNull() }
+        val samples = linkedMapOf<Mode, Choice>()
+        val colorControls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        val themeControls = FrameLayout(host)
+        lateinit var fullTheme: AppearanceSegment
+        lateinit var darkTheme: AppearanceSegment
+        fun updateSamples(only: Mode? = null) {
+            for ((mode, choice) in samples) {
+                if (only != null && mode != only) continue
+                val selected = mode == profile.mode
+                if (choice.group.isSelected != selected) choice.group.isSelected = selected
+                val textColor = if (selected) accent else contrast
+                if (choice.caption.currentTextColor != textColor) choice.caption.setTextColor(textColor)
+                val dark = mode == Mode.DARK || profile.selectMode(mode).dark(systemDark)
+                val plate = when (mode) {
+                    Mode.DARK -> 0xff23262d.toInt()
+                    Mode.CLEAR -> if (dark) 0x90404b5a.toInt() else Color.TRANSPARENT
+                    Mode.TINTED -> Color.HSVToColor(if (dark) 220 else 235,
+                        floatArrayOf(profile.hue.toFloat(), profile.saturation / 100f, if (dark) .48f else .9f))
+                    else -> Color.TRANSPARENT
                 }
-            }
-            item.addView(frame, LinearLayout.LayoutParams(dp(height), dp(height)))
-            item.addView(caption, LinearLayout.LayoutParams(-1, -2))
-            return Choice(item, caption, frame)
-        }
-        fun highlight(choice: Choice, selected: Boolean) {
-            choice.item.isSelected = selected
-            choice.sample.isSelected = selected
-            val color = if (selected) accent else secondary
-            if (choice.label.currentTextColor != color) {
-                choice.label.setTypeface(Typeface.DEFAULT, if (selected) Typeface.BOLD else Typeface.NORMAL)
-                choice.label.setTextColor(color)
+                val glyph = if (!dark && mode == Mode.TINTED) 0xff303943.toInt() else 0xffecf1f5.toInt()
+                choice.sample.setPlate(plate, glyph, selected)
             }
         }
-        fun render(modes: Set<Mode> = previews.keys) {
+        fun updateLayout() {
+            val oldHeight = card.height
+            heightMotion?.removeAllListeners()
+            heightMotion?.cancel()
+            val choices = profile.themeChoices
+            themeControls.visibility = if (choices.isEmpty()) View.GONE else View.VISIBLE
+            fullTheme.view.visibility = if (choices.size == 3) View.VISIBLE else View.GONE
+            darkTheme.view.visibility = if (choices.size == 2) View.VISIBLE else View.GONE
+            if (choices.isNotEmpty()) {
+                val segment = if (choices.size == 2) darkTheme else fullTheme
+                segment.select(choices.indexOf(profile.theme).coerceAtLeast(0))
+            }
             colorControls.visibility = if (profile.hasTintControls) View.VISIBLE else View.GONE
-            val themes = profile.themeChoices
-            themeControls.visibility = if (themes.isEmpty()) View.GONE else View.VISIBLE
-            for ((mode, button) in modeButtons) highlight(button, mode == profile.mode)
-            for ((theme, button) in themeButtons) {
-                button.item.visibility = if (theme in themes) View.VISIBLE else View.GONE
-                button.sample.visibility = if (profile.hasTintControls) View.VISIBLE else View.GONE
-                if (theme == Theme.DARK) {
-                    val title = labels.getString(
-                        if (profile.mode == Mode.DARK) R.string.desktop_appearance_dark_always else theme.label)
-                    if (button.label.text != title) {
-                        button.label.text = title
-                        button.item.contentDescription = title
-                    }
+            visibleHeight = 0
+            if (oldHeight <= 0 || !ValueAnimator.areAnimatorsEnabled()) {
+                card.requestLayout()
+                return
+            }
+            val limit = (root.height - dp(8)).coerceAtLeast(oldHeight)
+            scroll.measure(View.MeasureSpec.makeMeasureSpec(card.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(limit, View.MeasureSpec.AT_MOST))
+            val target = scroll.measuredHeight
+            if (target == oldHeight) {
+                card.requestLayout()
+                return
+            }
+            visibleHeight = oldHeight
+            heightMotion = ValueAnimator.ofInt(oldHeight, target).apply {
+                duration = 255L
+                interpolator = enter
+                addUpdateListener {
+                    visibleHeight = it.animatedValue as Int
+                    card.requestLayout()
                 }
-                highlight(button, theme == profile.theme)
-                button.label.backgroundTintList = ColorStateList.valueOf(if (theme == profile.theme)
-                    ColorUtils.setAlphaComponent(foreground, 28) else Color.TRANSPARENT)
-                if (theme == Theme.AUTO) button.sample.isSelected = false
-            }
-            for (mode in modes) {
-                val iconView = previews[mode] ?: continue
-                val candidate = profile.selectMode(mode)
-                val settings = Bundle(stored)
-                DesktopAppearance.apply(settings, candidate, systemDark)
-                val enabled = settings.getBoolean(FeatureSections.key("ICONS"), true)
-                val dark = candidate.iconDark(systemDark)
-                val keys = Keys.colorKeys(dark)
-                fun number(key: String) = settings.getInt(key, SettingsDefaults.integer(key))
-                val clear = number(Keys.KEY_ICON_APPEARANCE) == 0
-                val palette = if (!enabled) null else IconPalette.from(number(Keys.KEY_COLOR_MODE), number(keys[0]), number(keys[1]),
-                    if (clear) number(Keys.KEY_CLEAR_BRIGHTNESS) else number(keys[2]), dark, clear)
-                    .withLogo(settings.getBoolean("icon_logo_tint"), settings.getInt("icon_logo_hue"),
-                        settings.getInt("icon_logo_saturation"), settings.getInt("icon_logo_brightness", 100))
-                iconView.configure(settings, 0)
-                iconView.show(GlassPreview.Material(enabled,
-                    number(Keys.KEY_BLUR_STYLE) == Keys.BLUR_STYLE_LIQUID, number(Keys.KEY_BLUR_RADIUS),
-                    number(Keys.KEY_BG_OPACITY), number(Keys.KEY_LIQUID_WIDTH), number(Keys.KEY_LIQUID_DISTORTION),
-                    GlassDispersionSettings.strength(settings, GlassDispersionSettings.ICONS), 28,
-                    tiles = 1, iconPalette = palette, plateColor = palette?.background))
+                doOnEnd {
+                    visibleHeight = 0
+                    card.requestLayout()
+                }
+                start()
             }
         }
-
-        val modes = LinearLayout(context).apply {
+        val modes = LinearLayout(host).apply {
             isBaselineAligned = false
-            setPadding(0, dp(6), 0, 0)
-        }
-        fun animateHeightChange() {
-            if (!card.isLaidOut || !android.animation.ValueAnimator.areAnimatorsEnabled()) return
-            TransitionManager.beginDelayedTransition(root, TransitionSet()
-                .addTransition(ChangeBounds().addTarget(card))
-                .addTransition(Fade().addTarget(colorControls).addTarget(themeControls))
-                .setDuration(240L).setInterpolator(DecelerateInterpolator(1.5f)))
+            setPadding(0, dp(5), 0, 0)
         }
         for (mode in listOf(Mode.STOCK, Mode.DARK, Mode.CLEAR, Mode.TINTED)) {
-            val weatherLayers = weather as? AdaptiveIconDrawable
-            val sample = if (mode == Mode.STOCK || mode == Mode.DARK || icons.isEmpty()) {
-                FrameLayout(context).apply {
-                    val icon = ImageView(context).apply {
-                        val drawable = if (mode == Mode.DARK && weatherLayers != null) {
-                            val front = weatherLayers.foreground
-                            AdaptiveIconDrawable(ColorDrawable(0xff202126.toInt()),
-                                front.constantState?.newDrawable() ?: front)
-                        } else weather?.constantState?.newDrawable() ?: weather
-                        setImageDrawable(drawable)
-                        scaleType = ImageView.ScaleType.FIT_CENTER
-                    }
-                    addView(icon, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
-                }
-            } else {
-                GlassPreview(context, systemDark, useDeviceWallpaperColor = false, showWallpaper = false).apply {
-                    setScene(null, icons)
-                    previews[mode] = this
-                }
-            }
-            val item = choice(labels.getString(mode.label), sample, 56) {
-                if (mode == profile.mode) return@choice
-                animateHeightChange()
-                profile = profile.selectMode(mode)
-                render()
-                save(DesktopAppearance.MODE to mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal)
-            }
-            modeButtons[mode] = item
-            modes.addView(item.item, LinearLayout.LayoutParams(0, -2, 1f))
-        }
-        body.addView(modes)
-        body.addView(Space(context), LinearLayout.LayoutParams(-1, dp(4), 1f))
-
-        fun slider(title: Int, range: Int, value: Int, change: (Int) -> Unit): ColorSlider {
-            val text = labels.getString(title)
-            val slider = native.seek.newInstance(context) as View
-            slider.contentDescription = text
-            native.max.invoke(slider, range)
-            native.progress.invoke(slider, value)
-            val holder = FrameLayout(context)
-            val gradient = GradientDrawable().apply {
-                orientation = GradientDrawable.Orientation.LEFT_RIGHT
-                cornerRadius = dp(12).toFloat()
-            }
-            val track = View(context).apply {
-                background = gradient
+            val sample = AppearanceSample(host, weatherIcon, mode == Mode.STOCK, accent)
+            val caption = label(labels.getString(mode.label), 11.5f).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            holder.addView(track, FrameLayout.LayoutParams(-1, dp(24), Gravity.CENTER).apply {
-                marginStart = dp(14); marginEnd = dp(14)
-            })
-            native.track.invoke(slider, ColorStateList.valueOf(Color.TRANSPARENT))
-            native.fill.invoke(slider, ColorStateList.valueOf(Color.TRANSPARENT))
-            native.thumb?.invoke(slider, ColorStateList.valueOf(Color.WHITE))
+            val item = LinearLayout(host).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                this.foreground = ripple(16, ColorUtils.setAlphaComponent(accent, 32))
+                contentDescription = caption.text
+                isFocusable = true
+                setOnClickListener {
+                    if (mode != profile.mode) {
+                        profile = profile.selectMode(mode)
+                        updateLayout()
+                        updateSamples()
+                        save(DesktopAppearance.MODE to mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal)
+                    }
+                }
+                addView(sample, LinearLayout.LayoutParams(dp(49), dp(49)))
+                addView(caption, LinearLayout.LayoutParams(-1, dp(28)))
+            }
+            samples[mode] = Choice(item, caption, sample)
+            modes.addView(item, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        body.addView(modes)
+
+        fun segment(choices: List<Theme>, titles: List<String>): AppearanceSegment {
+            val change: (Int) -> Unit = { index ->
+                val theme = choices[index]
+                if (theme in profile.themeChoices && theme != profile.theme) {
+                    profile = profile.copy(theme = theme)
+                    updateSamples()
+                    save(DesktopAppearance.THEME to theme.ordinal)
+                }
+            }
+            runCatching { native.segments?.create(host, titles, change) }.getOrNull()?.let { return it }
+            val row = LinearLayout(host).apply {
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(20).toFloat()
+                    setColor(ColorUtils.setAlphaComponent(foreground, 18))
+                }
+                setPadding(dp(3), dp(3), dp(3), dp(3))
+            }
+            fun highlight(index: Int) {
+                for (i in 0 until row.childCount) {
+                    val cell = row.getChildAt(i)
+                    cell.isSelected = i == index
+                    cell.backgroundTintList = ColorStateList.valueOf(
+                        if (i == index) ColorUtils.setAlphaComponent(foreground, 44) else Color.TRANSPARENT)
+                }
+            }
+            titles.forEachIndexed { i, title ->
+                row.addView(label(title, 13f).apply {
+                    isFocusable = true
+                    this.foreground = ripple(18, ColorUtils.setAlphaComponent(accent, 28))
+                    background = GradientDrawable().apply {
+                        cornerRadius = dp(18).toFloat()
+                        setColor(Color.WHITE)
+                    }
+                    setOnClickListener {
+                        change(i)
+                        highlight(choices.indexOf(profile.theme))
+                    }
+                }, LinearLayout.LayoutParams(0, -1, 1f))
+            }
+            return AppearanceSegment(row, ::highlight)
+        }
+        val themeOrder = listOf(Theme.LIGHT, Theme.DARK, Theme.AUTO)
+        fullTheme = segment(themeOrder, themeOrder.map { labels.getString(it.label) })
+        darkTheme = segment(listOf(Theme.DARK, Theme.AUTO),
+            listOf(labels.getString(R.string.desktop_appearance_dark_always), labels.getString(Theme.AUTO.label)))
+        themeControls.addView(fullTheme.view, FrameLayout.LayoutParams(-1, -1))
+        themeControls.addView(darkTheme.view, FrameLayout.LayoutParams(-1, -1))
+        body.addView(themeControls, LinearLayout.LayoutParams(-1, dp(41)).apply { topMargin = dp(4) })
+
+        fun slider(title: Int, range: Int, value: Int, key: String, change: (Int) -> Unit): ColorSlider {
+            val input = native.seek.newInstance(host) as View
+            input.contentDescription = labels.getString(title)
+            input.alpha = .01f
+            native.max.invoke(input, range)
+            native.progress.invoke(input, value)
+            val track = AppearanceSpectrum(host, range).apply {
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                position = value
+            }
+            var dragging = false
+            var dirty = false
+            fun finishDrag() {
+                if (dirty) save(key to track.position)
+                dirty = false
+            }
             val callback = Proxy.newProxyInstance(native.listenerType.classLoader, arrayOf(native.listenerType)) { proxy, method, args ->
                 when {
-                    method.name == "hashCode" -> System.identityHashCode(slider)
+                    method.name == "hashCode" -> System.identityHashCode(proxy)
                     method.name == "equals" -> proxy === args?.getOrNull(0)
                     method.name == "toString" -> "CPI appearance slider listener"
                     args?.size == 2 && args[1] is Int -> {
-                        change(args[1] as Int)
+                        val next = (args[1] as Int).coerceIn(0, range)
+                        if (next != track.position) {
+                            track.position = next
+                            change(next)
+                            if (dragging) dirty = true else save(key to next)
+                        }
                         null
                     }
                     else -> null
                 }
             }
-            native.listener.invoke(slider, callback)
-            holder.addView(slider, FrameLayout.LayoutParams(-1, -1))
-            colorControls.addView(holder, LinearLayout.LayoutParams(-1, dp(42)))
-            return ColorSlider(slider, gradient)
-        }
-        fun direction(colors: IntArray): IntArray {
-            if (context.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL) colors.reverse()
-            return colors
-        }
-        fun updateSaturationTrack(track: GradientDrawable) {
-            track.colors = direction(intArrayOf(Color.WHITE, Color.HSVToColor(floatArrayOf(profile.hue.toFloat(), 1f, 1f))))
-        }
-        lateinit var saturation: ColorSlider
-        val hue = slider(R.string.desktop_appearance_hue, 360, profile.hue) {
-            if (it == profile.hue) return@slider
-            profile = profile.copy(hue = it)
-            updateSaturationTrack(saturation.gradient)
-            render(setOf(Mode.TINTED))
-            save(DesktopAppearance.HUE to it, dragging = true)
-        }
-        hue.gradient.colors = direction(intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED))
-        saturation = slider(R.string.desktop_appearance_saturation, 100, profile.saturation) {
-            if (it == profile.saturation) return@slider
-            profile = profile.copy(saturation = it)
-            render(setOf(Mode.TINTED))
-            save(DesktopAppearance.SATURATION to it, dragging = true)
-        }
-        updateSaturationTrack(saturation.gradient)
-        body.addView(colorControls)
-        val themes = LinearLayout(context).apply {
-            isBaselineAligned = false
-            setPadding(dp(12), dp(8), dp(12), 0)
-        }
-        for (theme in listOf(Theme.LIGHT, Theme.DARK, Theme.AUTO)) {
-            val sample = if (theme == Theme.AUTO) sampleRow else FrameLayout(context).apply {
-                val swatch = View(context).apply {
-                    background = GradientDrawable().apply {
-                        shape = GradientDrawable.OVAL
-                        val light = 0xffeeeeef.toInt()
-                        val dark = 0xff252528.toInt()
-                        when (theme) {
-                            Theme.LIGHT -> setColor(light)
-                            Theme.DARK -> setColor(dark)
-                            Theme.AUTO -> {
-                                orientation = GradientDrawable.Orientation.LEFT_RIGHT
-                                colors = intArrayOf(light, light, dark, dark)
-                            }
+            native.listener.invoke(input, callback)
+            input.setOnTouchListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> dragging = true
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        input.post {
+                            dragging = false
+                            finishDrag()
                         }
-                        setStroke(dp(1), 0x50888888)
                     }
                 }
-                addView(swatch, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
+                false
             }
-            val toggle = choice(labels.getString(theme.label), sample, 42) {
-                profile = profile.copy(theme = theme)
-                render()
-                save(DesktopAppearance.THEME to theme.ordinal)
+            val holder = FrameLayout(host)
+            holder.addView(input, FrameLayout.LayoutParams(-1, -1))
+            holder.addView(track, FrameLayout.LayoutParams(-1, -1))
+            holder.addOnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ ->
+                if (r - l != oldR - oldL) input.doOnLayout {
+                    val start = runCatching { (native.start?.invoke(input) as? Number)?.toFloat() }.getOrNull()
+                    val length = runCatching { (native.length?.invoke(input) as? Number)?.toFloat() }.getOrNull()
+                    if (start != null && length != null) track.setInputBounds(start, length)
+                }
             }
-            toggle.label.background = GradientDrawable().apply {
-                cornerRadius = dp(16).toFloat()
-                setColor(Color.WHITE)
-            }
-            if (theme == Theme.AUTO) toggle.sample.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            themeButtons[theme] = toggle
-            themes.addView(toggle.item, LinearLayout.LayoutParams(0, -2, 1f))
+            colorControls.addView(holder, LinearLayout.LayoutParams(-1, dp(36)))
+            return ColorSlider(input, track)
         }
-        val sampleButton = roundButton(R.drawable.ic_wallpaper_sample, R.string.desktop_appearance_pick_color, 38) {
+        lateinit var saturation: ColorSlider
+        fun saturationColor(strength: Float) = Color.HSVToColor(floatArrayOf(profile.hue.toFloat(), strength, 1f))
+        fun updateTracks() {
+            saturation.track.setHandle(saturationColor(profile.saturation / 100f))
+            saturation.track.setColors(intArrayOf(Color.WHITE, saturationColor(1f)))
+        }
+        val hue = slider(R.string.desktop_appearance_hue, 360, profile.hue, DesktopAppearance.HUE) {
+            profile = profile.copy(hue = it)
+            updateTracks()
+            updateSamples(Mode.TINTED)
+        }
+        hue.track.setColors(intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED))
+        saturation = slider(R.string.desktop_appearance_saturation, 100, profile.saturation, DesktopAppearance.SATURATION) {
+            profile = profile.copy(saturation = it)
+            saturation.track.setHandle(saturationColor(it / 100f))
+            updateSamples(Mode.TINTED)
+        }
+        updateTracks()
+        body.addView(colorControls, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
+
+        val pickerButton = roundButton(R.drawable.ic_wallpaper_sample, R.string.desktop_appearance_pick_color) {
             val image = wallpaper?.takeUnless { it.isRecycled }
             if (image == null) {
-                Toast.makeText(context, labels.getString(R.string.desktop_appearance_wallpaper_unavailable), Toast.LENGTH_SHORT).show()
+                Toast.makeText(host, labels.getString(R.string.desktop_appearance_wallpaper_unavailable), Toast.LENGTH_SHORT).show()
             } else {
                 val closeAppearance = backAction
                 lateinit var picker: DesktopWallpaperColorPicker
                 fun hidePicker() {
-                    root.removeView(picker)
-                    card.visibility = View.VISIBLE
+                    if (!picker.isEnabled) return
+                    picker.isEnabled = false
                     backAction = closeAppearance
+                    card.visibility = View.VISIBLE
+                    if (!ValueAnimator.areAnimatorsEnabled()) root.removeView(picker)
+                    else picker.animate().alpha(0f).setDuration(165L).setInterpolator(enter)
+                        .withEndAction { root.removeView(picker) }.start()
                 }
-                picker = DesktopWallpaperColorPicker(context, image,
+                picker = DesktopWallpaperColorPicker(host, image,
                     labels.getString(R.string.desktop_appearance_pick_color)) { color ->
                     val hsv = FloatArray(3)
                     Color.colorToHSV(color, hsv)
                     val pickedHue = if (hsv[1] == 0f) profile.hue else hsv[0].roundToInt().coerceIn(0, 360)
                     val pickedSaturation = (hsv[1] * 100f).roundToInt()
-                    profile = profile.copy(hue = pickedHue, saturation = pickedSaturation)
-                    native.progress.invoke(hue.view, pickedHue)
-                    native.progress.invoke(saturation.view, pickedSaturation)
-                    updateSaturationTrack(saturation.gradient)
-                    render(setOf(Mode.TINTED))
-                    save(DesktopAppearance.HUE to pickedHue, DesktopAppearance.SATURATION to pickedSaturation)
+                    profile = profile.selectMode(Mode.TINTED).copy(hue = pickedHue, saturation = pickedSaturation)
+                    hue.track.position = pickedHue
+                    saturation.track.position = pickedSaturation
+                    native.progress.invoke(hue.input, pickedHue)
+                    native.progress.invoke(saturation.input, pickedSaturation)
+                    updateTracks()
+                    updateSamples()
+                    updateLayout()
+                    save(DesktopAppearance.MODE to profile.mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal,
+                        DesktopAppearance.HUE to pickedHue, DesktopAppearance.SATURATION to pickedSaturation)
                     hidePicker()
                 }
                 card.visibility = View.INVISIBLE
                 backAction = ::hidePicker
                 root.addView(picker, FrameLayout.LayoutParams(-1, -1))
+                if (ValueAnimator.areAnimatorsEnabled()) {
+                    picker.alpha = 0f
+                    picker.animate().alpha(1f).setDuration(165L).setInterpolator(enter).start()
+                }
             }
         }
-        sampleRow.addView(sampleButton, FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
-        themeControls.addView(themes)
-        body.addView(themeControls)
-        render()
+        header.addView(pickerButton, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.END or Gravity.CENTER_VERTICAL))
+        updateLayout()
+        updateSamples()
         scroll.addView(body)
-        card.isClickable = true
         card.addView(material, FrameLayout.LayoutParams(-1, -1))
         card.addView(scroll, FrameLayout.LayoutParams(-1, -2))
         root.addView(card, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
@@ -501,18 +525,50 @@ internal object DesktopAppearancePanel {
             marginEnd = dp(12)
             bottomMargin = dp(8)
         })
-        fun closeCard() {
-            if (!android.animation.ValueAnimator.areAnimatorsEnabled()) {
-                dialog.dismiss()
+        var motion: ValueAnimator? = null
+        var closing = false
+        var swiping = false
+        fun cancelMotion() {
+            motion?.removeAllListeners()
+            motion?.cancel()
+        }
+        fun moveCard(open: Boolean) {
+            cancelMotion()
+            val target = if (open) 0f else (card.height + dp(8)).toFloat()
+            if (!ValueAnimator.areAnimatorsEnabled() || !card.isLaidOut) {
+                card.translationY = target
+                if (!open) dialog.dismiss()
                 return
             }
-            if (!root.isClickable) return
-            root.isClickable = false
-            card.animate().translationY((card.height + dp(12)).toFloat())
-                .setInterpolator(android.view.animation.AccelerateInterpolator(1.25f))
-                .setDuration(185L).withEndAction { dialog.dismiss() }.start()
+            motion = ValueAnimator.ofFloat(card.translationY, target).apply {
+                duration = if (open) 310L else 240L
+                interpolator = if (open) enter else exit
+                addUpdateListener { card.translationY = it.animatedValue as Float }
+                doOnEnd { if (!open) dialog.dismiss() }
+                start()
+            }
         }
-        backAction = ::closeCard
+        backAction = {
+            if (!closing) {
+                closing = true
+                moveCard(false)
+            }
+        }
+        swipe = { distance, finished ->
+            if (!closing) {
+                if (!finished) {
+                    if (!swiping) {
+                        cancelMotion()
+                        swiping = true
+                    }
+                    card.translationY = distance
+                } else if (swiping) {
+                    swiping = false
+                    if (distance >= minOf(dp(75).toFloat(), card.height * .35f)) backAction()
+                    else moveCard(true)
+                }
+            }
+        }
         root.setOnClickListener { backAction() }
         root.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         dialog.setContentView(root)
@@ -521,36 +577,37 @@ internal object DesktopAppearancePanel {
         window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         window.clearFlags(FLAG_BLUR_BEHIND or FLAG_DIM_BEHIND)
         window.setDimAmount(0f)
+        val hostDecor = host.window.decorView
+        val detach = object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) { dialog.dismiss() }
+        }
         dialog.setOnDismissListener {
-            card.animate().cancel()
+            hostDecor.removeOnAttachStateChangeListener(detach)
+            cancelMotion()
+            heightMotion?.removeAllListeners()
+            heightMotion?.cancel()
             handler.removeCallbacks(flush)
             flush.run()
         }
         dialog.show()
+        hostDecor.addOnAttachStateChangeListener(detach)
         window.clearFlags(FLAG_BLUR_BEHIND or FLAG_DIM_BEHIND)
         window.setLayout(-1, -1)
-        if (android.animation.ValueAnimator.areAnimatorsEnabled()) {
-            card.doOnPreDraw {
-                card.translationY = card.height + dp(8).toFloat()
-                card.animate().translationY(0f).setDuration(265L).setInterpolator(DecelerateInterpolator(1.65f)).start()
+        card.doOnPreDraw {
+            if (!closing) {
+                card.translationY = (card.height + dp(8)).toFloat()
+                moveCard(true)
             }
         }
-        // Wallpaper I/O must not delay the host sheet animation.
-        Thread({
-            val image = runCatching {
-                WallpaperHelper.getRawScaledWallpaper(host.applicationContext)?.let(WallpaperHelper::forSoftwareCanvas)
-            }.getOrNull()
-            if (image != null) handler.post {
-                if (dialog.isShowing) {
-                    wallpaper = image
-                    previews.values.forEach { it.setWallpaper(image) }
-                }
-            }
-        }, "CPI appearance wallpaper").start()
+        wallpapers.execute {
+            val image = runCatching { WallpaperHelper.getPickerWallpaper(app) }.getOrNull()
+            handler.post { if (dialog.isShowing) wallpaper = image }
+        }
         GlassLogger.i("DesktopAppearance", "Opened bottom-aligned classic COUI appearance panel")
         return dialog
     }
 
-    private data class Choice(val item: LinearLayout, val label: TextView, val sample: FrameLayout)
-    private data class ColorSlider(val view: View, val gradient: GradientDrawable)
+    private data class Choice(val group: LinearLayout, val caption: TextView, val sample: AppearanceSample)
+    private data class ColorSlider(val input: View, val track: AppearanceSpectrum)
 }

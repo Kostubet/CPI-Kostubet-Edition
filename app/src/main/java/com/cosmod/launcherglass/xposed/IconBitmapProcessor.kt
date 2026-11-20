@@ -21,7 +21,6 @@ object IconBitmapProcessor {
     @Synchronized fun markLayeredSource(bitmap:Bitmap){
         if(layeredSources.put(bitmap,true)!=true)cache.remove(bitmap)
     }
-    @Synchronized fun clearTintCache() { cache.values.forEach { it.palette = null; it.colored = null } }
     private fun applyPalette(cached: CachedIcon): ProcessedIcon? {
         val icon = cached.icon ?: return null
         val palette = PrefsHelper.iconPalette
@@ -34,14 +33,11 @@ object IconBitmapProcessor {
             cached.palette = palette; cached.colored = it
         }
     }
-    private var cachedOpacity: Int = -1
     private var processLogCount = 0
 
     @Synchronized
     fun clearCache() {
         cache.clear()
-        clearTintCache()
-        cachedOpacity = -1
     }
 
     @Synchronized
@@ -56,11 +52,6 @@ object IconBitmapProcessor {
     @Synchronized
     fun getOrProcess(src: Bitmap, bgOpacity: Int): ProcessedIcon? {
         if (src.isRecycled) return null
-        if (cachedOpacity != bgOpacity) {
-            cache.clear()
-            cachedOpacity = bgOpacity
-        }
-
         val cached = cache[src]
         if (cached != null && cached.generation == src.generationId) {
             return applyPalette(cached)

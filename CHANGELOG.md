@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 433
+
+- «Оформление» плавно открывается у нижнего края, закрывается свайпом вниз и при открытии завершает редактирование рабочего стола штатной анимацией ColorOS.
+- Выбор темы использует сегменты COUI. Образцы «Погоды» одного размера, пипетка переехала в правый верхний угол и использует более чёткие обои.
+- Ползунки обновляют образец под пальцем и применяют цвет при отпускании. Переключение стилей сохраняет кэш исходных слоёв иконок. Светлый прозрачный стиль показывает только логотип, тёмный оставляет затемнённое стекло.
+
 ### Сборка 432
 
 - «Оформление» закреплено снизу и меняет высоту при переключении стилей. Карточка использует исходный материал COUI. Открытие больше не накладывает общую маску на рабочий стол.
@@ -180,6 +186,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 433
+
+- Desktop Appearance opens smoothly at the bottom, dismisses on a downward swipe, and exits the stock editor with the ColorOS transition.
+- Theme choices use COUI segments. Weather samples have a consistent size, and the eyedropper moves to the upper right and uses a sharper wallpaper source.
+- Color sliders preview changes immediately and apply them on release. Style changes retain the cached icon layers. The light transparent style shows only the glyph, and the dark variant keeps shaded glass.
 
 ### Build 432
 

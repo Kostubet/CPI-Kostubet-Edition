@@ -55,15 +55,15 @@ internal class DesktopWallpaperColorPicker(
 
         val lensX = x.coerceIn(radius, max(radius, width - radius))
         val offset = radius + 24 * density
-        val lensY = if (y >= radius + offset) y - offset else y + offset
+        val lensY = (if (y >= radius + offset) y - offset else y + offset)
+            .coerceIn(radius, max(radius, height - radius))
         lens.rewind()
         lens.addCircle(lensX, lensY, radius, Path.Direction.CW)
         val saved = canvas.save()
         canvas.clipPath(lens)
         canvas.translate(lensX, lensY)
-        canvas.scale(7f, 7f)
+        canvas.scale(2.75f, 2.75f)
         canvas.translate(-x, -y)
-        paint.isFilterBitmap = false
         canvas.drawBitmap(wallpaper, null, crop, paint)
         canvas.restoreToCount(saved)
         paint.color = sampledColor()
@@ -79,6 +79,7 @@ internal class DesktopWallpaperColorPicker(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!isEnabled) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
                 x = event.x.coerceIn(0f, width.toFloat())

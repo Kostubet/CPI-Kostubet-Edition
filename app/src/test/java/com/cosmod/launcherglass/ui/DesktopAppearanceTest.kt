@@ -22,6 +22,15 @@ class DesktopAppearanceTest {
     }
 
     @Test
+    fun transparentLightHidesThePlateAndTransparentDarkKeepsIt() {
+        assertTrue(clear.hideIconPlate(systemDark = true))
+        assertFalse(clear.copy(theme = Theme.DARK).hideIconPlate(systemDark = false))
+        assertTrue(clear.copy(theme = Theme.AUTO).hideIconPlate(systemDark = false))
+        assertFalse(clear.copy(theme = Theme.AUTO).hideIconPlate(systemDark = true))
+        assertFalse(clear.selectMode(Mode.TINTED).hideIconPlate(systemDark = false))
+    }
+
+    @Test
     fun switchingStylesKeepsTheSelectedColor() {
         val stock = clear.selectMode(Mode.STOCK)
         assertTrue(stock.themeChoices.isEmpty())
