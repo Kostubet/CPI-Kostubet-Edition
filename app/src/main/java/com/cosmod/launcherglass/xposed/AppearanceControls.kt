@@ -65,6 +65,10 @@ internal class AppearanceSegmentContract(loader: ClassLoader) {
 internal class AppearanceSegment(val view: View, val select: (Int) -> Unit)
 
 internal class AppearanceSample(context: Context, private val mode: Mode) : View(context) {
+    init {
+        isForceDarkAllowed = false
+    }
+
     private var weather: AppearanceWeather? = null
     private val density = resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -74,7 +78,7 @@ internal class AppearanceSample(context: Context, private val mode: Mode) : View
     private var plate = Color.TRANSPARENT
     private var glyph = Color.WHITE
     private var selected = false
-    private var edge: LinearGradient? = null
+    private var sheen: LinearGradient? = null
     private var rim: LinearGradient? = null
     private var logoFilter = shadedIconGlyph(glyph, .28f)
 
@@ -99,8 +103,8 @@ internal class AppearanceSample(context: Context, private val mode: Mode) : View
         iconBounds.inset(density * 1.5f, density * 1.5f)
         NativeIconAppearance.iconOutline(context, mask, bounds)
         if (h > 0) {
-            edge = LinearGradient(0f, 0f, w * .65f, h.toFloat(),
-                intArrayOf(0x2affffff, 0x00ffffff, 0x0dffffff), null, Shader.TileMode.CLAMP)
+            sheen = LinearGradient(0f, 0f, w * .65f, h.toFloat(),
+                intArrayOf(0x25ffffff, 0x00ffffff, 0x0dffffff), null, Shader.TileMode.CLAMP)
             rim = LinearGradient(0f, 0f, w * .5f, h.toFloat(),
                 intArrayOf(0x9affffff.toInt(), 0x16ffffff, 0x69ffffff), null, Shader.TileMode.CLAMP)
         }
@@ -112,7 +116,7 @@ internal class AppearanceSample(context: Context, private val mode: Mode) : View
         if (!stock && plate != Color.TRANSPARENT) {
             paint.color = plate
             canvas.drawPath(mask, paint)
-            paint.shader = edge
+            paint.shader = sheen
             paint.alpha = 255
             canvas.drawPath(mask, paint)
             paint.shader = null
@@ -120,9 +124,7 @@ internal class AppearanceSample(context: Context, private val mode: Mode) : View
         val image = if (stock) weather?.source else weather?.glyph
         if (image != null) {
             paint.alpha = 255
-            if (!stock) {
-                paint.colorFilter = logoFilter
-            }
+            paint.colorFilter = if (mode == Mode.CLEAR || mode == Mode.TINTED) logoFilter else null
             val layer = canvas.save()
             canvas.clipPath(mask)
             canvas.drawBitmap(image, null, if (stock) bounds else iconBounds, paint)

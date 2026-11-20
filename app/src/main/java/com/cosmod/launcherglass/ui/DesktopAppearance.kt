@@ -126,6 +126,10 @@ internal object DesktopAppearance {
             settings.putInt(keys[1], saturation)
             settings.putInt(keys[2], brightness)
             settings.putInt(Keys.KEY_CLEAR_BRIGHTNESS, brightness)
+            if (profile.usesLightGlass(systemDark)) {
+                settings.putInt(Keys.KEY_BLUR_VIBRANCY, 0)
+                settings.putInt(Keys.KEY_BLUR_LIGHTENING, 50)
+            }
             settings.putBoolean("icon_logo_tint", !wallpaper)
             settings.putInt("icon_logo_hue", hue)
             settings.putInt("icon_logo_saturation", if (tinted) saturation / 3 else 0)

@@ -10,6 +10,7 @@ import android.os.Looper
 import android.view.View
 import android.view.animation.PathInterpolator
 import com.cosmod.launcherglass.ui.DesktopAppearance
+import com.cosmod.launcherglass.util.LauncherGridIconScale
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
@@ -114,7 +115,7 @@ internal object LauncherIconSize {
     }
 
     fun onNativeIconReturned(view: View) {
-        if (!large && largeProgress == 0f) return
+        if (!large && largeProgress == 0f && percent <= 100) return
         if (view in containers) runCatching { updateContainer(view) }
         else scaleWorkspaceIcon?.invoke(view)
     }
@@ -143,14 +144,27 @@ internal object LauncherIconSize {
         val child = if (isShortcut) NativeIconAccess.call(view, "getMRecyclerView") as? View else null
         val plate = child ?: view
         if (plate.width == 0 || plate.height == 0) return
+        // The native resize frame owns the plate's pivot and scale until resetState.
+        if (NativeIconAccess.call(view, "isResizeFrameActive") == true) return
         val bounds = (NativeIconAccess.call(view, if (isShortcut) "getBackgroundBounds" else "getItemIconBounds") as? Rect)
             ?.takeUnless { it.isEmpty }
         val centerX = bounds?.exactCenterX()?.minus(child?.left ?: 0) ?: plate.width / 2f
         val centerY = bounds?.exactCenterY()?.minus(child?.top ?: 0) ?: plate.height / 2f
-        val label = if (isShortcut) NativeIconAccess.call(view, "getMContainerName") as? View else null
-        if (label != null) labelViews[label] = true
-        val ratio = if (isLargeFolder) 1f else workspaceScale * percent / 100f
+        val label = if (isLargeFolder) null else NativeIconAccess.call(view,
+            if (isShortcut) "getMContainerName" else "getFolderName") as? View
+        if (label != null && labelViews.put(label, true) == null) updateLabel?.invoke(label)
+        val requested = if (isLargeFolder) 1f else workspaceScale * percent / 100f
+        val ratio = fitCell(view, bounds, requested, nativeRatio = 1f)
         scaleAround(plate, ratio, centerX, centerY, nativeScale)
+    }
+
+    private fun fitCell(view: View, bounds: Rect?, requested: Float, nativeRatio: Float): Float {
+        if (requested <= nativeRatio || bounds == null || bounds.isEmpty || view.width == 0 || view.height == 0) {
+            return requested
+        }
+        val gap = 4f * view.resources.displayMetrics.density
+        return LauncherGridIconScale.fit(requested, nativeRatio, view.width, view.height,
+            bounds.exactCenterX(), bounds.exactCenterY(), bounds.width(), bounds.height(), gap)
     }
 
     fun install(loader:ClassLoader){
@@ -163,6 +177,14 @@ internal object LauncherIconSize {
             }
         }.toSet()
         val resize=object:XC_MethodHook(){
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (param.method.name != "notifyFrameAttachedToWindow" || param.args[0] != true) return
+                val view = param.thisObject as View
+                val plate = if (shortcutType?.isInstance(view) == true)
+                    NativeIconAccess.call(view, "getMRecyclerView") as? View else view
+                if (plate != null && plate in scales) scaleAround(plate, 1f, plate.pivotX, plate.pivotY)
+            }
+
             override fun afterHookedMethod(param:MethodHookParam){
                 if(param.hasThrowable())return
                 val view=param.thisObject as? View ?: return
@@ -171,9 +193,10 @@ internal object LauncherIconSize {
         }
         for(method in methods)ModuleHooks.hookMethod(method,resize)
         targets.flatMap { target -> target.declaredMethods.filter {
-            (it.name=="updateItemIconLayout" && it.parameterCount==2) ||
-                (target.name==SHORTCUT && it.name=="resetState" && it.parameterCount==0)
-        } }.forEach { ModuleHooks.hookMethod(it, resize) }
+            (it.name == "resetState" && it.parameterCount == 0) ||
+                (it.name == "notifyFrameAttachedToWindow" &&
+                    it.parameterTypes.contentEquals(arrayOf(Boolean::class.javaPrimitiveType)))
+        } }.distinct().forEach { ModuleHooks.hookMethod(it, resize) }
         targets.firstOrNull {it.name==FOLDER}?.declaredMethods?.firstOrNull {
             it.name=="setReorderBounceScale" && it.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
         }?.let {method->
@@ -223,8 +246,9 @@ internal object LauncherIconSize {
                 iconBounds.setEmpty()
                 getIconBounds.invoke(view, iconBounds)
                 if (iconBounds.isEmpty) return
-                val dock = if (workspaceScale > 1f) DockMaterial.containingDock(view) else null
-                val ratio = if (dock == null) workspaceScale else DockMaterial.limitIconScale(dock, view, iconBounds, workspaceScale)
+                val ratioInCell = fitCell(view, iconBounds, workspaceScale, 100f / percent)
+                val dock = if (ratioInCell > 1f) DockMaterial.containingDock(view) else null
+                val ratio = if (dock == null) ratioInCell else DockMaterial.limitIconScale(dock, view, iconBounds, ratioInCell)
                 scaleAround(view, ratio, iconBounds.exactCenterX(), iconBounds.exactCenterY())
             }
             scaleWorkspaceIcon = { view -> runCatching { resizeWorkspaceIcon(view) } }
@@ -236,7 +260,7 @@ internal object LauncherIconSize {
             }?.let { method ->
                 ModuleHooks.hookMethod(method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (param.hasThrowable() || param.args[2] != false || workspaceScale == 1f) return
+                        if (param.hasThrowable() || param.args[2] != false) return
                         val view = param.args[1] as? View ?: return
                         if (!type.isInstance(view)) return
                         val bounds = param.args[3] as? RectF ?: return

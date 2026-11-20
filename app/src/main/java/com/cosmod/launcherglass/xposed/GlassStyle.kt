@@ -38,8 +38,12 @@ data class GlassStyle(val liquid:Boolean,val width:Int,val distortion:Int,
     val backdropFilter get()=BackdropBrightness.filter(filter,engineOptics.backdropBrightness)
 
     companion object {
-        fun icons() = GlassStyle(PrefsHelper.liquidGlass, PrefsHelper.liquidWidth, PrefsHelper.liquidDistortion,
-            PrefsHelper.blurRadius, PrefsHelper.bgOpacity, PrefsHelper.blurColorFilter,
-            plateColor = PrefsHelper.iconPlateColor(), dispersion = PrefsHelper.iconDispersion)
+        fun icons(): GlassStyle {
+            val light = PrefsHelper.desktopLightIconGlass
+            return GlassStyle(PrefsHelper.liquidGlass, PrefsHelper.liquidWidth, PrefsHelper.liquidDistortion,
+                PrefsHelper.blurRadius, PrefsHelper.bgOpacity, if (light) null else PrefsHelper.blurColorFilter,
+                plateColor = PrefsHelper.iconPlateColor(), volumeOpacity = if (light) 0 else null,
+                dispersion = PrefsHelper.iconDispersion)
+        }
     }
 }

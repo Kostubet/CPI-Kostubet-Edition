@@ -502,10 +502,6 @@ object IconGlassHook {
         return WallpaperFootprint.source(bitmap,a.screenW,a.screenH,footprint,footprint)
     }
     private fun render(canvas:Canvas,bounds:Rect,parts:ProcessedIcon,a:Anchor?,wallpaper:Bitmap?,binding:IconMaterialRenderer.Binding?=null) {
-        if (PrefsHelper.desktopLightIconGlass) {
-            drawIconGlyph(canvas, bounds, parts)
-            return
-        }
         // The native surface can be screen-wide. Reuse the desktop material
         // texture and let the GPU scale it, instead of rebuilding all effects
         // into a 1200px CPU bitmap for every new native drawable.
@@ -533,7 +529,7 @@ object IconGlassHook {
         val footprint=Rect(0,0,parts.plateMaskBitmap.width,parts.plateMaskBitmap.height)
         val source=compatible?.let {sourceRect(it,a,footprint)}
         val plateColor=if(PrefsHelper.blurEnabled)PrefsHelper.iconPlateColor(parts.bgColor) else parts.bgColor
-        val plateOpacity=PrefsHelper.bgOpacity
+        val plateOpacity = if (PrefsHelper.desktopLightIconGlass && compatible == null) 7 else PrefsHelper.bgOpacity
         val folderBackdrop=PrefsHelper.folderIconsBlurEnabled &&
             (binding?.view?.let(FolderMaterialHook::ownsBackdrop)==true || a?.openFolder==true)
         val style=GlassStyle.icons().copy(folderBackdrop=folderBackdrop)
@@ -544,9 +540,10 @@ object IconGlassHook {
             style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height)){target,local,blurred ->
             if(!blurred){
                 val save=target.saveLayer(RectF(local),null)
-                val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (plateColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
+                val fallbackColor = if (PrefsHelper.desktopLightIconGlass) Color.WHITE else plateColor
+                val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (fallbackColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
                 target.drawBitmap(WallpaperHelper.forCanvas(plateMask,target),null,local,paint)
-                if (PrefsHelper.gradientOpacity > 0) {
+                if (!PrefsHelper.desktopLightIconGlass && PrefsHelper.gradientOpacity > 0) {
                     paint.colorFilter=null;paint.shader=GlassVolume.shader(local.height().toFloat(),PrefsHelper.gradientOpacity)
                     paint.xfermode=PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
                     target.drawRect(local,paint)
@@ -566,7 +563,7 @@ object IconGlassHook {
         else GlyphMaterialRenderer.draw(canvas, bounds, glyph, paint)
     }
 
-    private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled && !PrefsHelper.desktopLightIconGlass &&
+    private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled &&
         (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) &&
         (a?.drawer!=true || PrefsHelper.drawerBlurEnabled) && a?.openFolder!=true
 
@@ -714,7 +711,7 @@ object IconGlassHook {
                 if(a!=null && bitmap!=null && !capture && !inTransition)anchors[bitmap]=a
                 if(LiveBlurEngine.isWorkspaceScrolling && scrollDrawLogs++<24)
                     GlassLogger.i("MaterialEngine","Scroll sample: host=${owner?.javaClass?.simpleName}, anchor=$a")
-                if(surfaceSource==null && a!=null && !drawer && !PrefsHelper.desktopLightIconGlass)NativeSurfaceLive.prewarm(parts.plateMaskBitmap.width,a.screenW)
+                if(surfaceSource==null && a!=null && !drawer)NativeSurfaceLive.prewarm(parts.plateMaskBitmap.width,a.screenW)
                 val materialAlpha=drawable.alpha
                 if(NativeSurfaceLive.recordingMaterial){
                     val materialBounds=Rect(bounds)

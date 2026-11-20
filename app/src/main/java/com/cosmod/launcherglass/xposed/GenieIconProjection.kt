@@ -26,6 +26,7 @@ internal class GenieIconProjection {
         val appMatrix = window.nativeMatrix ?: return false
         nativeIcon.getValues(iconMatrix)
         if (iconTransform.update(iconMatrix, appMatrix, perspective) &&
+            ProjectiveIconTransform.center(iconTransform.matrix, crop.exactCenterX(), crop.exactCenterY()) &&
             ProjectiveIconTransform.bounded(iconTransform.matrix, crop.left.toFloat(), crop.top.toFloat(),
                 crop.width().toFloat(), crop.height().toFloat())) {
             iconTransform.matrix.copyInto(matrix)

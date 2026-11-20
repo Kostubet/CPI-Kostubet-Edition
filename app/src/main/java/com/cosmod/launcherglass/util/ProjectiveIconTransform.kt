@@ -33,6 +33,19 @@ internal class ProjectiveIconTransform {
     }
     companion object {
         private val indices=intArrayOf(0,1,3,4,5,7,12,13,15)
+        /** Preserve the launcher's icon position while keeping the app plane's perspective. */
+        fun center(matrix: FloatArray, x: Float, y: Float): Boolean {
+            val w = matrix[12] * x + matrix[13] * y + matrix[15]
+            if (!w.isFinite() || w < .15f) return false
+            val dx = (matrix[0] * x + matrix[1] * y + matrix[3]) / w - x
+            val dy = (matrix[4] * x + matrix[5] * y + matrix[7]) / w - y
+            for (i in 0..3) {
+                matrix[i] -= dx * matrix[12 + i]
+                matrix[4 + i] -= dy * matrix[12 + i]
+            }
+            return matrix.all(Float::isFinite)
+        }
+
         /** An icon must not extrapolate a distant app plane into another workspace cell. */
         fun bounded(matrix:FloatArray,left:Float,top:Float,width:Float,height:Float):Boolean {
             if(matrix.size!=16 || width<=0f || height<=0f || matrix.any {!it.isFinite()})return false

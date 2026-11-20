@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 438
+
+- Все стили «Оформления» используют нативные иконки Flux. Исправлены образцы «Погоды» для тёмного, прозрачного и однотонного стилей.
+- Светлый прозрачный стиль сохраняет размытие и преломление без затемняющего слоя.
+- Увеличение учитывает границы ячеек, включая растянутые ярлыки и папки. Перспектива при переходе сохраняет центр движущейся иконки.
+
 ### Сборка 437
 
 - Карточка «Оформление» использует общую механику растягивания COUI. Угловые кнопки используют материал, тень и подсветку панели COUI. Действия под цветовыми шкалами остаются компактными иконками с откликом на касание.
@@ -215,6 +221,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 438
+
+- All Appearance styles use native Flux icons. Corrected the Weather samples for the dark, transparent, and tinted styles.
+- The light transparent style retains blur and refraction without a dark tint.
+- Enlarged icons and stretched shortcuts and folders respect their grid cells. Perspective effects keep the animated icon centered on its path.
 
 ### Build 437
 

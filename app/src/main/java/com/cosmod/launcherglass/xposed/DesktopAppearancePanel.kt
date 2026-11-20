@@ -86,7 +86,6 @@ internal object DesktopAppearancePanel {
         }
         val listener = seekType.getMethod("setOnSeekBarChangeListener", listenerType)
         val segments = runCatching { AppearanceSegmentContract(loader) }.getOrNull()
-        val classic = runCatching { NativeClassicIconStyle(loader) }.getOrNull()
     }
 
     fun contract(loader: ClassLoader) = Contract(loader)
@@ -116,10 +115,7 @@ internal object DesktopAppearancePanel {
             pending.clear()
             writes.execute {
                 runCatching {
-                    val result = app.contentResolver.call(Keys.CONTENT_URI, Keys.METHOD_SET_DESKTOP_APPEARANCE, null, change)
-                    if (result?.getBoolean("applied") == true && change.getInt(DesktopAppearance.MODE, -1) == Mode.STOCK.ordinal) {
-                        native.classic?.apply(app)
-                    }
+                    app.contentResolver.call(Keys.CONTENT_URI, Keys.METHOD_SET_DESKTOP_APPEARANCE, null, change)
                 }.onFailure {
                     GlassLogger.limited("DesktopAppearance", "save") { "Could not save appearance: ${it.message}" }
                 }
@@ -341,10 +337,10 @@ internal object DesktopAppearancePanel {
                 val dark = mode == Mode.DARK || sample.iconDark(systemDark)
                 val plate = when (mode) {
                     Mode.DARK -> 0xff17181b.toInt()
-                    Mode.CLEAR -> if (dark) 0x603b3736 else Color.TRANSPARENT
-                    Mode.TINTED -> Color.HSVToColor(if (dark) 225 else 156,
-                        floatArrayOf(displayHue, displaySaturation * if (dark) .42f else .68f,
-                            if (dark) .15f else .9f))
+                    Mode.CLEAR -> if (dark) 0x80322e2c.toInt() else 0x28ffffff
+                    Mode.TINTED -> Color.HSVToColor(if (dark) 230 else 200,
+                        floatArrayOf(displayHue, displaySaturation * if (dark) .35f else .5f,
+                            if (dark) .18f else .72f))
                     else -> Color.TRANSPARENT
                 }
                 val glyph = if (mode == Mode.TINTED) Color.HSVToColor(floatArrayOf(displayHue,
@@ -455,8 +451,8 @@ internal object DesktopAppearancePanel {
                         updateLayout()
                         updateSamples()
                         save(DesktopAppearance.MODE to mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal, delay = MODE_TRANSITION_MS)
-                    } else if (mode == Mode.STOCK) {
-                        save(DesktopAppearance.MODE to mode.ordinal, delay = MODE_TRANSITION_MS)
+                    } else {
+                        NativeFluxIconStyle.request(app)
                     }
                 }
                 addView(sample, LinearLayout.LayoutParams(dp(54), dp(54)))

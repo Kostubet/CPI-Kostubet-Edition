@@ -99,7 +99,8 @@ object PrefsHelper {
     @Volatile var blurColorFilter: android.graphics.ColorMatrixColorFilter? = null
     private var initialized = false
     @Volatile private var loaded=false
-    private var currentDesktopAppearance: DesktopAppearance.Profile? = null
+    @Volatile private var currentDesktopAppearance: DesktopAppearance.Profile? = null
+    fun usesDesktopAppearance() = enabled && currentDesktopAppearance?.let { it.mode != DesktopAppearance.Mode.MANUAL } == true
     private var followsWallpaper=false
     private var wallpaperTone:IconPalette.WallpaperTone?=null
 
@@ -395,6 +396,9 @@ object PrefsHelper {
             }
             loaded=true
             currentDesktopAppearance = appearance
+            if (enabled && (appearanceChanged || masterChanged) && appearance.mode != DesktopAppearance.Mode.MANUAL) {
+                NativeFluxIconStyle.request(context)
+            }
 
             GlassLogger.i(
                 "PrefsHelper",
