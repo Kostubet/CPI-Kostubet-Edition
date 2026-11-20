@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 431
+
+- «Оформление» открывается компактной панелью COUI над рабочим столом. Убраны затемнение и размытие за пределами панели.
+- Четыре варианта собраны в одну строку с иконками «Погоды». Для однотонного режима показаны градиентные ползунки цвета и насыщенности.
+
 ### Сборка 430
 
 - Исправлено падение «Функций» при запуске поиска COUI. Обновлены экран обновлений и нижняя панель, убраны лишние обводки карточек, добавлен мягкий отскок меню выбора COUI 2.0.
@@ -170,6 +175,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 431
+
+- Desktop Appearance opens in a compact COUI panel over the home screen without dimming or blurring the area outside it.
+- Four styles appear in a row with Weather icons. Tinted mode shows gradient hue and saturation sliders.
 
 ### Build 430
 
