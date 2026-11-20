@@ -4,6 +4,14 @@
 
 ## Русский
 
+### Сборка 436
+
+- «Оформление» тянется в любую сторону и плавнее отпружинивает по кривой COUI. Свечение следует за пальцем, угловые кнопки светлее, а три действия под ползунками отображаются иконками.
+- Образцы используют скругление лаунчера. Подложки тёмных однотонных иконок стали немного светлее. В светлом прозрачном режиме виден только логотип.
+- Улучшены перекраска классических иконок и передача изображения между окном и значком при открытии и возврате.
+- Размер больших значков восстанавливается после обновления иконок. Значки дока увеличиваются в пределах его скруглённой подложки.
+- Haptic Studio открыт внизу вкладки «Функции» и доступен через поиск.
+
 ### Сборка 435
 
 - В «Оформлении» стиль «По умолчанию» включает классические иконки ColorOS. Карточка стала шире, угловые кнопки используют стеклянный материал COUI, а образцы берутся из оригинальной иконки «Погоды».
@@ -201,6 +209,14 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 436
+
+- Appearance stretches in every direction and settles more smoothly with COUI's resistance curve. The spotlight follows the touch, header buttons are lighter, and the three color actions are icon-only.
+- Style samples use the launcher's icon rounding. Dark tinted backgrounds are slightly brighter. Light clear icons show the glyph alone.
+- Improved Classic icon tinting and the visual handoff between the app window and its icon.
+- Large icons keep their size after native icon updates. Dock icons grow within the rounded dock background.
+- Haptic Studio is available at the bottom of Features and through search.
 
 ### Build 435
 

@@ -38,12 +38,12 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
     )
     private data class ViewIcon(val view: View, val screen: RectF, val time: Long)
     data class Replay(val matrix: FloatArray, val time: Long)
-    data class SharedProjection(val perspective: FloatArray, val nativeMatrix: FloatArray,
+    data class SharedProjection(val perspective: FloatArray?, val nativeMatrix: FloatArray?,
                                 val openFraction: Double, val nativeAlpha: Float) {
         fun iconAlpha(alpha: Float): Float {
             if (!nativeAlpha.isFinite() || !alpha.isFinite()) return alpha
-            val overlap = Ba31kGenieMotion.ease((openFraction - .16) / .29)
-            val windowVisible = Ba31kGenieMotion.ease((nativeAlpha - .25) / .68)
+            val overlap = Ba31kGenieMotion.ease((openFraction - .11) / .30)
+            val windowVisible = Ba31kGenieMotion.ease((nativeAlpha - .15) / .70)
             return (alpha * (1 - overlap * windowVisible)).toFloat()
         }
     }
@@ -137,8 +137,9 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
         icon.pass.nativeAlpha?.let { alpha ->
             val factor = shared.iconAlpha(alpha)
             if (factor != alpha) {
-                // An icon updater still on the stack applies the fade in its normal hook.
-                alphaSetter?.invoke(icon.builder, if (passes.get() === icon.pass) alpha else factor)
+                alphaSetter?.let { setter ->
+                    XposedBridge.invokeOriginalMethod(setter, icon.builder, arrayOf(factor))
+                }
             }
         }
     }
@@ -241,17 +242,13 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
             for (method in updateMethods) {
                 val rectIndex = method.parameterTypes.indexOf(RectF::class.java)
                 hooks += XposedBridge.hookMethod(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(p:MethodHookParam){
-                        // A reused floating view must not carry the preceding app's pose
-                        // into the OEM's next icon/snapshot update.
-                        viewPoses.remove(p.thisObject as? View)
-                        (runCatching {clip.get(p.thisObject)}.getOrNull() as? View)?.let(viewPoses::remove)
-                    }
                     override fun afterHookedMethod(p: MethodHookParam) {
                         val view = clip.get(p.thisObject) as? View ?: return
-                        if (viewPoses.remove(view) != null) view.postInvalidateOnAnimation()
                         if (p.hasThrowable() || !active() || !view.isAttachedToWindow ||
-                            view.width <= 0 || view.height <= 0) return
+                            view.width <= 0 || view.height <= 0) {
+                            if (viewPoses.remove(view) != null) view.postInvalidateOnAnimation()
+                            return
+                        }
                         val rect = p.args[rectIndex] as? RectF ?: return
                         val icon = ViewIcon(view, RectF(rect), System.nanoTime())
                         viewIcons.set(icon)

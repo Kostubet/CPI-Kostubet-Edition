@@ -38,20 +38,8 @@ data class GlassStyle(val liquid:Boolean,val width:Int,val distortion:Int,
     val backdropFilter get()=BackdropBrightness.filter(filter,engineOptics.backdropBrightness)
 
     companion object {
-        private val lightGlass = ColorMatrixColorFilter(floatArrayOf(
-            .92f, 0f, 0f, 0f, 23f,
-            0f, .92f, 0f, 0f, 23f,
-            0f, 0f, .92f, 0f, 23f,
-            0f, 0f, 0f, 1f, 0f,
-        ))
-
-        fun icons(): GlassStyle {
-            val light = PrefsHelper.desktopLightIconGlass
-            val style = GlassStyle(PrefsHelper.liquidGlass, PrefsHelper.liquidWidth, PrefsHelper.liquidDistortion,
-                PrefsHelper.blurRadius, PrefsHelper.bgOpacity, if (light) lightGlass else PrefsHelper.blurColorFilter,
-                plateColor = PrefsHelper.iconPlateColor(), dispersion = PrefsHelper.iconDispersion,
-                volumeOpacity = if (light) 0 else null)
-            return if (light) style.copy(engineOptics = style.engineOptics.copy(backdropBrightness = 100)) else style
-        }
+        fun icons() = GlassStyle(PrefsHelper.liquidGlass, PrefsHelper.liquidWidth, PrefsHelper.liquidDistortion,
+            PrefsHelper.blurRadius, PrefsHelper.bgOpacity, PrefsHelper.blurColorFilter,
+            plateColor = PrefsHelper.iconPlateColor(), dispersion = PrefsHelper.iconDispersion)
     }
 }

@@ -19,6 +19,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.VelocityTracker
 import android.view.Window
 import android.view.WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS
 import android.view.WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
@@ -56,15 +57,17 @@ import com.cosmod.launcherglass.util.WallpaperHelper
 import de.robv.android.xposed.XposedHelpers
 import java.lang.reflect.Proxy
 import java.util.concurrent.Executors
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.sign
 import kotlin.math.roundToInt
 
 internal object DesktopAppearancePanel {
     private val writes by lazy { Executors.newSingleThreadExecutor() }
     private val wallpapers by lazy { Executors.newSingleThreadExecutor() }
     private val previewIcons by lazy { Executors.newSingleThreadExecutor() }
-    private val enter = PathInterpolator(.24f, .65f, .22f, 1f)
-    private val exit = PathInterpolator(.35f, .02f, .35f, 1f)
+    private val enter = PathInterpolator(.25f, .20f, .22f, 1f)
+    private val exit = PathInterpolator(.38f, .04f, .34f, 1f)
     private val modeTransition = PathInterpolator(.24f, .06f, .24f, 1f)
     private const val MODE_TRANSITION_MS = 365L
 
@@ -136,8 +139,10 @@ internal object DesktopAppearancePanel {
             if (host.theme.resolveAttribute(android.R.attr.colorAccent, value, true) && Color.alpha(value.data) > 0)
                 value.data else 0xff1677ff.toInt()
         }
-        val root = FrameLayout(host)
+        val root = FrameLayout(host).apply { clipChildren = false; clipToPadding = false }
         val scroll = ScrollView(host).apply {
+            clipChildren = false
+            clipToPadding = false
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
         }
@@ -150,12 +155,48 @@ internal object DesktopAppearancePanel {
         var heightMotion: ValueAnimator? = null
         var pickerMotion: ValueAnimator? = null
         var pickerActive = false
-        var swipe: (Float, Boolean) -> Unit = { _, _ -> }
+        var pull: (Float, Float) -> Unit = { _, _ -> }
+        var release: (Boolean, Float, Float) -> Unit = { _, _, _ -> }
+        val horizontalControls = mutableListOf<View>()
         val card = object : FrameLayout(host) {
             private val slop = ViewConfiguration.get(host).scaledTouchSlop
             private var startX = 0f
             private var startY = 0f
             private var pulling = false
+            private var dismissGesture = false
+            private var beganOnHorizontalControl = false
+            private var velocity: VelocityTracker? = null
+
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        velocity?.recycle()
+                        velocity = VelocityTracker.obtain()
+                        material.spotlightDown(event.x, event.y)
+                    }
+                    MotionEvent.ACTION_MOVE -> material.spotlightMove(event.x, event.y)
+                    MotionEvent.ACTION_UP -> material.spotlightUp(event.x, event.y)
+                    MotionEvent.ACTION_CANCEL -> material.cancelSpotlight()
+                }
+                val raw = MotionEvent.obtain(event)
+                raw.offsetLocation(event.rawX - event.x, event.rawY - event.y)
+                velocity?.addMovement(raw)
+                raw.recycle()
+                try {
+                    return super.dispatchTouchEvent(event)
+                } finally {
+                    if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                        velocity?.recycle()
+                        velocity = null
+                    }
+                }
+            }
+
+            override fun onDetachedFromWindow() {
+                velocity?.recycle()
+                velocity = null
+                super.onDetachedFromWindow()
+            }
 
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
                 measureChild(scroll, widthMeasureSpec, heightMeasureSpec)
@@ -164,9 +205,10 @@ internal object DesktopAppearancePanel {
                     MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY))
             }
 
-            private fun pullDistance(event: MotionEvent): Float {
-                val dy = event.rawY - startY
-                return if (dy < 0) (dy + slop).coerceAtMost(0f) else (dy - slop).coerceAtLeast(0f)
+            private fun pastSlop(delta: Float): Float = delta.sign * (abs(delta) - slop).coerceAtLeast(0f)
+
+            private fun pullAt(event: MotionEvent) {
+                pull(pastSlop(event.rawX - startX), pastSlop(event.rawY - startY))
             }
 
             override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
@@ -175,14 +217,25 @@ internal object DesktopAppearancePanel {
                         startX = event.rawX
                         startY = event.rawY
                         pulling = false
+                        dismissGesture = false
+                        val position = IntArray(2)
+                        beganOnHorizontalControl = horizontalControls.any { control ->
+                            if (!control.isShown) return@any false
+                            control.getLocationOnScreen(position)
+                            startX >= position[0] && startX < position[0] + control.width * scaleX &&
+                                startY >= position[1] && startY < position[1] + control.height * scaleY
+                        }
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val dx = abs(event.rawX - startX)
                         val dy = event.rawY - startY
-                        val canPull = !scroll.canScrollVertically(if (dy < 0f) 1 else -1)
-                        if (canPull && abs(dy) > slop && abs(dy) > dx * 1.3f) {
+                        val horizontal = dx >= abs(dy)
+                        if (horizontal && beganOnHorizontalControl) return false
+                        if (maxOf(dx, abs(dy)) > slop && (horizontal ||
+                                !scroll.canScrollVertically(if (dy < 0f) 1 else -1))) {
                             pulling = true
-                            swipe(pullDistance(event), false)
+                            dismissGesture = !horizontal && dy > 0f
+                            pullAt(event)
                             return true
                         }
                     }
@@ -193,9 +246,14 @@ internal object DesktopAppearancePanel {
             override fun onTouchEvent(event: MotionEvent): Boolean {
                 if (!pulling) return super.onTouchEvent(event)
                 when (event.actionMasked) {
-                    MotionEvent.ACTION_MOVE -> swipe(pullDistance(event), false)
+                    MotionEvent.ACTION_MOVE -> pullAt(event)
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        swipe(if (event.actionMasked == MotionEvent.ACTION_UP) pullDistance(event) else 0f, true)
+                        val released = event.actionMasked == MotionEvent.ACTION_UP
+                        if (released) velocity?.computeCurrentVelocity(1000)
+                        val down = event.rawY - startY - slop
+                        val dismiss = released && dismissGesture && down >= minOf(dp(75).toFloat(), height * .35f)
+                        release(dismiss, if (released) velocity?.xVelocity ?: 0f else 0f,
+                            if (released) velocity?.yVelocity ?: 0f else 0f)
                         pulling = false
                     }
                 }
@@ -203,8 +261,8 @@ internal object DesktopAppearancePanel {
             }
         }.apply {
             isClickable = true
-            clipToOutline = true
-            outlineProvider = material.outlineProvider
+            clipChildren = false
+            clipToPadding = false
         }
         fun label(text: String, size: Float) = TextView(host).apply {
             this.text = text
@@ -217,15 +275,29 @@ internal object DesktopAppearancePanel {
                 cornerRadius = dp(radius).toFloat()
                 setColor(Color.WHITE)
             })
+        val buttonTint = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_selected), intArrayOf()),
+            intArrayOf(accent, foreground))
+        fun glyphButton(icon: Int, title: Int, action: () -> Unit) = ImageView(host).apply {
+            setImageDrawable(labels.getDrawable(icon))
+            imageTintList = buttonTint
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            val inset = dp(12)
+            setPadding(inset, inset, inset, inset)
+            this.foreground = ripple(22, ColorUtils.setAlphaComponent(foreground, 25))
+            contentDescription = labels.getString(title)
+            setOnClickListener { action() }
+            isFocusable = true
+        }
+
         fun roundButton(icon: Int, title: Int, action: () -> Unit): View {
-            val systemButton = runCatching { native.button?.create(host) }.getOrNull()
+            val systemButton = runCatching { native.button?.create(host,
+                ColorUtils.setAlphaComponent(foreground, if (systemDark) 20 else 14)) }.getOrNull()
             if (systemButton != null) return systemButton.apply {
                 setImageDrawable(labels.getDrawable(icon))
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 val inset = dp(11)
                 setPadding(inset, inset, inset, inset)
-                imageTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_selected), intArrayOf()),
-                    intArrayOf(accent, foreground))
+                imageTintList = buttonTint
                 contentDescription = labels.getString(title)
                 setOnClickListener { action() }
                 isFocusable = true
@@ -257,9 +329,11 @@ internal object DesktopAppearancePanel {
         }
         val body = LinearLayout(host).apply {
             orientation = LinearLayout.VERTICAL
+            clipChildren = false
+            clipToPadding = false
             setPadding(dp(14), dp(7), dp(14), dp(13))
         }
-        val header = FrameLayout(host)
+        val header = FrameLayout(host).apply { clipChildren = false; clipToPadding = false }
         header.addView(label(labels.getString(R.string.desktop_appearance_title), 16f).apply {
             typeface = Typeface.DEFAULT_BOLD
             isAccessibilityHeading = true
@@ -283,9 +357,9 @@ internal object DesktopAppearancePanel {
         body.addView(header, LinearLayout.LayoutParams(-1, dp(47)))
 
         val samples = linkedMapOf<Mode, Choice>()
-        val colorControls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
+        val colorControls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
         val colorReveal = FrameLayout(host)
-        val themeControls = FrameLayout(host)
+        val themeControls = FrameLayout(host).also(horizontalControls::add)
         val colorHeight = dp(36) * 2 + dp(54) + dp(5)
         val themeHeight = dp(41) + dp(4)
         lateinit var fullTheme: AppearanceSegment
@@ -311,9 +385,10 @@ internal object DesktopAppearancePanel {
                 val dark = mode == Mode.DARK || profile.selectMode(mode).dark(systemDark)
                 val plate = when (mode) {
                     Mode.DARK -> 0xff1a1d21.toInt()
-                    Mode.CLEAR -> if (dark) 0x503b3736 else 0x4affffff
+                    Mode.CLEAR -> if (dark) 0x503b3736 else Color.TRANSPARENT
                     Mode.TINTED -> Color.HSVToColor(if (dark) 232 else 156,
-                        floatArrayOf(displayHue, displaySaturation * if (dark) .42f else .68f, if (dark) .22f else .9f))
+                        floatArrayOf(displayHue, displaySaturation * if (dark) .42f else .68f,
+                            if (dark) .06f + .52f * profile.selectMode(Mode.TINTED).brightness(systemDark) / 100f else .9f))
                     else -> Color.TRANSPARENT
                 }
                 val glyph = if (mode == Mode.TINTED) Color.HSVToColor(floatArrayOf(displayHue,
@@ -548,7 +623,7 @@ internal object DesktopAppearancePanel {
                 }
                 false
             }
-            val holder = FrameLayout(host)
+            val holder = FrameLayout(host).also(horizontalControls::add)
             holder.addView(input, FrameLayout.LayoutParams(-1, -1))
             holder.addView(track, FrameLayout.LayoutParams(-1, -1))
             holder.addOnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ ->
@@ -612,10 +687,10 @@ internal object DesktopAppearancePanel {
             save(DesktopAppearance.COLOR_SOURCE to source.ordinal,
                 DesktopAppearance.HUE to selectedHue, DesktopAppearance.SATURATION to selectedSaturation)
         }
-        val monochrome = roundButton(R.drawable.ic_desktop_monochrome, R.string.desktop_appearance_monochrome) {
+        val monochrome = glyphButton(R.drawable.ic_desktop_monochrome, R.string.desktop_appearance_monochrome) {
             selectColorSource(ColorSource.MONOCHROME, null)
         }
-        val followWallpaper = roundButton(R.drawable.ic_desktop_wallpaper_colors, R.string.desktop_appearance_wallpaper_colors) {
+        val followWallpaper = glyphButton(R.drawable.ic_desktop_wallpaper_colors, R.string.desktop_appearance_wallpaper_colors) {
             selectColorSource(ColorSource.WALLPAPER, wallpaperTone)
         }
         updateSourceButtons = {
@@ -623,8 +698,8 @@ internal object DesktopAppearancePanel {
             followWallpaper.isSelected = profile.colorSource == ColorSource.WALLPAPER
         }
         updateSourceButtons()
-        val pickerButton = roundButton(R.drawable.ic_wallpaper_sample, R.string.desktop_appearance_pick_color) {
-            if (pickerActive) return@roundButton
+        val pickerButton = glyphButton(R.drawable.ic_wallpaper_sample, R.string.desktop_appearance_pick_color) {
+            if (pickerActive) return@glyphButton
             val image = wallpaper?.takeUnless { it.isRecycled }
             if (image == null) {
                 Toast.makeText(host, labels.getString(R.string.desktop_appearance_wallpaper_unavailable), Toast.LENGTH_SHORT).show()
@@ -695,6 +770,8 @@ internal object DesktopAppearancePanel {
             }
         }
         val colorActions = LinearLayout(host).apply {
+            clipChildren = false
+            clipToPadding = false
             gravity = Gravity.CENTER
             for ((index, control) in listOf(monochrome, followWallpaper, pickerButton).withIndex()) {
                 addView(control, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
@@ -706,6 +783,9 @@ internal object DesktopAppearancePanel {
         updateLayout()
         updateSamples()
         scroll.addView(body)
+        scroll.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            scroll.clipChildren = body.height > scroll.height
+        }
         card.addView(material, FrameLayout.LayoutParams(-1, -1))
         card.addView(scroll, FrameLayout.LayoutParams(-1, -2))
         root.addView(card, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
@@ -714,19 +794,39 @@ internal object DesktopAppearancePanel {
             bottomMargin = dp(8)
         })
         var motion: ValueAnimator? = null
-        var rebound: SpringAnimation? = null
+        var reboundX: SpringAnimation? = null
+        var reboundY: SpringAnimation? = null
         var closing = false
         var swiping = false
+        var originX = 0f
+        var originY = 0f
+        var dragX = 0f
+        var dragY = 0f
+        val maxSide = dp(5).toFloat()
         val maxLift = dp(14).toFloat()
-        fun setCardPosition(offset: Float) {
-            val lift = (-offset / maxLift).coerceIn(0f, 1f)
-            card.translationY = offset
+        val maxDrop = dp(5).toFloat()
+        // COUI's overscroll resistance, mapped to this card's smaller travel.
+        fun resistance(distance: Float, limit: Float): Float {
+            val x = (abs(distance) / (3f * limit)).coerceAtMost(1f)
+            return distance.sign * (x - x * x + x * x * x / 3f) * (3f * limit)
+        }
+        fun resistanceVelocity(distance: Float, limit: Float, velocity: Float): Float {
+            val remaining = (1f - abs(distance) / (3f * limit)).coerceAtLeast(0f)
+            return (velocity * remaining * remaining).coerceIn(-density * 320f, density * 320f)
+        }
+        fun setCardPosition(x: Float, y: Float) {
+            val side = (abs(x) / maxSide).coerceIn(0f, 1f)
+            val vertical = if (y < 0f) (y / maxLift).coerceAtLeast(-1f) else (y / maxDrop).coerceAtMost(1f)
+            card.translationX = x
+            card.translationY = y
+            card.pivotX = card.width * .5f
             card.pivotY = card.height.toFloat()
-            card.scaleY = 1f + lift * .045f
-            card.scaleX = 1f - lift * .013f
+            card.scaleX = 1f + side * .010f + vertical * .006f
+            card.scaleY = 1f - vertical * .037f - side * .009f
         }
         fun cancelMotion() {
-            rebound?.cancel()
+            reboundX?.cancel()
+            reboundY?.cancel()
             motion?.removeAllListeners()
             motion?.cancel()
         }
@@ -735,14 +835,24 @@ internal object DesktopAppearancePanel {
             cancelMotion()
             val target = if (open) 0f else hiddenOffset()
             if (!ValueAnimator.areAnimatorsEnabled() || !card.isLaidOut) {
-                setCardPosition(target)
+                setCardPosition(0f, target)
                 if (!open) dialog.dismiss()
                 return
             }
-            motion = ValueAnimator.ofFloat(card.translationY, target).apply {
-                duration = if (open) 415L else 345L
+            val startX = card.translationX
+            val startY = card.translationY
+            val startScaleX = card.scaleX
+            val startScaleY = card.scaleY
+            motion = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = if (open) 465L else 390L
                 interpolator = if (open) enter else exit
-                addUpdateListener { setCardPosition(it.animatedValue as Float) }
+                addUpdateListener {
+                    val fraction = it.animatedValue as Float
+                    card.translationX = startX * (1f - fraction)
+                    card.translationY = startY + (target - startY) * fraction
+                    card.scaleX = startScaleX + (1f - startScaleX) * fraction
+                    card.scaleY = startScaleY + (1f - startScaleY) * fraction
+                }
                 doOnEnd { if (!open) dialog.dismiss() }
                 start()
             }
@@ -753,32 +863,45 @@ internal object DesktopAppearancePanel {
                 moveCard(false)
             }
         }
-        fun springBack() {
-            if (!ValueAnimator.areAnimatorsEnabled()) {
-                setCardPosition(0f)
-                return
-            }
-            rebound = SpringAnimation(FloatValueHolder(card.translationY)).apply {
-                spring = SpringForce(0f).setStiffness(410f).setDampingRatio(.74f)
-                minimumVisibleChange = .2f * density
-                addUpdateListener { _, position, _ -> setCardPosition(position) }
-                addEndListener { _, cancelled, _, _ -> if (!cancelled) setCardPosition(0f) }
+        fun rebound(position: Float, velocity: Float, update: (Float) -> Unit): SpringAnimation =
+            SpringAnimation(FloatValueHolder(position)).apply {
+                // Use COUI's spring period, with a slight rebound for this floating card.
+                val period = if (abs(velocity) > 180f * density) .55f else .43f
+                val frequency = (2 * PI / period).toFloat()
+                spring = SpringForce(0f).setStiffness(frequency * frequency).setDampingRatio(.78f)
+                minimumVisibleChange = .10f * density
+                setStartVelocity(velocity)
+                addUpdateListener { _, offset, _ -> update(offset) }
                 start()
             }
-        }
-        swipe = { distance, finished ->
+        pull = { x, y ->
             if (!closing) {
-                if (!finished) {
-                    if (!swiping) {
-                        cancelMotion()
-                        swiping = true
+                if (!swiping) {
+                    cancelMotion()
+                    originX = card.translationX.coerceIn(-maxSide, maxSide)
+                    originY = card.translationY.coerceIn(-maxLift, maxDrop)
+                    swiping = true
+                }
+                dragX = x
+                dragY = y
+                setCardPosition(
+                    (originX + resistance(x, maxSide)).coerceIn(-maxSide, maxSide),
+                    (originY + resistance(y, if (y < 0f) maxLift else maxDrop)).coerceIn(-maxLift, maxDrop),
+                )
+            }
+        }
+        release = { dismiss, vx, vy ->
+            if (!closing && swiping) {
+                swiping = false
+                if (dismiss) backAction()
+                else if (!ValueAnimator.areAnimatorsEnabled()) setCardPosition(0f, 0f)
+                else {
+                    reboundX = rebound(card.translationX, resistanceVelocity(dragX, maxSide, vx)) {
+                        setCardPosition(it.coerceIn(-maxSide, maxSide), card.translationY)
                     }
-                    val offset = if (distance < 0f) (maxLift * distance) / (maxLift - distance) else distance
-                    setCardPosition(offset)
-                } else if (swiping) {
-                    swiping = false
-                    if (distance >= minOf(dp(75).toFloat(), card.height * .35f)) backAction()
-                    else springBack()
+                    reboundY = rebound(card.translationY, resistanceVelocity(dragY, if (dragY < 0f) maxLift else maxDrop, vy)) {
+                        setCardPosition(card.translationX, it.coerceIn(-maxLift, maxDrop))
+                    }
                 }
             }
         }

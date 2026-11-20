@@ -397,8 +397,8 @@ object NativeSurfaceLive {
             it.name=="appIconView" && View::class.java.isAssignableFrom(it.type)
         }?.apply {isAccessible=true}
         if(sourceField!=null)ModuleHooks.hookAllMethods(type,"showOriginalIcon",object:XC_MethodHook(){
-            override fun beforeHookedMethod(param:MethodHookParam){
-                if(PrefsHelper.iconsFeatureEnabled)IconGlassHook.onNativeIconReturned(sourceField.get(param.thisObject) as? View)
+            override fun afterHookedMethod(param:MethodHookParam){
+                if (!param.hasThrowable()) IconGlassHook.onNativeIconReturned(sourceField.get(param.thisObject) as? View)
             }
         })
         val renderer=modern ?: type

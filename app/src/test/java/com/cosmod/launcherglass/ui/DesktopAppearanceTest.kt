@@ -22,15 +22,15 @@ class DesktopAppearanceTest {
     }
 
     @Test
-    fun clearGlassKeepsThePlateWithLessTintInLightMode() {
+    fun lightClearStyleHidesPlateWhileDarkKeepsIt() {
         val dark = clear.copy(theme = Theme.DARK)
         val auto = clear.copy(theme = Theme.AUTO)
         assertTrue(clear.usesLightGlass(systemDark = true))
-        assertEquals(13, clear.clearOpacity(0, systemDark = true))
-        assertEquals(20, clear.clearOpacity(100, systemDark = true))
+        assertEquals(0, clear.clearOpacity(0, systemDark = true))
+        assertEquals(0, clear.clearOpacity(100, systemDark = true))
         assertEquals(32, dark.clearOpacity(0, systemDark = false))
         assertEquals(54, dark.clearOpacity(100, systemDark = false))
-        assertEquals(20, auto.clearOpacity(40, systemDark = false))
+        assertEquals(0, auto.clearOpacity(40, systemDark = false))
         assertEquals(40, auto.clearOpacity(40, systemDark = true))
         assertFalse(clear.selectMode(Mode.TINTED).usesLightGlass(systemDark = false))
     }

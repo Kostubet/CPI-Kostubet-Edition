@@ -62,7 +62,7 @@ internal object DesktopAppearance {
         fun brightness(systemDark: Boolean) = when (mode) {
             Mode.DARK -> if (dark(systemDark)) 0 else 12
             Mode.CLEAR -> if (dark(systemDark)) 4 else 12
-            Mode.TINTED -> if (dark(systemDark)) 28 else 66
+            Mode.TINTED -> if (dark(systemDark)) 36 else 66
             else -> 0
         }
 
@@ -71,7 +71,7 @@ internal object DesktopAppearance {
         fun usesLightGlass(systemDark: Boolean) = mode == Mode.CLEAR && !iconDark(systemDark)
 
         fun clearOpacity(opacity: Int, systemDark: Boolean) =
-            if (usesLightGlass(systemDark)) opacity.coerceIn(13, 20) else opacity.coerceIn(32, 54)
+            if (usesLightGlass(systemDark)) 0 else opacity.coerceIn(32, 54)
     }
 
     fun read(settings: Bundle, systemDark: Boolean): Profile {

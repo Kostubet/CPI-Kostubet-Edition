@@ -1,6 +1,12 @@
 package com.cosmod.launcherglass.xposed
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import kotlin.math.abs
 import com.cosmod.launcherglass.util.GlassLogger
 import java.util.WeakHashMap
 import kotlin.math.max
@@ -14,7 +20,7 @@ data class ProcessedIcon(
 
 object IconBitmapProcessor {
 
-    private data class CachedIcon(val generation: Int, val icon: ProcessedIcon?,
+    private data class CachedIcon(val generation: Int, val classic: Boolean, val icon: ProcessedIcon?,
         var palette: com.cosmod.launcherglass.util.IconPalette? = null, var colored: ProcessedIcon? = null)
     private val cache = WeakHashMap<Bitmap, CachedIcon>()
     private val layeredSources=WeakHashMap<Bitmap,Boolean>()
@@ -52,18 +58,87 @@ object IconBitmapProcessor {
     @Synchronized
     fun getOrProcess(src: Bitmap, bgOpacity: Int): ProcessedIcon? {
         if (src.isRecycled) return null
+        val classic = PrefsHelper.nativeClassicIcons && layeredSources[src] != true
         val cached = cache[src]
-        if (cached != null && cached.generation == src.generationId) {
+        if (cached != null && cached.generation == src.generationId && cached.classic == classic) {
             return applyPalette(cached)
         }
 
-        val processed = processIcon(src, bgOpacity)
-        val entry = CachedIcon(src.generationId, processed)
+        val processed = processIcon(src, bgOpacity, classic)
+        val entry = CachedIcon(src.generationId, classic, processed)
         cache[src] = entry
         return applyPalette(entry)
     }
 
-    private fun processIcon(src: Bitmap, bgOpacity: Int): ProcessedIcon? {
+    /** Classic app art may have a gradient backing or a transparent, standalone logo. */
+    private fun classicLayers(pixels: IntArray, width: Int, height: Int): ProcessedIcon? {
+        val left = IntArray(height) { width }
+        val right = IntArray(height) { -1 }
+        var filled = 0
+        for (y in 0 until height) for (x in 0 until width) {
+            if (pixels[y * width + x] ushr 24 < 160) continue
+            left[y] = minOf(left[y], x)
+            right[y] = x
+            filled++
+        }
+        if (filled == 0) return null
+        val tile = filled.toLong() * 100 >= pixels.size.toLong() * 54
+        val glyph = IntArray(pixels.size)
+        val mask = if (tile) IntArray(pixels.size) else null
+        var visibleLogoPixels = 0
+        for (y in 0 until height) {
+            val span = (right[y] - left[y]).coerceAtLeast(0)
+            val inset = (span * .08f).toInt()
+            val first = pixels[y * width + (left[y] + inset).coerceAtMost(width - 1)]
+            val last = pixels[y * width + (right[y] - inset).coerceAtLeast(0)]
+            for (x in 0 until width) {
+                val index = y * width + x
+                val pixel = pixels[index]
+                val alpha = pixel ushr 24
+                if (alpha == 0) continue
+                val r = pixel shr 16 and 255
+                val g = pixel shr 8 and 255
+                val b = pixel and 255
+                val luma = (54 * r + 183 * g + 19 * b) shr 8
+                val opacity = if (!tile) .76f + luma / 255f * .24f else {
+                    mask!![index] = (alpha shl 24) or 0xffffff
+                    val t = ((x - left[y]).toFloat() / span.coerceAtLeast(1)).coerceIn(0f, 1f)
+                    fun backing(shift: Int): Float {
+                        val a = first shr shift and 255
+                        val z = last shr shift and 255
+                        return a + (z - a) * t
+                    }
+                    val difference = maxOf(abs(r - backing(16)), abs(g - backing(8)), abs(b - backing(0)))
+                    val contrast = ((difference - 14f) / 83f).coerceIn(0f, 1f)
+                    contrast * (.78f + luma / 255f * .22f)
+                }
+                val glyphAlpha = (alpha * opacity).toInt()
+                if (glyphAlpha >= 32) visibleLogoPixels++
+                glyph[index] = (glyphAlpha shl 24) or (pixel and 0xffffff)
+            }
+        }
+        if (visibleLogoPixels < filled * .02f) {
+            // Flat marks can be a single color. Keep the artwork legible and
+            // subdued even when there is no contrasting logo to separate.
+            for (i in pixels.indices) {
+                val pixel = pixels[i]
+                glyph[i] = (((pixel ushr 24) * 3 / 8) shl 24) or (pixel and 0xffffff)
+            }
+        }
+        val plate = if (mask != null) Bitmap.createBitmap(mask, width, height, Bitmap.Config.ARGB_8888)
+            else Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
+                val path = Path()
+                val context = IconGlassHook.appContext
+                if (context != null) NativeIconAppearance.iconOutline(context, path, rect)
+                else path.addRoundRect(rect, width * .23f, height * .23f, Path.Direction.CW)
+                Canvas(bitmap).drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+            }
+        return ProcessedIcon(Bitmap.createBitmap(glyph, width, height, Bitmap.Config.ARGB_8888), plate,
+            Color.rgb(46, 46, 49))
+    }
+
+    private fun processIcon(src: Bitmap, bgOpacity: Int, classic: Boolean = false): ProcessedIcon? {
         if (src.isRecycled) return null
         val width = src.width
         val height = src.height
@@ -97,6 +172,8 @@ object IconBitmapProcessor {
         } finally {
             if (readable !== src && !readable.isRecycled) readable.recycle()
         }
+
+        if (classic) classicLayers(pixels, width, height)?.let { return it }
 
         // 1. Find dominant opaque color (the background squircle plate)
         val buckets = IntArray(32768)

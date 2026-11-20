@@ -18,6 +18,7 @@ import com.cosmod.launcherglass.util.WallpaperHelper
 
 object PrefsHelper {
     @Volatile var iconsFeatureEnabled=true
+    @Volatile internal var nativeClassicIcons = false
         private set
     @Volatile var nativeIconsSupported=true
         private set
@@ -92,8 +93,7 @@ object PrefsHelper {
     private var blurSaturation = 100
     @Volatile private var neutralIconAccent:Int?=null
     internal fun iconPlateColor(color:Int=iconPalette.background)=
-        if (desktopLightIconGlass) android.graphics.Color.WHITE else
-            com.cosmod.launcherglass.util.PlateTone.iconSaturation(color,blurSaturation,neutralIconAccent)
+        com.cosmod.launcherglass.util.PlateTone.iconSaturation(color,blurSaturation,neutralIconAccent)
     @Volatile var blurLightening = 50
         private set
     @Volatile var blurColorFilter: android.graphics.ColorMatrixColorFilter? = null
@@ -248,6 +248,9 @@ object PrefsHelper {
                     (if (systemDark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO)
             }
             val nativeDarkIcons = NativeIconAppearance.read(context, configuration) ?: actualSystemDark
+            val classicIcons = NativeIconAppearance.isClassic(context)
+            val classicChanged = classicIcons != nativeClassicIcons
+            nativeClassicIcons = classicIcons
             val darkIcons = if (appearance.mode == DesktopAppearance.Mode.MANUAL ||
                 appearance.mode == DesktopAppearance.Mode.STOCK) nativeDarkIcons else appearance.iconDark(actualSystemDark)
             val fluxSupport=FluxIconSupport.read(context)
@@ -290,7 +293,7 @@ object PrefsHelper {
             val blurEnabledChanged=newBlurEnabled!=blurEnabled
             val drawerChanged=newDrawerBlurEnabled!=drawerBlurEnabled
             val folderEnabledChanged=newFolderBlurEnabled!=folderBlurEnabled
-            val materialChanged=iconsSectionChanged || iconPlateFinishChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
+            val materialChanged=iconsSectionChanged || classicChanged || iconPlateFinishChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
                 newFolderBlurEnabled!=folderBlurEnabled || newFolderIconsBlurEnabled!=folderIconsBlurEnabled || newDrawerBlurEnabled!=drawerBlurEnabled ||
                 newIconStroke != iconStroke || newStrokeOpacity != strokeOpacity ||
                 newGradientOpacity != gradientOpacity || glyphOutlineChanged || paletteChanged ||

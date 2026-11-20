@@ -22,8 +22,10 @@ internal class GenieIconProjection {
 
     fun share(nativeIcon: Matrix, window: GenieTransitionLayers.SharedProjection, crop: Rect): Boolean {
         if (crop.isEmpty) return false
+        val appMatrix = window.nativeMatrix ?: return false
+        val perspective = window.perspective ?: return false
         nativeIcon.getValues(iconMatrix)
-        if (!iconTransform.update(iconMatrix, window.nativeMatrix, window.perspective) ||
+        if (!iconTransform.update(iconMatrix, appMatrix, perspective) ||
             !ProjectiveIconTransform.bounded(iconTransform.matrix, crop.left.toFloat(), crop.top.toFloat(),
                 crop.width().toFloat(), crop.height().toFloat())) return false
         iconTransform.matrix.copyInto(matrix)

@@ -270,12 +270,17 @@ internal object AppGenieTransition {
                                 current.replayMatrix = perspective.copyOf()
                             }
                         }
-                        val shared = if (perspective != null && current.minimized > .20) {
-                            val appMatrix = FloatArray(9).also(current.native::getValues)
-                            GenieTransitionLayers.SharedProjection(perspective.copyOf(), appMatrix,
-                                1 - current.minimized, current.nativeAlpha)
+                        val fraction = 1 - current.minimized
+                        val overlap = if (usesProjectedIcon()) {
+                            val weight = 1 - com.cosmod.launcherglass.util.Ba31kGenieMotion.ease((fraction - .57) / .24)
+                            val iconPerspective = perspective?.takeIf { weight > 0 }?.let { matrix ->
+                                FloatArray(16) { i -> identity[i] + (matrix[i] - identity[i]) * weight.toFloat() }
+                            }
+                            val appMatrix = iconPerspective?.let { FloatArray(9).also(current.native::getValues) }
+                            GenieTransitionLayers.SharedProjection(iconPerspective, appMatrix, fraction, current.nativeAlpha)
                         } else null
-                        transitionLayers.stageWindow(current.transaction, current.screen, current.time, shared)
+
+                        transitionLayers.stageWindow(current.transaction, current.screen, current.time, overlap)
                         if (perspective != null) Ba31kAppTransitions.recordFrame(current.opening)
                     } catch (error: Throwable) {
                         GlassLogger.limited("AppGenieTransition", "matrix") { "Native matrix retained: $error" }

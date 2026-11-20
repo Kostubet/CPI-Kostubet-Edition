@@ -171,6 +171,7 @@ internal object FolderMaterialHook {
             val host=callback as? View
             val view=drawingHost ?: host?.takeIf {it.background===this || (it as? ImageView)?.drawable===this} ?: source.get() ?: host ?: return
             if(!enabled(source.get())) {fallback?.bounds=bounds;fallback?.draw(canvas);return}
+            if (PrefsHelper.desktopLightIconGlass && shortcut(source.get())) return
             val native=owner?.get()
             val old=fallback?.bounds?.let(::Rect)
             val outline=Outline()

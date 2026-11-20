@@ -166,6 +166,7 @@ class MainActivity : AppCompatActivity() {
         MOTION(R.string.ui_ba31k_title, R.drawable.ic_catalog_motion, 0x55A4ED, R.string.ui_catalog_keywords_motion),
         CAMERA_ZOOM(R.string.camera_zoom_title, R.drawable.ic_cpi_camera, 0x6793F2, R.string.camera_zoom_keywords),
         PERFORMANCE(R.string.ui_performance, R.drawable.ic_catalog_speed, 0x31B881, R.string.ui_catalog_keywords_performance),
+        HAPTIC(R.string.ui_haptic_studio, R.drawable.ic_catalog_motion, 0x926DF5, R.string.ui_haptic_studio_keywords),
         TOOLS(R.string.ui_about_module, R.drawable.ic_cpi_module, 0, 0),
         SETTINGS(R.string.ui_cpi_settings, R.drawable.ic_settings, 0x969AA8, R.string.ui_catalog_keywords_tools),
         DEVICE(R.string.ui_device_details, R.drawable.ic_cpi_module, 0, 0),
@@ -845,6 +846,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openScreen(next:Screen){
+        if (next == Screen.HAPTIC) {
+            hideSearchKeyboard()
+            startActivity(Intent(this, com.cosmod.launcherglass.haptic.HapticStudioActivity::class.java))
+            return
+        }
         if(screen in rootTabs){
             saveTabScroll()
             detailParent=screen
@@ -1164,7 +1170,7 @@ class MainActivity : AppCompatActivity() {
                 Screen.MOTION),
             R.string.ui_catalog_systemui to listOf(Screen.LOCKSCREEN,Screen.SHADE,Screen.SIDEBAR,Screen.LIVE,Screen.BANNERS,Screen.VOLUME),
             R.string.camera_tab to listOf(Screen.CAMERA_ZOOM),
-            R.string.ui_catalog_general to listOf(Screen.GLASS,Screen.LIGHT,Screen.PERFORMANCE)
+            R.string.ui_catalog_general to listOf(Screen.GLASS,Screen.LIGHT,Screen.PERFORMANCE,Screen.HAPTIC)
         )
         val alternateLanguage=if(UiLanguage.tag(this)=="ru")"en" else "ru"
         val alternate=resources.configuration.let {current->
@@ -1234,11 +1240,6 @@ class MainActivity : AppCompatActivity() {
                 val match = rendered?.singleOrNull()?.first
                 val transfer = renderedTransfer?.singleOrNull()?.let(configRows::get)
                 when {
-                    searchQuery.trim().equals("kostuhaptic", ignoreCase = true) -> {
-                        searchInput?.setQuery("")
-                        hideSearchKeyboard()
-                        startActivity(Intent(this, com.cosmod.launcherglass.haptic.HapticStudioActivity::class.java))
-                    }
                     !renderedCatalog && match != null && renderedTransfer.isNullOrEmpty() -> openScreen(match)
                     !renderedCatalog && rendered.isNullOrEmpty() && transfer != null -> {
                         hideSearchKeyboard()
@@ -1370,7 +1371,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun catalogRow(item:Screen,matchedSetting:String?,index:Int,count:Int):View =
         CouiPreference(this,darkUi,primary,getString(item.title),matchedSetting,item.icon,Color.BLACK or item.tint,
-            catalog=true,onPreview={showFeaturePreview(item,it)},position=cardListPositionOf(index,count)){haptic(it);openScreen(item)}
+            catalog=true,onPreview=if(item==Screen.HAPTIC)null else { {showFeaturePreview(item,it)} },
+            position=cardListPositionOf(index,count)){haptic(it);openScreen(item)}
 
     private fun buildCameraZoom(body: LinearLayout) {
         val zoom = com.cosmod.launcherglass.camera.CameraZoomSettings

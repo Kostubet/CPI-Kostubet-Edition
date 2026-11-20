@@ -59,6 +59,7 @@ internal object LauncherIconSize {
     private var refresh:((View)->Unit)?=null
     private var lastPercent=100
     private var lastLarge = false
+    private var lastDockGeometry: List<Int> = emptyList()
     private val large get() = PrefsHelper.enabled && PrefsHelper.desktopLargeIcons
     private val percent get()=if(PrefsHelper.enabled)PrefsHelper.launcherIconSize else 100
     private var largeProgress = 0f
@@ -86,6 +87,11 @@ internal object LauncherIconSize {
             }
             updateWorkspaceSizes()
         }
+        val dockGeometry = listOf(PrefsHelper.dockWidth, PrefsHelper.dockHeight, PrefsHelper.dockInset, PrefsHelper.dockCorner)
+        if (dockGeometry != lastDockGeometry) {
+            lastDockGeometry = dockGeometry
+            if (large && large == lastLarge) updateWorkspaceSizes()
+        }
         if (large == lastLarge) return
         lastLarge = large
         largeMotion?.cancel()
@@ -104,6 +110,12 @@ internal object LauncherIconSize {
             }
             start()
         }
+    }
+
+    fun onNativeIconReturned(view: View) {
+        if (!large && largeProgress == 0f) return
+        if (view in workspaceViews) scaleWorkspaceIcon?.invoke(view)
+        if (view in containers) runCatching { updateContainer(view) }
     }
 
     private const val SHORTCUT="com.android.launcher3.viewcontainer.ShortcutContainer"
@@ -202,16 +214,21 @@ internal object LauncherIconSize {
             val nativeText = type.getDeclaredField("mTextAlpha").apply { isAccessible = true }
             val getIconBounds = type.getDeclaredMethod("getIconBounds", Rect::class.java)
             val iconBounds = Rect()
+            fun isWorkspaceIcon(view: View) = display.getInt(view) == workspace || DockMaterial.containingDock(view) != null
+
             fun resizeWorkspaceIcon(view: View) {
-                if (view.width == 0 || view.height == 0 || display.getInt(view) != workspace ||
+                if (view.width == 0 || view.height == 0 || !isWorkspaceIcon(view) ||
                     hasScaledContainer(view, targets)) return
                 iconBounds.setEmpty()
                 getIconBounds.invoke(view, iconBounds)
-                if (!iconBounds.isEmpty) scaleAround(view, workspaceScale, iconBounds.exactCenterX(), iconBounds.exactCenterY())
+                if (iconBounds.isEmpty) return
+                val dock = if (workspaceScale > 1f) DockMaterial.containingDock(view) else null
+                val ratio = if (dock == null) workspaceScale else DockMaterial.limitIconScale(dock, view, iconBounds, workspaceScale)
+                scaleAround(view, ratio, iconBounds.exactCenterX(), iconBounds.exactCenterY())
             }
             scaleWorkspaceIcon = { view -> runCatching { resizeWorkspaceIcon(view) } }
             fun trackWorkspaceIcon(view: View) {
-                if (display.getInt(view) != workspace || hasScaledContainer(view, targets)) return
+                if (!isWorkspaceIcon(view) || hasScaledContainer(view, targets)) return
                 labelViews[view] = true
                 if (workspaceViews.put(view, true) == null) {
                     view.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> scaleWorkspaceIcon?.invoke(v) }
@@ -221,7 +238,7 @@ internal object LauncherIconSize {
             ModuleHooks.hookMethod(textAlpha, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val view = param.thisObject as View
-                    if (view !in labelViews && (display.getInt(view) != workspace || hasScaledContainer(view, targets))) return
+                    if (view !in labelViews && (!isWorkspaceIcon(view) || hasScaledContainer(view, targets))) return
                     val wanted = param.args[0] as Float
                     labelViews[view] = true
                     labelAlpha[view] = wanted
@@ -252,12 +269,30 @@ internal object LauncherIconSize {
                     if(!param.hasThrowable())apply(param.thisObject as View)
                 }
             })
+            type.declaredMethods.firstOrNull { it.name == "onAttachedToWindow" && it.parameterCount == 0 }
+                ?.let { method ->
+                    ModuleHooks.hookMethod(method, object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            if (!param.hasThrowable()) runCatching { trackWorkspaceIcon(param.thisObject as View) }
+                        }
+                    })
+                }
             ModuleHooks.hookMethod(update,object:XC_MethodHook(){
                 override fun beforeHookedMethod(param:MethodHookParam){apply(param.thisObject as View)}
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (!param.hasThrowable()) runCatching { trackWorkspaceIcon(param.thisObject as View) }
                 }
             })
+            // This native method resets both View scale axes after setIcon updates its bounds.
+            oplus?.declaredMethods?.firstOrNull {
+                it.name == "resetViewProperties" && it.parameterTypes.contentEquals(arrayOf(Drawable::class.java))
+            }?.let { method ->
+                ModuleHooks.hookMethod(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!param.hasThrowable()) scaleWorkspaceIcon?.invoke(param.thisObject as View)
+                    }
+                })
+            }
             oplus?.declaredMethods?.firstOrNull {
                 it.name=="setIconSize" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
             }?.let {method->

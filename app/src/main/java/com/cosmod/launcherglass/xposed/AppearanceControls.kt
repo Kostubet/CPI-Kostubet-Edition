@@ -17,7 +17,6 @@ import android.view.animation.PathInterpolator
 import android.widget.ImageView
 import androidx.core.view.doOnLayout
 import com.cosmod.launcherglass.ui.DesktopAppearance.Mode
-import com.cosmod.launcherglass.ui.onextbox.addOplusSmoothRoundRect
 import com.cosmod.launcherglass.util.PreviewIcons
 
 internal class AppearanceSegmentContract(loader: ClassLoader) {
@@ -75,11 +74,18 @@ internal class AppearanceButtonContract(loader: ClassLoader) {
     private val spotlight = type.getMethod("setSpotLightEnabled", Boolean::class.javaPrimitiveType)
     private val motion = type.getMethod("setTouchAnimationEnable", Boolean::class.javaPrimitiveType)
 
-    fun create(context: Context): ImageView = (constructor.newInstance(context) as ImageView).apply {
+    // The launcher exposes its in-sheet color and stroke mode through this overload.
+    private val colorSurface = type.declaredMethods.singleOrNull {
+        it.returnType == Void.TYPE && it.parameterTypes.contentEquals(
+            arrayOf(Int::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType))
+    }?.apply { isAccessible = true }
+
+    fun create(context: Context, tint: Int): ImageView = (constructor.newInstance(context) as ImageView).apply {
         blur.invoke(this, true)
         stroke.invoke(this, true)
         spotlight.invoke(this, true)
         motion.invoke(this, true)
+        colorSurface?.invoke(this, tint, true, true)
     }
 }
 
@@ -113,14 +119,10 @@ internal class AppearanceSample(context: Context, private val mode: Mode) : View
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val inset = density
-        val radius = density * 13
         bounds.set(inset, inset, w - inset, h - inset)
         iconBounds.set(bounds)
         iconBounds.inset(density * 1.5f, density * 1.5f)
-        mask.rewind()
-        if (!addOplusSmoothRoundRect(mask, bounds, radius)) {
-            mask.addRoundRect(bounds, radius, radius, android.graphics.Path.Direction.CW)
-        }
+        NativeIconAppearance.iconOutline(context, mask, bounds)
         if (h > 0) {
             edge = LinearGradient(0f, 0f, w * .65f, h.toFloat(),
                 intArrayOf(0x2affffff, 0x00ffffff, 0x0dffffff), null, Shader.TileMode.CLAMP)
@@ -163,7 +165,7 @@ internal class AppearanceSample(context: Context, private val mode: Mode) : View
             canvas.restoreToCount(layer)
             paint.colorFilter = null
         }
-        if (selected || !stock) {
+        if (selected || (!stock && plate != Color.TRANSPARENT)) {
             paint.color = Color.WHITE
             paint.shader = if (selected) null else rim
             paint.strokeWidth = density * if (selected) 1.1f else .6f
