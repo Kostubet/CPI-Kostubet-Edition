@@ -82,7 +82,7 @@ object PrefsHelper {
         private set
     @Volatile var desktopLargeIcons = false
         private set
-    @Volatile var desktopTransparentIconPlate = false
+    @Volatile var desktopLightIconGlass = false
         private set
     @Volatile var desktopDimWallpaper = false
         private set
@@ -92,13 +92,14 @@ object PrefsHelper {
     private var blurSaturation = 100
     @Volatile private var neutralIconAccent:Int?=null
     internal fun iconPlateColor(color:Int=iconPalette.background)=
-        com.cosmod.launcherglass.util.PlateTone.iconSaturation(color,blurSaturation,neutralIconAccent)
+        if (desktopLightIconGlass) android.graphics.Color.WHITE else
+            com.cosmod.launcherglass.util.PlateTone.iconSaturation(color,blurSaturation,neutralIconAccent)
     @Volatile var blurLightening = 50
         private set
     @Volatile var blurColorFilter: android.graphics.ColorMatrixColorFilter? = null
     private var initialized = false
     @Volatile private var loaded=false
-    private var appearanceMode = DesktopAppearance.Mode.MANUAL
+    private var currentDesktopAppearance: DesktopAppearance.Profile? = null
     private var followsWallpaper=false
     private var wallpaperTone:IconPalette.WallpaperTone?=null
 
@@ -155,9 +156,12 @@ object PrefsHelper {
             ) ?: return
             val actualSystemDark = systemDark ?: IconPalette.isSystemDark(context)
             val appearance = DesktopAppearance.read(stored, actualSystemDark)
-            val appearanceChanged = appearance.mode != appearanceMode
-            val hideIconPlate = appearance.hideIconPlate(actualSystemDark)
-            val iconPlateVisibilityChanged = desktopTransparentIconPlate != hideIconPlate
+            val previousAppearance = currentDesktopAppearance
+            val appearanceChanged = appearance.mode != (previousAppearance?.mode ?: DesktopAppearance.Mode.MANUAL)
+            val updatingDesktopProfile = previousAppearance != null && previousAppearance != appearance &&
+                appearance.mode != DesktopAppearance.Mode.MANUAL
+            val lightIconGlass = appearance.usesLightGlass(actualSystemDark)
+            val iconPlateFinishChanged = desktopLightIconGlass != lightIconGlass
             val bundle = if (appearance.mode == DesktopAppearance.Mode.MANUAL) stored else Bundle(stored)
             DesktopAppearance.apply(bundle, appearance, actualSystemDark)
 
@@ -286,7 +290,7 @@ object PrefsHelper {
             val blurEnabledChanged=newBlurEnabled!=blurEnabled
             val drawerChanged=newDrawerBlurEnabled!=drawerBlurEnabled
             val folderEnabledChanged=newFolderBlurEnabled!=folderBlurEnabled
-            val materialChanged=iconsSectionChanged || iconPlateVisibilityChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
+            val materialChanged=iconsSectionChanged || iconPlateFinishChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
                 newFolderBlurEnabled!=folderBlurEnabled || newFolderIconsBlurEnabled!=folderIconsBlurEnabled || newDrawerBlurEnabled!=drawerBlurEnabled ||
                 newIconStroke != iconStroke || newStrokeOpacity != strokeOpacity ||
                 newGradientOpacity != gradientOpacity || glyphOutlineChanged || paletteChanged ||
@@ -302,7 +306,7 @@ object PrefsHelper {
             enabled = newEnabled
             gpuEffects=newGpuEffects
             bgOpacity = newBgOpacity
-            desktopTransparentIconPlate = hideIconPlate
+            desktopLightIconGlass = lightIconGlass
             blurEnabled = newBlurEnabled
             colorDepthBits=newColorDepth
             colorDepthStage=newDepthStage
@@ -350,10 +354,14 @@ object PrefsHelper {
             // In particular, a contour toggle must rebuild the overlay itself,
             // not only update the wallpaper sampling RenderNode.
             if (materialChanged || folderChanged) {
-                IconGlassHook.invalidateShaders()
+                if (updatingDesktopProfile && !masterChanged && !backendChanged && !folderChanged &&
+                    !geometryChanged && !edgeChanged && !opticsChanged && !glassEngineChanged) {
+                    // The renderer reuses its RenderNodes and switches the keyed material
+                    // on draw when the profile only changes color, opacity or style.
+                    IconGlassHook.invalidateFolderPreviews()
+                } else IconGlassHook.invalidateShaders()
             }
             if(materialChanged || folderChanged || paletteChanged){
-                IconGlassHook.invalidateFolderPreviews()
                 IconGlassHook.invalidateActiveIcons()
             }
             // Quick appearance profiles use the same native drawables. Preserve
@@ -383,7 +391,7 @@ object PrefsHelper {
                 ModuleHooks.setEnabled(false)
             }
             loaded=true
-            appearanceMode = appearance.mode
+            currentDesktopAppearance = appearance
 
             GlassLogger.i(
                 "PrefsHelper",

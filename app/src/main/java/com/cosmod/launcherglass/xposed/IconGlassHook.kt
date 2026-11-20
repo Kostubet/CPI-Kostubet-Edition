@@ -498,8 +498,6 @@ object IconGlassHook {
         val footprint=RectF(a.x,a.y,a.x+a.iconW,a.y+a.iconH)
         return WallpaperFootprint.source(bitmap,a.screenW,a.screenH,footprint,footprint)
     }
-    private val transparentProfileGlyphPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-
     private fun render(canvas:Canvas,bounds:Rect,parts:ProcessedIcon,a:Anchor?,wallpaper:Bitmap?,binding:IconMaterialRenderer.Binding?=null) {
         // The native surface can be screen-wide. Reuse the desktop material
         // texture and let the GPU scale it, instead of rebuilding all effects
@@ -511,10 +509,6 @@ object IconGlassHook {
             canvas.translate(bounds.left.toFloat(),bounds.top.toFloat())
             canvas.scale(bounds.width().toFloat()/width,bounds.height().toFloat()/height)
             try {render(canvas,Rect(0,0,width,height),parts,a,wallpaper,binding)}finally{canvas.restoreToCount(save)}
-            return
-        }
-        if (PrefsHelper.desktopTransparentIconPlate) {
-            GlyphMaterialRenderer.draw(canvas, bounds, parts.glyphBitmap, transparentProfileGlyphPaint)
             return
         }
         val compatible=wallpaper?.takeUnless {it.isRecycled}?.let {WallpaperHelper.forCanvas(it,canvas)}
@@ -545,7 +539,7 @@ object IconGlassHook {
                 val save=target.saveLayer(RectF(local),null)
                 val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (plateColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
                 target.drawBitmap(WallpaperHelper.forCanvas(plateMask,target),null,local,paint)
-                if(PrefsHelper.gradientOpacity>0){
+                if (PrefsHelper.gradientOpacity > 0 && !PrefsHelper.desktopLightIconGlass) {
                     paint.colorFilter=null;paint.shader=GlassVolume.shader(local.height().toFloat(),PrefsHelper.gradientOpacity)
                     paint.xfermode=PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
                     target.drawRect(local,paint)
@@ -558,7 +552,7 @@ object IconGlassHook {
             GlyphMaterialRenderer.draw(target,local,parts.glyphBitmap,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
         }
     }
-    private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled && !PrefsHelper.desktopTransparentIconPlate &&
+    private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled &&
         (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) &&
         (a?.drawer!=true || PrefsHelper.drawerBlurEnabled) && a?.openFolder!=true
 

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.Context
 import android.content.ContextWrapper
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
@@ -14,6 +15,7 @@ import android.widget.FrameLayout
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.util.GlassLogger
+import com.cosmod.launcherglass.util.LiveBlurEngine
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import org.xmlpull.v1.XmlPullParser
@@ -34,7 +36,11 @@ internal object DesktopAppearanceToolbar {
 
     private fun setWallpaperShade(host: Activity, existing: View?) {
         if (existing != null) {
-            existing.visibility = if (PrefsHelper.desktopDimWallpaper) View.VISIBLE else View.GONE
+            val show = PrefsHelper.desktopDimWallpaper
+            existing.animate().cancel()
+            if (show) existing.visibility = View.VISIBLE
+            existing.animate().alpha(if (show) 1f else 0f).setDuration(235L)
+                .withEndAction { if (!PrefsHelper.desktopDimWallpaper) existing.visibility = View.GONE }.start()
             return
         }
         wallpaperShades[host] = WeakReference(null)
@@ -45,10 +51,12 @@ internal object DesktopAppearanceToolbar {
         if (layer.id != host.resources.getIdentifier("drag_layer", "id", host.packageName)) return
         val shade = View(host).apply {
             setBackgroundColor(0x38000000)
+            alpha = 0f
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         layer.addView(shade, layer.indexOfChild(workspace), FrameLayout.LayoutParams(-1, -1))
         wallpaperShades[host] = WeakReference(shade)
+        shade.animate().alpha(1f).setDuration(235L).start()
     }
 
     fun install(loader: ClassLoader) {
@@ -114,6 +122,10 @@ internal object DesktopAppearanceToolbar {
             visibility = View.INVISIBLE
         }
         var dialog: Dialog? = null
+        var opening = false
+        fun editorVisible() = group.isShown && done.isShown &&
+            group.text.toString() == resources.getString(groupText) &&
+            done.text.toString() == resources.getString(doneText)
         val listener = ViewTreeObserver.OnPreDrawListener {
             val available = PrefsHelper.enabled && group.visibility == View.VISIBLE &&
                 done.visibility == View.VISIBLE && group.text.toString() == resources.getString(groupText) &&
@@ -127,13 +139,41 @@ internal object DesktopAppearanceToolbar {
             true
         }
         copy.setOnClickListener {
-            if (!PrefsHelper.enabled || dialog?.isShowing == true) return@setOnClickListener
+            if (!PrefsHelper.enabled || opening || dialog?.isShowing == true) return@setOnClickListener
             val host = activity(context) ?: return@setOnClickListener
             if (host.isFinishing || host.isDestroyed) return@setOnClickListener
-            runCatching {
-                dialog = DesktopAppearancePanel.open(host, sheet)
-                if (dialog?.isShowing == true) done.performClick()
-            }.onFailure { report(it) }
+            opening = true
+            val editorWasTracked = LiveBlurEngine.isEditing
+            val workspace = NativeIconAccess.call(host, "getWorkspace")
+            val deadline = SystemClock.uptimeMillis() + 1200L
+            var lastClick = 0L
+            val owner = host.window.decorView
+            val closeEditor = object : Runnable {
+                override fun run() {
+                    if (host.isFinishing || host.isDestroyed || !owner.isAttachedToWindow || !PrefsHelper.enabled) {
+                        opening = false
+                        return
+                    }
+                    val now = SystemClock.uptimeMillis()
+                    if (!editorVisible() || (editorWasTracked && !LiveBlurEngine.isEditing)) {
+                        opening = false
+                        runCatching { dialog = DesktopAppearancePanel.open(host, sheet) }.onFailure { report(it) }
+                        return
+                    }
+                    if (now >= deadline) {
+                        opening = false
+                        GlassLogger.limited("DesktopAppearance", "editorBusy") { "Launcher editor did not accept Done" }
+                        return
+                    }
+                    val moving = workspace?.let { NativeIconAccess.call(it, "isSwitchingState") } == true
+                    if (!moving && now - lastClick > 100L) {
+                        done.performClick()
+                        lastClick = now
+                    }
+                    owner.postDelayed(this, 32L)
+                }
+            }
+            closeEditor.run()
         }
         copy.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) {

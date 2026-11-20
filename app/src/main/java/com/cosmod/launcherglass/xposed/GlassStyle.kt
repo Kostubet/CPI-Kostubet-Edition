@@ -39,6 +39,7 @@ data class GlassStyle(val liquid:Boolean,val width:Int,val distortion:Int,
 
     companion object {
         fun icons()=GlassStyle(PrefsHelper.liquidGlass,PrefsHelper.liquidWidth,PrefsHelper.liquidDistortion,
-            PrefsHelper.blurRadius,PrefsHelper.bgOpacity,PrefsHelper.blurColorFilter,plateColor=PrefsHelper.iconPlateColor(),dispersion=PrefsHelper.iconDispersion)
+            PrefsHelper.blurRadius,PrefsHelper.bgOpacity,PrefsHelper.blurColorFilter,plateColor=PrefsHelper.iconPlateColor(),dispersion=PrefsHelper.iconDispersion,
+            volumeOpacity=if (PrefsHelper.desktopLightIconGlass) 0 else null)
     }
 }

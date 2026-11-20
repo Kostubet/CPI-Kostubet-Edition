@@ -22,12 +22,17 @@ class DesktopAppearanceTest {
     }
 
     @Test
-    fun transparentLightHidesThePlateAndTransparentDarkKeepsIt() {
-        assertTrue(clear.hideIconPlate(systemDark = true))
-        assertFalse(clear.copy(theme = Theme.DARK).hideIconPlate(systemDark = false))
-        assertTrue(clear.copy(theme = Theme.AUTO).hideIconPlate(systemDark = false))
-        assertFalse(clear.copy(theme = Theme.AUTO).hideIconPlate(systemDark = true))
-        assertFalse(clear.selectMode(Mode.TINTED).hideIconPlate(systemDark = false))
+    fun clearGlassKeepsThePlateWithLessTintInLightMode() {
+        val dark = clear.copy(theme = Theme.DARK)
+        val auto = clear.copy(theme = Theme.AUTO)
+        assertTrue(clear.usesLightGlass(systemDark = true))
+        assertEquals(6, clear.clearOpacity(0, systemDark = true))
+        assertEquals(10, clear.clearOpacity(100, systemDark = true))
+        assertEquals(32, dark.clearOpacity(0, systemDark = false))
+        assertEquals(54, dark.clearOpacity(100, systemDark = false))
+        assertEquals(10, auto.clearOpacity(40, systemDark = false))
+        assertEquals(40, auto.clearOpacity(40, systemDark = true))
+        assertFalse(clear.selectMode(Mode.TINTED).usesLightGlass(systemDark = false))
     }
 
     @Test

@@ -4,6 +4,14 @@
 
 ## Русский
 
+### Сборка 434
+
+- Нижний переключатель сохраняет положение и плавно меняет сегменты при смене стиля. Цветовые ползунки раскрываются над ним.
+- Кнопки «Оформления» используют компоненты COUI с контуром и откликом на касание. У переключателя «Светлые / Тёмные / Авто» включено родное краевое освещение.
+- Пипетка сначала читает исходное статическое изображение, в том числе на прошивках с эффектом глубины. Образцы используют системную иконку «Погоды» и сохраняют детали логотипа.
+- Светлый прозрачный стиль сохраняет подложку из прозрачного стекла. Смена стиля переиспользует подготовленные слои, а перерисовка образца при движении ползунков выполняется максимум один раз за кадр.
+- Рядом с пипеткой добавлена кнопка размера. Исправлено двойное масштабирование в растянутых контейнерах. «Оформление» ждёт выхода из штатного редактора, а затемнение обоев видно и за статус-баром.
+
 ### Сборка 433
 
 - «Оформление» плавно открывается у нижнего края, закрывается свайпом вниз и при открытии завершает редактирование рабочего стола штатной анимацией ColorOS.
@@ -186,6 +194,14 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 434
+
+- The bottom selector stays anchored and smoothly changes segments when switching styles. Color sliders expand above it.
+- Desktop Appearance uses native COUI buttons with outlines and touch feedback. The light, dark, and auto selector enables the native edge effect.
+- The eyedropper prefers the original static wallpaper even when the firmware has the wallpaper-depth effect enabled. Style samples use the system Weather icon and retain its details.
+- Light clear icons retain their glass plate. Switching styles reuses prepared layers, and slider movement updates the sample at most once per frame.
+- A size button sits beside the eyedropper. Resizable containers apply their scale once. Desktop Appearance waits for the stock editor to exit and shows wallpaper dimming behind the status bar.
 
 ### Build 433
 

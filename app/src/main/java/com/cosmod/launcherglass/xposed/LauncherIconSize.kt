@@ -53,16 +53,18 @@ internal object LauncherIconSize {
     private const val FLEX_FOLDER="com.android.launcher3.folder.FlexibleFolderIcon"
     private var folderTypes:List<Class<*>> = emptyList()
 
+    private fun hasScaledContainer(view: View, targets: List<Class<*>>): Boolean =
+        generateSequence(view.parent as? View) { it.parent as? View }
+            .any { parent -> targets.any { it.isInstance(parent) } }
+
     private fun updateContainer(view:View,nativeScale:Float?=null){
-        val large=if(folderTypes.any {it.isInstance(view)}) {
-            val span=NativeIconAccess.call(view,"getSpanRange") as? Rect
-            if(span!=null)span.width()>1 && span.height()>1
-            else {
-                val item=NativeIconAccess.call(view,"getItemInfo") ?: view.tag
-                if(item==null)NativeIconAccess.call(view,"isBigFolderIcon")==true
-                else (NativeIconAccess.field(item,"spanX") as? Int ?: 1)>1 &&
-                    (NativeIconAccess.field(item,"spanY") as? Int ?: 1)>1
-            }
+        val large = if (folderTypes.any { it.isInstance(view) }) {
+            val item = NativeIconAccess.call(view, "getItemInfo") ?: view.tag
+            val width = item?.let { NativeIconAccess.field(it, "spanX") as? Int }
+            val height = item?.let { NativeIconAccess.field(it, "spanY") as? Int }
+            if (width != null && height != null) width > 1 && height > 1
+            else NativeIconAccess.call(view, "isBigFolderIcon") == true ||
+                (NativeIconAccess.call(view, "getSpanRange") as? Rect)?.let { it.width() > 1 && it.height() > 1 } == true
         } else false
         scaleContainer(view,if(large)1f else workspacePercent/100f,nativeScale)
     }
@@ -83,9 +85,10 @@ internal object LauncherIconSize {
             }
         }
         for(method in methods)ModuleHooks.hookMethod(method,resize)
-        targets.firstOrNull {it.name==SHORTCUT}?.declaredMethods?.filter {
-            (it.name=="updateItemIconLayout" && it.parameterCount==2) || (it.name=="resetState" && it.parameterCount==0)
-        }?.forEach {ModuleHooks.hookMethod(it,resize)}
+        targets.flatMap { target -> target.declaredMethods.filter {
+            (it.name=="updateItemIconLayout" && it.parameterCount==2) ||
+                (target.name==SHORTCUT && it.name=="resetState" && it.parameterCount==0)
+        } }.forEach { ModuleHooks.hookMethod(it, resize) }
         targets.firstOrNull {it.name==FOLDER}?.declaredMethods?.firstOrNull {
             it.name=="setReorderBounceScale" && it.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
         }?.let {method->
@@ -111,7 +114,8 @@ internal object LauncherIconSize {
                 return synchronized(sizes){
                     val previous=sizes[view]
                     val native=previous?.takeIf {!nativeOverride && it.applied==observed}?.native ?: observed
-                    val scale = if (surface == workspace) workspacePercent else percent
+                    val scale = if (surface == drawer) percent
+                        else if (hasScaledContainer(view, targets)) 100 else workspacePercent
                     val adjusted=(native*scale+50)/100
                     if(previous==null || previous.native!=native || previous.applied!=adjusted)sizes[view]=Size(native,adjusted)
                     adjusted
@@ -154,8 +158,8 @@ internal object LauncherIconSize {
                 it.name=="setIconSize" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
             }?.let {method->
                 ModuleHooks.hookMethod(method,object:XC_MethodHook(){
-                    override fun afterHookedMethod(param:MethodHookParam){
-                        if(!param.hasThrowable())apply(param.thisObject as View,nativeOverride=true)
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        param.args[0] = adjust(param.thisObject as View, param.args[0] as Int, nativeOverride = true)
                     }
                 })
             }

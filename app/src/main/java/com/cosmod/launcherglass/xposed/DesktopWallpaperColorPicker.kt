@@ -19,12 +19,13 @@ internal class DesktopWallpaperColorPicker(
     private val onColor: (Int) -> Unit,
 ) : View(context) {
     private val density = resources.displayMetrics.density
-    private val radius = 39f * density
+    private val radius = 30f * density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val crop = RectF()
     private val lens = Path()
     private var x = 0f
     private var y = 0f
+    private var zoom = 1.65f
 
     init {
         contentDescription = description
@@ -34,6 +35,7 @@ internal class DesktopWallpaperColorPicker(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val scale = max(w.toFloat() / wallpaper.width, h.toFloat() / wallpaper.height)
+        zoom = (1.35f / scale).coerceIn(1.15f, 1.85f)
         val dx = (wallpaper.width * scale - w) * .5f
         val dy = (wallpaper.height * scale - h) * .5f
         crop.set(-dx, -dy, w + dx, h + dy)
@@ -54,28 +56,23 @@ internal class DesktopWallpaperColorPicker(
         canvas.drawBitmap(wallpaper, null, crop, paint)
 
         val lensX = x.coerceIn(radius, max(radius, width - radius))
-        val offset = radius + 24 * density
-        val lensY = (if (y >= radius + offset) y - offset else y + offset)
-            .coerceIn(radius, max(radius, height - radius))
+        val lensY = y.coerceIn(radius, max(radius, height - radius))
         lens.rewind()
         lens.addCircle(lensX, lensY, radius, Path.Direction.CW)
         val saved = canvas.save()
         canvas.clipPath(lens)
         canvas.translate(lensX, lensY)
-        canvas.scale(2.75f, 2.75f)
+        canvas.scale(zoom, zoom)
         canvas.translate(-x, -y)
         canvas.drawBitmap(wallpaper, null, crop, paint)
         canvas.restoreToCount(saved)
-        paint.color = sampledColor()
-        canvas.drawCircle(lensX, lensY, 7f * density, paint)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 2f * density
         paint.color = Color.WHITE
         canvas.drawCircle(lensX, lensY, radius, paint)
-        canvas.drawCircle(lensX, lensY, 7f * density, paint)
         paint.strokeWidth = density
-        canvas.drawLine(x - 7f * density, y, x + 7f * density, y, paint)
-        canvas.drawLine(x, y - 7f * density, x, y + 7f * density, paint)
+        val mark = 2.5f * density
+        canvas.drawRect(lensX - mark, lensY - mark, lensX + mark, lensY + mark, paint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

@@ -606,8 +606,10 @@ object WallpaperHelper {
     internal fun getPickerWallpaper(context: Context): Bitmap? {
         val maxSide = maxOf(context.resources.displayMetrics.widthPixels,
             context.resources.displayMetrics.heightPixels).coerceIn(1920, 3072)
-        if (!hasSystemWallpaperEffect(context)) {
-            val manager = WallpaperManager.getInstance(context)
+        val manager = WallpaperManager.getInstance(context)
+        // ColorOS also sets its wallpaper-effect flag for static depth wallpapers.
+        // The editor's effect frame is often lower resolution than the static crop.
+        if (runCatching { manager.wallpaperInfo == null }.getOrDefault(false)) {
             val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             runCatching {
                 manager.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)?.use {
@@ -619,11 +621,18 @@ object WallpaperHelper {
                         BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
                     } else null
                 }
-            }.getOrNull()?.let { forSoftwareCanvas(it)?.let { image -> return image } }
+            }.getOrNull()?.let(::forSoftwareCanvas)?.let { image ->
+                image.prepareToDraw()
+                GlassLogger.i("DesktopAppearance", "Eyedropper uses static wallpaper ${image.width}x${image.height}")
+                return image
+            }
         }
         val bitmap = readSystemSnapshot(context, fresh = true, maxSide = maxSide)
             ?: loadRawWallpaper(context) ?: return null
-        return forSoftwareCanvas(bitmap)
+        return forSoftwareCanvas(bitmap)?.also {
+            it.prepareToDraw()
+            GlassLogger.i("DesktopAppearance", "Eyedropper uses wallpaper snapshot ${it.width}x${it.height}")
+        }
     }
 
     fun getRawScaledWallpaper(context: Context): Bitmap? {
