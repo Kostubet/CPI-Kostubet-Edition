@@ -12,4 +12,9 @@
     <string name="desktop_appearance_auto">Auto</string>
     <string name="desktop_appearance_active">Desktop appearance · %1$s</string>
     <string name="desktop_appearance_restore_manual">Use manual settings</string>
+    <string name="desktop_appearance_dim_wallpaper">Darken wallpaper</string>
+    <string name="desktop_appearance_icon_size_toggle">Large icons</string>
+    <string name="desktop_appearance_pick_color">Pick a color from wallpaper</string>
+    <string name="desktop_appearance_wallpaper_unavailable">The wallpaper image is unavailable</string>
+    <string name="desktop_appearance_dark_always">Always</string>
 </resources>

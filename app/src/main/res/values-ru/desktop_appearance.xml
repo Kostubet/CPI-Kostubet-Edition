@@ -12,4 +12,9 @@
     <string name="desktop_appearance_auto">Авто</string>
     <string name="desktop_appearance_active">Оформление рабочего стола · %1$s</string>
     <string name="desktop_appearance_restore_manual">Использовать ручные настройки</string>
+    <string name="desktop_appearance_dim_wallpaper">Затемнить обои</string>
+    <string name="desktop_appearance_icon_size_toggle">Крупные иконки</string>
+    <string name="desktop_appearance_pick_color">Выбрать цвет с обоев</string>
+    <string name="desktop_appearance_wallpaper_unavailable">Не удалось получить изображение обоев</string>
+    <string name="desktop_appearance_dark_always">Всегда</string>
 </resources>

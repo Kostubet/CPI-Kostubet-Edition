@@ -11,8 +11,12 @@ internal object DesktopAppearance {
     const val THEME = "desktop_appearance_theme"
     const val HUE = "desktop_appearance_hue"
     const val SATURATION = "desktop_appearance_saturation"
-    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1)
-    val ranges = mapOf(MODE to 0..4, THEME to 0..2, HUE to -1..360, SATURATION to -1..100)
+    const val LARGE_ICONS = "desktop_appearance_large_icons"
+    const val DIM_WALLPAPER = "desktop_appearance_dim_wallpaper"
+    const val LARGE_ICON_PERCENT = 118
+    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1, LARGE_ICONS to 0, DIM_WALLPAPER to 0)
+    val ranges = mapOf(MODE to 0..4, THEME to 0..2, HUE to -1..360, SATURATION to -1..100,
+        LARGE_ICONS to 0..1, DIM_WALLPAPER to 0..1)
 
     enum class Mode(val label: Int) {
         MANUAL(R.string.desktop_appearance_manual),
@@ -29,9 +33,23 @@ internal object DesktopAppearance {
     }
 
     data class Profile(val mode: Mode, val theme: Theme, val hue: Int, val saturation: Int) {
+        val hasTintControls get() = mode == Mode.TINTED
+
+        val themeChoices: List<Theme> get() = when (mode) {
+            Mode.DARK -> listOf(Theme.DARK, Theme.AUTO)
+            Mode.CLEAR, Mode.TINTED -> listOf(Theme.LIGHT, Theme.DARK, Theme.AUTO)
+            else -> emptyList()
+        }
+
+        fun selectMode(next: Mode): Profile {
+            val updated = copy(mode = next)
+            val choices = updated.themeChoices
+            return if (choices.isEmpty() || theme in choices) updated else updated.copy(theme = Theme.DARK)
+        }
+
         fun dark(systemDark: Boolean) = when (theme) {
             Theme.AUTO -> systemDark
-            Theme.LIGHT -> false
+            Theme.LIGHT -> mode == Mode.DARK
             Theme.DARK -> true
         }
 
@@ -42,19 +60,20 @@ internal object DesktopAppearance {
             else -> 0
         }
 
-        fun iconDark(systemDark: Boolean) = mode == Mode.DARK || dark(systemDark)
+        fun iconDark(systemDark: Boolean) = dark(systemDark)
     }
 
     fun read(settings: Bundle, systemDark: Boolean): Profile {
         val mode = Mode.entries.getOrElse(settings.getInt(MODE)) { Mode.MANUAL }
         val theme = Theme.entries.getOrElse(settings.getInt(THEME)) { Theme.AUTO }
-        val dark = theme == Theme.DARK || theme == Theme.AUTO && systemDark
+        val profile = Profile(mode, theme, 0, 0).selectMode(mode)
+        val dark = profile.iconDark(systemDark)
         val keys = Keys.colorKeys(dark)
         fun color(custom: String, manual: String, max: Int): Int {
             val value = settings.getInt(custom, -1)
             return (if (value >= 0) value else settings.getInt(manual, SettingsDefaults.integer(manual))).coerceIn(0, max)
         }
-        return Profile(mode, theme, color(HUE, keys[0], 360), color(SATURATION, keys[1], 100))
+        return profile.copy(hue = color(HUE, keys[0], 360), saturation = color(SATURATION, keys[1], 100))
     }
 
     fun apply(settings: Bundle, profile: Profile, systemDark: Boolean) {

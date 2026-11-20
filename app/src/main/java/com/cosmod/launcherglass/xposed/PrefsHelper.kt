@@ -80,6 +80,10 @@ object PrefsHelper {
     @Volatile var iconPalette = com.cosmod.launcherglass.util.IconPalette.from(0, 0, 0, 0)
     @Volatile var launcherIconSize=100
         private set
+    @Volatile var desktopLargeIcons = false
+        private set
+    @Volatile var desktopDimWallpaper = false
+        private set
 
     @Volatile var blurVibrancy = 0
         private set
@@ -163,6 +167,10 @@ object PrefsHelper {
             Ba31kShadeMotion.update(bundle)
             DockMaterial.updateUnlock(bundle)
             launcherIconSize=bundle.getInt("launcher_icon_size",100).coerceIn(70,130)
+            desktopLargeIcons = bundle.getInt(DesktopAppearance.LARGE_ICONS) == 1
+            val previousWallpaperDim = desktopDimWallpaper
+            desktopDimWallpaper = bundle.getBoolean(SettingsProvider.KEY_ENABLED, true) &&
+                bundle.getInt(DesktopAppearance.DIM_WALLPAPER) == 1
             val newEnabled = bundle.getBoolean(SettingsProvider.KEY_ENABLED, SettingsDefaults.boolean(SettingsProvider.KEY_ENABLED))
             val toneEnabled=bundle.getBoolean(SettingsProvider.KEY_BLUR_TONE_ENABLED,true)
             val newBgOpacity = if (toneEnabled)
@@ -372,6 +380,7 @@ object PrefsHelper {
             if(masterChanged || widgetChanged || widgetElementsChanged || photoSourceChanged || edgeChanged || glassEngineChanged)PhotoWidgetMaterial.onSettingsChanged()
             DockMaterial.onSettingsChanged()
             LauncherIconSize.onSettingsChanged()
+            if (previousWallpaperDim != desktopDimWallpaper) DesktopAppearanceToolbar.updateWallpaperShade()
             if(!enabled){
                 IconGlassHook.onModuleDisabled()
                 com.cosmod.launcherglass.util.LauncherWallpaperCapture.onModuleDisabled()

@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 432
+
+- «Оформление» закреплено снизу и меняет высоту при переключении стилей. Карточка использует исходный материал COUI. Открытие больше не накладывает общую маску на рабочий стол.
+- Добавлены выбор цвета пипеткой с обоев, переключение размера и подписей иконок и ручное затемнение обоев. Ползунки оттенка и насыщенности применяются к рабочему столу при движении.
+
 ### Сборка 431
 
 - «Оформление» открывается компактной панелью COUI над рабочим столом. Убраны затемнение и размытие за пределами панели.
@@ -175,6 +180,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 432
+
+- Desktop Appearance uses the original COUI material and stays bottom-aligned while switching styles. Opening it no longer adds a scrim over the home screen.
+- Added a wallpaper eyedropper, a large-icon mode with hidden labels, and manual wallpaper darkening. The home screen updates while dragging the hue and saturation sliders.
 
 ### Build 431
 

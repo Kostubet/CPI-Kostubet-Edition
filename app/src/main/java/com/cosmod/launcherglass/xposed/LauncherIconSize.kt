@@ -4,6 +4,7 @@ import android.content.res.TypedArray
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.view.View
+import com.cosmod.launcherglass.ui.DesktopAppearance
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
@@ -31,11 +32,15 @@ internal object LauncherIconSize {
     }
     private var refresh:((View)->Unit)?=null
     private var lastPercent=100
+    private var lastLarge = false
+    private val large get() = PrefsHelper.enabled && PrefsHelper.desktopLargeIcons
     private val percent get()=if(PrefsHelper.enabled)PrefsHelper.launcherIconSize else 100
+    private val workspacePercent get() = if (large) (percent * DesktopAppearance.LARGE_ICON_PERCENT / 100).coerceAtMost(130) else percent
 
     fun onSettingsChanged(){
-        if(percent==lastPercent)return
+        if(percent==lastPercent && large==lastLarge)return
         lastPercent=percent
+        lastLarge=large
         for(view in containers.keys.weakSnapshot())if(view.isAttachedToWindow)updateContainer(view)
         val apply=refresh ?: return
         for(view in synchronized(sizes){sizes.keys.weakSnapshot()}){
@@ -59,7 +64,7 @@ internal object LauncherIconSize {
                     (NativeIconAccess.field(item,"spanY") as? Int ?: 1)>1
             }
         } else false
-        scaleContainer(view,if(large)1f else percent/100f,nativeScale)
+        scaleContainer(view,if(large)1f else workspacePercent/100f,nativeScale)
     }
 
     fun install(loader:ClassLoader){
@@ -106,7 +111,8 @@ internal object LauncherIconSize {
                 return synchronized(sizes){
                     val previous=sizes[view]
                     val native=previous?.takeIf {!nativeOverride && it.applied==observed}?.native ?: observed
-                    val adjusted=(native*percent+50)/100
+                    val scale = if (surface == workspace) workspacePercent else percent
+                    val adjusted=(native*scale+50)/100
                     if(previous==null || previous.native!=native || previous.applied!=adjusted)sizes[view]=Size(native,adjusted)
                     adjusted
                 }
@@ -117,6 +123,12 @@ internal object LauncherIconSize {
                 if(adjusted!=observed)size.setInt(view,adjusted)
             }
             val oplus=XposedHelpers.findClassIfExists("com.android.launcher3.OplusBubbleTextView",loader)
+            val textAlpha = type.getDeclaredMethod("setTextAlpha", Float::class.javaPrimitiveType)
+            ModuleHooks.hookMethod(textAlpha, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (large && display.getInt(param.thisObject) == workspace) param.args[0] = 0f
+                }
+            })
             // Adjust the stock size after the device profile and any XML override have been resolved.
             val initialize=object:XC_MethodHook(){
                 override fun afterHookedMethod(param:MethodHookParam){
@@ -152,6 +164,7 @@ internal object LauncherIconSize {
                     apply(view)
                     val drawable=icon.get(view) as? Drawable
                     if(drawable!=null)XposedHelpers.callMethod(view,"applyCompoundDrawables",drawable)
+                    if(display.getInt(view)==workspace) NativeIconAccess.call(view, "setTextVisibility")
                     view.requestLayout()
                     view.invalidate()
                 }.onFailure {GlassLogger.limited("LauncherIconSize","refresh"){"Native icon size refresh unavailable: $it"}}

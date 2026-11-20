@@ -10,17 +10,46 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.TextView
+import android.widget.FrameLayout
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedHelpers
 import org.xmlpull.v1.XmlPullParser
+import java.util.WeakHashMap
+import java.lang.ref.WeakReference
 
 /** Contract verified against OplusLauncher 17.3.12 on the OnePlus 13 IN. */
 internal object DesktopAppearanceToolbar {
     private const val TOOLBAR = "com.android.launcher.togglebar.views.ToggleStateToolbar"
     private const val BUTTON = "com.android.launcher.views.PressFeedbackButton"
+    private val wallpaperShades = WeakHashMap<Activity, WeakReference<View>>()
+
+    fun updateWallpaperShade() {
+        for ((host, shade) in wallpaperShades.toMap()) {
+            if (!host.isDestroyed) setWallpaperShade(host, shade.get())
+        }
+    }
+
+    private fun setWallpaperShade(host: Activity, existing: View?) {
+        if (existing != null) {
+            existing.visibility = if (PrefsHelper.desktopDimWallpaper) View.VISIBLE else View.GONE
+            return
+        }
+        wallpaperShades[host] = WeakReference(null)
+        if (!PrefsHelper.desktopDimWallpaper) return
+        val id = host.resources.getIdentifier("workspace", "id", host.packageName)
+        val workspace = host.findViewById<View>(id) ?: return
+        val layer = workspace.parent as? FrameLayout ?: return
+        if (layer.id != host.resources.getIdentifier("drag_layer", "id", host.packageName)) return
+        val shade = View(host).apply {
+            setBackgroundColor(0x38000000)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        layer.addView(shade, layer.indexOfChild(workspace), FrameLayout.LayoutParams(-1, -1))
+        wallpaperShades[host] = WeakReference(shade)
+    }
 
     fun install(loader: ClassLoader) {
         runCatching {
@@ -106,6 +135,11 @@ internal object DesktopAppearanceToolbar {
         copy.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) {
                 view.viewTreeObserver.addOnPreDrawListener(listener)
+                view.post {
+                    if (view.isAttachedToWindow) activity(view.context)?.let { host ->
+                        setWallpaperShade(host, wallpaperShades[host]?.get())
+                    }
+                }
             }
             override fun onViewDetachedFromWindow(view: View) {
                 view.viewTreeObserver.removeOnPreDrawListener(listener)
