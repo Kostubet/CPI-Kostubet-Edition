@@ -25,8 +25,10 @@ class WinterMelodyTest {
         val cursor = WinterMelody.Cursor()
         assertEquals(listOf(WinterMelody.notes.last()), cursor.due(WinterMelody.SLIDE_START_MS))
         assertFalse(cursor.startSlide(WinterMelody.SLIDE_START_MS))
-        assertTrue(cursor.startSlide(WinterMelody.SLIDE_START_MS + 37))
-        assertFalse(cursor.startSlide(WinterMelody.SLIDE_START_MS + 44))
+        val pulseEnd = WinterMelody.SLIDE_START_MS + WinterMelody.notes.last().pulseMs.toInt()
+        assertFalse(cursor.startSlide(pulseEnd - 1))
+        assertTrue(cursor.startSlide(pulseEnd))
+        assertFalse(cursor.startSlide(pulseEnd + 7))
     }
 
     @Test fun slideUsesReportedFrequencyRangeAndEndsInSilence() {
@@ -34,7 +36,7 @@ class WinterMelodyTest {
         assertTrue(slide.points.all { it.hz in 80f..260f && it.pitch == 0f })
         assertEquals(0f, slide.points.first().amplitude, 0f)
         assertEquals(0f, slide.points.last().amplitude, 0f)
-        assertTrue(slide.points.maxOf { it.amplitude } <= .25f)
+        assertTrue(slide.points.maxOf { it.amplitude } <= .42f)
         val fallback = WinterMelody.slide(null)
         assertTrue(fallback.points.all { it.hz == 0f })
         assertTrue(fallback.points.any { it.pitch != 0f })

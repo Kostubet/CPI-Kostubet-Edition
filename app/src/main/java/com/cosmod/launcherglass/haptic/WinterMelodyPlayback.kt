@@ -2,7 +2,6 @@ package com.cosmod.launcherglass.haptic
 
 import android.content.Context
 import android.media.AudioAttributes
-import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
@@ -17,25 +16,26 @@ internal class WinterMelodyPlayback(private val context: Context) {
     private var slide: (() -> Unit)? = null
     private var cursor = WinterMelody.Cursor()
     val playing get() = player != null
+    val positionMs: Int? get() = player?.let { runCatching { it.currentPosition }.getOrNull() }
 
     private val tick = object : Runnable {
         override fun run() {
             val audio = player ?: return
             val ms = runCatching { audio.currentPosition }.getOrElse { stop(); return }
             // Never replay missed taps as a cluster after a stalled UI frame.
-            for (note in cursor.due(ms)) motor?.auditionClick(note.strength)
+            for (note in cursor.due(ms)) motor?.celebrationTap(note)
             if (cursor.startSlide(ms)) runCatching { slide?.invoke() }
             handler.postDelayed(this, 6)
         }
     }
 
-    fun play() {
+    fun play(onStarted: () -> Unit) {
         stop()
-        // Respect the user's media volume, ringer mode and global haptic switch.
-        if (Settings.System.getInt(context.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 1 &&
-            context.getSystemService(AudioManager::class.java)?.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
-            motor = HapticMotor(context)
-            slide = motor?.let { it.prepare(WinterMelody.slide(it.frequency), 0, WinterMelody.SLIDE_DURATION_MS) }
+        if (Settings.System.getInt(context.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 1) {
+            motor = runCatching { HapticMotor(context, touchFeedback = true) }.getOrNull()
+            slide = motor?.let { engine ->
+                runCatching { engine.prepare(WinterMelody.slide(engine.frequency), 0, WinterMelody.SLIDE_DURATION_MS) }.getOrNull()
+            }
         }
         val audio = MediaPlayer()
         player = audio
@@ -46,6 +46,7 @@ internal class WinterMelodyPlayback(private val context: Context) {
             runCatching {
                 cursor = WinterMelody.Cursor()
                 it.start()
+                onStarted()
                 handler.post(tick)
             }.onFailure { stop() }
         }

@@ -2,6 +2,8 @@ package com.cosmod.launcherglass.ui
 
 import android.content.Context
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
@@ -11,9 +13,15 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.unit.DpSize
+import androidx.compose.ui.unit.dp
+import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.onextbox.ColorOsSearchSurface
 import io.github.suqi8.coui.kmp.basic.InputField
+import io.github.suqi8.coui.kmp.basic.SearchBar
 import io.github.suqi8.coui.kmp.basic.SearchBarDefaults
+import io.github.suqi8.coui.kmp.basic.ButtonDefaults
+import io.github.suqi8.coui.kmp.basic.TextButton
 
 /** Keeps the CPI catalog query in sync with COUI's search field. */
 internal class CouiSearchHost(
@@ -49,8 +57,8 @@ internal class CouiSearchHost(
                     query = queryText,
                     onQueryChange = ::setQuery,
                     onSearch = { onSearch() },
-                    expanded = inputFocused,
-                    onExpandedChange = { if (!it) closeKeyboard() },
+                    expanded = inputFocused || queryText.isNotEmpty(),
+                    onExpandedChange = { if (!it) cancelSearch() },
                     label = label,
                     material = appearance == CouiAppearance.MODERN && couiMaterialEnabled(context),
                     colors = SearchBarDefaults.searchBarColors(
@@ -67,9 +75,28 @@ internal class CouiSearchHost(
                     },
                 )
             }
-            if (appearance == CouiAppearance.ORIGINAL) {
-                ColorOsSearchSurface(Modifier.fillMaxSize(), Color(surface), inputFocused, queryText.isEmpty()) { input() }
-            } else input()
+            // The published COUI 2.0 uses SearchBar for the animated cancel action.
+            SearchBar(
+                modifier = Modifier.fillMaxWidth(),
+                expanded = inputFocused || queryText.isNotEmpty(),
+                insideMargin = DpSize.Zero,
+                onExpandedChange = { if (!it) cancelSearch() },
+                inputField = {
+                    if (appearance == CouiAppearance.ORIGINAL) {
+                        ColorOsSearchSurface(Modifier.fillMaxWidth().height(45.dp), Color(surface),
+                            inputFocused, queryText.isEmpty()) { input() }
+                    } else input()
+                },
+                outsideEndAction = {
+                    TextButton(
+                        text = context.getString(R.string.ui_cancel),
+                        onClick = ::cancelSearch,
+                        minWidth = 0.dp,
+                        minHeight = 40.dp,
+                        colors = ButtonDefaults.textButtonColorsBorderless(),
+                    )
+                },
+            ) {}
         }
     }
 
@@ -124,6 +151,11 @@ internal class CouiSearchHost(
 
     fun closeKeyboard() {
         clearInputFocus?.invoke()
+    }
+
+    private fun cancelSearch() {
+        setQuery("")
+        closeKeyboard()
     }
 
     override fun onDetachedFromWindow() {

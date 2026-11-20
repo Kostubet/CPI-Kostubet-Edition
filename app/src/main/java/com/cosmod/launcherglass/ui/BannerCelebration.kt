@@ -21,6 +21,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import com.cosmod.launcherglass.R
+import com.cosmod.launcherglass.haptic.WinterMelody
+import com.cosmod.launcherglass.haptic.WinterMelodyPlayback
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -29,7 +31,7 @@ import kotlin.random.Random
 internal class BannerCelebration(context:Context):View(context) {
     private data class Spark(val vx:Float,val vy:Float,val size:Float,val color:Int,val phase:Float)
     private data class Tap(val amplitude:Int,val durationMs:Long)
-    private data class Burst(val time:Float,val x:Float,val y:Float,val color:Int,val tap:Tap,val sparks:Array<Spark>)
+    private data class Burst(val time:Float,val x:Float,val y:Float,val color:Int,val tap:Tap?,val sparks:Array<Spark>)
 
     private val density=resources.displayMetrics.density
     private val random=Random(136)
@@ -37,13 +39,24 @@ internal class BannerCelebration(context:Context):View(context) {
     private val glow=RadialGradient(0f,0f,1f,intArrayOf(Color.WHITE,0x70ffffff,Color.TRANSPARENT),
         floatArrayOf(0f,.29f,1f),Shader.TileMode.CLAMP)
     private val glowMatrix=Matrix()
-    private val bursts=arrayOf(
+    private val originalBursts=arrayOf(
         burst(.49f,.49f,.22f,0xffad8cff.toInt(),0xff83dcff.toInt(),Tap(200,48),48,116f),
         burst(.64f,.24f,.38f,0xffffce80.toInt(),0xffff9a7a.toInt(),Tap(235,72),36,83f),
         burst(.79f,.76f,.32f,0xfffc8ac5.toInt(),0xfff0d0ff.toInt(),Tap(255,112),40,95f)
     )
+    private val winterBursts by lazy {
+        val palette = intArrayOf(0xffad8cff.toInt(), 0xff83dcff.toInt(), 0xffffce80.toInt(),
+            0xfffc8ac5.toInt(), 0xffc4f4ff.toInt(), 0xffff9a7a.toInt())
+        WinterMelody.notes.mapIndexed { index, note ->
+            val x = .17f + .66f * ((index * 5 + 3) % 11) / 10f
+            val y = .19f + .29f * ((index * 3 + 2) % 7) / 6f
+            burst(note.ms / 1000f, x, y, palette[index % palette.size], Color.WHITE,
+                null, if (index == WinterMelody.notes.lastIndex) 40 else 22, 52f + 36f * note.strength)
+        }.toTypedArray()
+    }
+    private var bursts=originalBursts
     private var player:MediaPlayer?=null
-    private val winter = com.cosmod.launcherglass.haptic.WinterMelodyPlayback(context)
+    private val winter = WinterMelodyPlayback(context)
     private var winterPlaying = false
     private var vibrator:Vibrator?=null
     private var startedAt=0L
@@ -60,12 +73,13 @@ internal class BannerCelebration(context:Context):View(context) {
     private val hold=Runnable {finishHold()}
     private val update=object:Runnable {
         override fun run(){
-            seconds=(SystemClock.uptimeMillis()-startedAt)/1000f
+            val elapsed = (SystemClock.uptimeMillis() - startedAt) / 1000f
+            seconds = if (winterPlaying) winter.positionMs?.let { maxOf(seconds, it / 1000f) } ?: elapsed else elapsed
             while(nextBurst<bursts.size && seconds>=bursts[nextBurst].time){
                 val burst=bursts[nextBurst++]
-                if(!winterPlaying && seconds-burst.time<.09f)vibrate(burst.tap)
+                if(seconds-burst.time<.09f)burst.tap?.let(::vibrate)
             }
-            if(seconds<2.25f){
+            if(seconds < bursts.last().time + 1.32f){
                 invalidate()
                 postOnAnimation(this)
             }else visibility=INVISIBLE
@@ -77,7 +91,7 @@ internal class BannerCelebration(context:Context):View(context) {
         visibility=INVISIBLE
     }
 
-    private fun burst(time:Float,x:Float,y:Float,main:Int,accent:Int,tap:Tap,count:Int,radius:Float):Burst {
+    private fun burst(time:Float,x:Float,y:Float,main:Int,accent:Int,tap:Tap?,count:Int,radius:Float):Burst {
         val sparks=Array(count){index->
             val angle=(index+random.nextFloat()*.58f)*2*PI/count
             val velocity=radius*(if(index%3==0).48f+random.nextFloat()*.18f else .76f+random.nextFloat()*.24f)
@@ -122,12 +136,21 @@ internal class BannerCelebration(context:Context):View(context) {
     private fun play(anchor:View){
         if(visibility==VISIBLE || player!=null || winter.playing)return
         winterPlaying=WinterEffects.melodyEnabled(context)
-        if(winterPlaying)winter.play() else playOriginalAudio()
-        if(!ValueAnimator.areAnimatorsEnabled())return
         anchor.getLocationInWindow(sourceLocation)
         getLocationInWindow(overlayLocation)
         sourceX=sourceLocation[0]-overlayLocation[0]+anchor.width*.5f
         sourceY=sourceLocation[1]-overlayLocation[1]+anchor.height*.6f
+        if (winterPlaying) {
+            winter.play { startAnimation(winterBursts) }
+        } else {
+            playOriginalAudio()
+            startAnimation(originalBursts)
+        }
+    }
+
+    private fun startAnimation(sequence: Array<Burst>) {
+        if (!ValueAnimator.areAnimatorsEnabled() || !isAttachedToWindow) return
+        bursts = sequence
         vibrator=if(!winterPlaying && Settings.System.getInt(context.contentResolver,Settings.System.HAPTIC_FEEDBACK_ENABLED,1)==1)
             context.getSystemService(VibratorManager::class.java)?.defaultVibrator?.takeIf {it.hasVibrator()}
             else null

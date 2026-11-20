@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Card
+import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.DropdownEntry
 import io.github.suqi8.coui.kmp.basic.DropdownItem
 import io.github.suqi8.coui.kmp.basic.Icon
@@ -505,6 +506,7 @@ private class CouiCardFill(context: Context, private val fillColor: Int, radius:
 internal class CouiPreference(context: Context, dark: Boolean, accent: Int, title: String,
     summary: String?, icon: Int?, iconTint: Int, catalog:Boolean=false, onPreview:((View)->Unit)?=null,
     longPressLabel:Int=R.string.ui_feature_peek_title,
+    position: CardListPosition = CardListPosition.None,
     action: (View) -> Unit) : CouiControl(context, dark, accent) {
     private var liftingForDialog = false
     private val previewScale = OnextSpring(1f) { scaleX = it; scaleY = it }
@@ -545,9 +547,10 @@ internal class CouiPreference(context: Context, dark: Boolean, accent: Int, titl
                 },
             )
             ArrowPreference(
-                modifier=Modifier.clip(RoundedCornerShape(22.dp)).then(gesture),
+                modifier=(if (position == CardListPosition.None) Modifier.clip(RoundedCornerShape(22.dp)) else Modifier).then(gesture),
                 title = title,
                 summary = summary,
+                cardListPosition = position,
                 insideMargin = PaddingValues(horizontal = 16.dp, vertical = if(catalog)10.dp else 12.dp),
                 startAction = icon?.let { resource ->
                     { if(catalog)Box(Modifier.size(32.dp),contentAlignment=Alignment.Center){

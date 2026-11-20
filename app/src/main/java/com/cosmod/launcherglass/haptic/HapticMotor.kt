@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -13,8 +14,10 @@ import androidx.annotation.RequiresApi
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-internal class HapticMotor(context: Context) {
+internal class HapticMotor(context: Context, private val touchFeedback: Boolean = false) {
+    @Suppress("DEPRECATION")
     private val vibrator = context.getSystemService(VibratorManager::class.java)?.defaultVibrator
+        ?.takeIf { it.hasVibrator() } ?: context.getSystemService(Vibrator::class.java)
     val present = vibrator?.hasVibrator() == true
     val amplitude = present && vibrator?.hasAmplitudeControl() == true
     val primitives = if (present) runCatching { vibrator?.arePrimitivesSupported(
@@ -222,9 +225,28 @@ internal class HapticMotor(context: Context) {
         }
     }
 
+    fun celebrationTap(note: WinterMelody.Note) {
+        if (!present) return
+        val pulse = VibrationEffect.createOneShot(
+            note.pulseMs,
+            if (amplitude) (note.strength * 255).roundToInt().coerceIn(1, 255)
+            else VibrationEffect.DEFAULT_AMPLITUDE,
+        )
+        runCatching { play(pulse) }.onFailure {
+            // Some vendor implementations accept only the device's default amplitude.
+            runCatching { play(VibrationEffect.createOneShot(note.pulseMs, VibrationEffect.DEFAULT_AMPLITUDE)) }
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun play(effect: VibrationEffect) {
-        vibrator?.vibrate(effect, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())
+        val motor = vibrator ?: return
+        if (touchFeedback && Build.VERSION.SDK_INT >= 33) {
+            motor.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_TOUCH))
+        } else {
+            val usage = if (touchFeedback) AudioAttributes.USAGE_ASSISTANCE_SONIFICATION else AudioAttributes.USAGE_MEDIA
+            motor.vibrate(effect, AudioAttributes.Builder().setUsage(usage).build())
+        }
     }
 
     fun stop() {

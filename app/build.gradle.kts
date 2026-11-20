@@ -11,7 +11,7 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 428
+        versionCode = 429
         versionName = "0.3.1"
     }
 

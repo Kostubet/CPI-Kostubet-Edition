@@ -51,6 +51,7 @@ import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.ui.UiLanguage
 import com.cosmod.launcherglass.ui.CouiAction
 import com.cosmod.launcherglass.ui.couiMaterialEnabled
+import com.cosmod.launcherglass.ui.setCouiPageContent
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
 import io.github.suqi8.coui.kmp.basic.HorizontalDivider
 import io.github.suqi8.coui.kmp.basic.SmallTitle
@@ -201,7 +202,7 @@ class HapticStudioActivity : AppCompatActivity() {
             playback?.update(ms, player.playing)
         }, { message(t("Cannot play this selection", "Не удалось воспроизвести фрагмент")) })
         root = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
-        setContentView(root)
+        setCouiPageContent(root, dark, accent)
         root.setBackgroundColor(canvasColor)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, root).apply {

@@ -36,6 +36,7 @@ import com.cosmod.launcherglass.ui.CouiAction
 import com.cosmod.launcherglass.ui.CouiGroup
 import com.cosmod.launcherglass.ui.CouiSlot
 import com.cosmod.launcherglass.ui.UiLanguage
+import com.cosmod.launcherglass.ui.setCouiPageContent
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.IconButton
 import io.github.suqi8.coui.kmp.basic.Text
@@ -96,7 +97,7 @@ class CpiUpdateActivity : AppCompatActivity() {
         }
         val scroller = ScrollView(this).apply { setBackgroundColor(canvas); addView(screen) }
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        setContentView(scroller)
+        setCouiPageContent(scroller, dark, accent)
         WindowCompat.getInsetsController(window, scroller).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark

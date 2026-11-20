@@ -30,7 +30,6 @@ import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.IconPalette
 import com.cosmod.launcherglass.util.PreviewIcons
 import com.cosmod.launcherglass.util.WallpaperHelper
-import com.cosmod.launcherglass.util.WidgetPreviewKind
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
@@ -42,7 +41,9 @@ internal object DesktopAppearancePanel {
     private const val COUI_SEEK = "com.coui.appcompat.seekbar.COUISeekBar"
 
     class Contract(loader: ClassLoader) {
-        val sheet: Constructor<*> = loader.loadClass(COUI_SHEET).getConstructor(Context::class.java)
+        private val sheetType = loader.loadClass(COUI_SHEET)
+        val sheet: Constructor<*> = sheetType.getConstructor(Context::class.java)
+        val backdrop: Method? = runCatching { sheetType.getMethod("setBackgroundBlur", Boolean::class.javaPrimitiveType) }.getOrNull()
         val button: Constructor<*> = loader.loadClass(BUTTON).getConstructor(Context::class.java)
         private val seekType = loader.loadClass(COUI_SEEK)
         val seek: Constructor<*> = seekType.getConstructor(Context::class.java)
@@ -102,17 +103,16 @@ internal object DesktopAppearancePanel {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(16), dp(20), dp(18))
         }
-        body.addView(label(labels.getString(R.string.desktop_appearance_title), 23f).apply {
+        body.addView(label(labels.getString(R.string.desktop_appearance_title), 21f).apply {
             typeface = Typeface.DEFAULT_BOLD
             isAccessibilityHeading = true
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(10))
         })
-        val icons = IconGlassHook.snapshotPreviewIcons().take(2).ifEmpty {
-            PreviewIcons.readInstalled(host, emptyList(), limit = 2)
+        val icons = IconGlassHook.snapshotPreviewIcons().take(1).ifEmpty {
+            PreviewIcons.readInstalled(host, emptyList(), limit = 1)
         }
-        val widget = WidgetPreviewKind.entries.firstNotNullOfOrNull { kind ->
-            runCatching { PhotoWidgetMaterial.snapshotPreview(kind) }.getOrNull()
-        }
-        val previews = mutableMapOf<Mode, Pair<GlassPreview, GlassPreview?>>()
+        val previews = mutableMapOf<Mode, GlassPreview>()
         val modeButtons = mutableMapOf<Mode, TextView>()
         val themeButtons = mutableMapOf<Theme, TextView>()
         val colorControls = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -134,7 +134,7 @@ internal object DesktopAppearancePanel {
             for ((mode, button) in modeButtons) highlight(button, mode == profile.mode)
             for ((theme, button) in themeButtons) highlight(button, theme == profile.theme)
             for (mode in modes) {
-                val (iconView, widgetView) = previews[mode] ?: continue
+                val iconView = previews[mode] ?: continue
                 val candidate = profile.copy(mode = mode)
                 val settings = Bundle(stored)
                 DesktopAppearance.apply(settings, candidate, systemDark)
@@ -152,46 +152,37 @@ internal object DesktopAppearancePanel {
                     number(Keys.KEY_BLUR_STYLE) == Keys.BLUR_STYLE_LIQUID, number(Keys.KEY_BLUR_RADIUS),
                     number(Keys.KEY_BG_OPACITY), number(Keys.KEY_LIQUID_WIDTH), number(Keys.KEY_LIQUID_DISTORTION),
                     GlassDispersionSettings.strength(settings, GlassDispersionSettings.ICONS), 28,
-                    tiles = 2, iconPalette = palette, plateColor = palette?.background))
-                widgetView?.let {
-                    val material = WidgetMaterialSettings.read(settings)
-                    it.configure(settings, GlassSurface.WIDGETS)
-                    it.show(GlassPreview.Material(material.enabled, material.liquid, material.radius, material.glassOpacity,
-                        material.width, material.distortion, material.dispersion, material.corner,
-                        backgroundFilter = material.tintFilter, contentOpacity = if (material.enabled) material.opacity else 100,
-                        shade = if (material.enabled) material.shade else 0))
-                }
+                    tiles = 1, iconPalette = palette, plateColor = palette?.background))
             }
         }
 
-        for (pair in listOf(listOf(Mode.STOCK, Mode.DARK), listOf(Mode.CLEAR, Mode.TINTED))) {
-            val row = LinearLayout(context).apply { isBaselineAligned = false }
-            for (mode in pair) {
-                val card = LinearLayout(context).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(0, dp(4), 0, 0)
-                }
-                val iconView = GlassPreview(context, systemDark, useDeviceWallpaperColor = false).apply { setScene(null, icons) }
-                val widgetView = widget?.let { scene ->
-                    GlassPreview(context, systemDark, useDeviceWallpaperColor = false).apply { setContentScene(scene, true) }
-                }
-                previews[mode] = iconView to widgetView
-                card.addView(iconView, LinearLayout.LayoutParams(-1, dp(68)))
-                widgetView?.let { card.addView(it, LinearLayout.LayoutParams(-1, dp(56))) }
-                val select = {
-                    profile = profile.copy(mode = mode)
-                    render(emptySet())
-                    save(DesktopAppearance.MODE, mode.ordinal)
-                }
-                iconView.setOnClickListener { select() }
-                widgetView?.setOnClickListener { select() }
-                modeButtons[mode] = button(labels.getString(mode.label), select).also(card::addView)
-                row.addView(card, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(4); marginStart = dp(4) })
+        val modes = LinearLayout(context).apply { isBaselineAligned = false }
+        for (mode in listOf(Mode.STOCK, Mode.DARK, Mode.CLEAR, Mode.TINTED)) {
+            val card = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            val iconView = GlassPreview(context, systemDark, useDeviceWallpaperColor = false, showWallpaper = false)
+                .apply { setScene(null, icons) }
+            previews[mode] = iconView
+            card.addView(iconView, LinearLayout.LayoutParams(-1, dp(58)))
+            val select = {
+                profile = profile.copy(mode = mode)
+                render(emptySet())
+                save(DesktopAppearance.MODE, mode.ordinal)
             }
-            body.addView(row)
+            val choice = button(labels.getString(mode.label), select).apply {
+                textSize = 12f
+                setSingleLine(false)
+                setMaxLines(2)
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            iconView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            iconView.setOnClickListener { choice.performClick() }
+            modeButtons[mode] = choice
+            card.addView(choice, LinearLayout.LayoutParams(-1, dp(48)))
+            modes.addView(card, LinearLayout.LayoutParams(0, -2, 1f))
         }
+        body.addView(modes)
 
-        fun slider(title: Int, range: Int, value: Int, hue: Boolean, change: (Int) -> Unit) {
+        fun slider(title: Int, range: Int, value: Int, change: (Int) -> Unit): GradientDrawable {
             val text = labels.getString(title)
             colorControls.addView(label(text, 14f))
             val slider = native.seek.newInstance(context) as View
@@ -199,19 +190,19 @@ internal object DesktopAppearancePanel {
             native.max.invoke(slider, range)
             native.progress.invoke(slider, value)
             val holder = FrameLayout(context)
-            if (hue) {
-                val colors = intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED)
-                if (context.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL) colors.reverse()
-                val track = View(context).apply {
-                    background = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors).apply { cornerRadius = dp(6).toFloat() }
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                }
-                holder.addView(track, FrameLayout.LayoutParams(-1, dp(12), Gravity.CENTER).apply {
-                    leftMargin = dp(14); rightMargin = dp(14)
-                })
-                native.track.invoke(slider, ColorStateList.valueOf(Color.TRANSPARENT))
-                native.fill.invoke(slider, ColorStateList.valueOf(Color.TRANSPARENT))
+            val gradient = GradientDrawable().apply {
+                orientation = GradientDrawable.Orientation.LEFT_RIGHT
+                cornerRadius = dp(8).toFloat()
             }
+            val track = View(context).apply {
+                background = gradient
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            holder.addView(track, FrameLayout.LayoutParams(-1, dp(14), Gravity.CENTER).apply {
+                marginStart = dp(14); marginEnd = dp(14)
+            })
+            native.track.invoke(slider, ColorStateList.valueOf(Color.TRANSPARENT))
+            native.fill.invoke(slider, ColorStateList.valueOf(Color.TRANSPARENT))
             val callback = Proxy.newProxyInstance(native.listenerType.classLoader, arrayOf(native.listenerType)) { proxy, method, args ->
                 when {
                     method.name == "hashCode" -> System.identityHashCode(slider)
@@ -227,17 +218,28 @@ internal object DesktopAppearancePanel {
             native.listener.invoke(slider, callback)
             holder.addView(slider, FrameLayout.LayoutParams(-1, -1))
             colorControls.addView(holder, LinearLayout.LayoutParams(-1, dp(46)))
+            return gradient
         }
-        slider(R.string.desktop_appearance_hue, 360, profile.hue, true) {
+        fun direction(colors: IntArray): IntArray {
+            if (context.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL) colors.reverse()
+            return colors
+        }
+        fun updateSaturationTrack(track: GradientDrawable) {
+            track.colors = direction(intArrayOf(Color.WHITE, Color.HSVToColor(floatArrayOf(profile.hue.toFloat(), 1f, 1f))))
+        }
+        lateinit var saturationTrack: GradientDrawable
+        slider(R.string.desktop_appearance_hue, 360, profile.hue) {
             profile = profile.copy(hue = it)
+            updateSaturationTrack(saturationTrack)
             render(setOf(Mode.TINTED))
             save(DesktopAppearance.HUE, it, dragging = true)
-        }
-        slider(R.string.desktop_appearance_saturation, 100, profile.saturation, false) {
+        }.colors = direction(intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED))
+        saturationTrack = slider(R.string.desktop_appearance_saturation, 100, profile.saturation) {
             profile = profile.copy(saturation = it)
             render(setOf(Mode.TINTED))
             save(DesktopAppearance.SATURATION, it, dragging = true)
         }
+        updateSaturationTrack(saturationTrack)
         body.addView(colorControls)
         themeControls.addView(label(labels.getString(R.string.desktop_appearance_variant), 14f))
         val themes = LinearLayout(context)
@@ -258,21 +260,21 @@ internal object DesktopAppearancePanel {
         }
         val scroll = ScrollView(context).apply { isFillViewport = false; addView(body) }
         dialog.setContentView(scroll)
+        runCatching { native.backdrop?.invoke(dialog, true) }
+            .onFailure { GlassLogger.limited("DesktopAppearance", "panelBlur") { "Native panel blur unavailable: ${it.message}" } }
         dialog.setOnDismissListener {
             handler.removeCallbacks(flush)
             flush.run()
         }
         dialog.show()
+        dialog.window?.setDimAmount(.08f)
         // Wallpaper I/O must not delay the host sheet animation.
         Thread({
             val wallpaper = runCatching {
                 WallpaperHelper.getRawScaledWallpaper(host.applicationContext)?.let(WallpaperHelper::forSoftwareCanvas)
             }.getOrNull()
             if (wallpaper != null) handler.post {
-                if (dialog.isShowing) previews.values.forEach { (icon, widgetView) ->
-                    icon.setWallpaper(wallpaper)
-                    widgetView?.setWallpaper(wallpaper)
-                }
+                if (dialog.isShowing) previews.values.forEach { it.setWallpaper(wallpaper) }
             }
         }, "CPI appearance wallpaper").start()
         GlassLogger.i("DesktopAppearance", "Opened native ColorOS appearance sheet")

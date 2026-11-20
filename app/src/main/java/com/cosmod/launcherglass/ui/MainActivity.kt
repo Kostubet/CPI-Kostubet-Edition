@@ -34,6 +34,9 @@ import androidx.compose.ui.res.painterResource
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
 import io.github.suqi8.coui.kmp.preference.WindowDropdownPreference
 import io.github.suqi8.coui.kmp.basic.BasicComponent
+import io.github.suqi8.coui.kmp.basic.CardListGroup
+import io.github.suqi8.coui.kmp.basic.SmallTitle
+import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 
 
 import io.github.suqi8.coui.kmp.basic.SmallTitle
@@ -259,7 +262,7 @@ class MainActivity : AppCompatActivity() {
         blurExpanded = savedInstanceState?.getBoolean("blurExpanded") ?: false
         designExpanded = savedInstanceState?.getBoolean("designExpanded") ?: false
         root = column().apply { clipChildren=false;clipToPadding=false;setBackgroundColor(this@MainActivity.background) }
-        setContentView(root)
+        setCouiPageContent(root, darkUi, primary)
         updateSystemBars()
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -432,7 +435,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun card(content:View,inner:Boolean=false):FrameLayout {
         val color=if(coloredFeatures)withAlpha(Color.WHITE,if(darkUi)27 else 154)else if(inner)raised else panel
-        val radius=if(inner)16 else 20
+        val radius=if(inner)16 else 24
         val edge=if(bool("coloros_ui_effects") && CouiAppearance.read(this)==CouiAppearance.MODERN)
             withAlpha(onSurface,if(darkUi)33 else 23) else Color.TRANSPARENT
         return CouiCardHost(this,color,radius,edge,content)
@@ -1189,16 +1192,14 @@ class MainActivity : AppCompatActivity() {
             val sections=if(query.isEmpty)groups.map {(heading,items)->heading to items.map {it to null}}
                 else if(ranked.isEmpty())emptyList() else listOf(0 to ranked)
             for((heading,matches) in sections){
-                if(heading!=0)add(entries,text(getString(heading),13f,true).apply {
-                    setPadding(dp(16),dp(10),dp(16),dp(8))
-                    ViewCompat.setAccessibilityHeading(this,true)
+                if (heading != 0) add(entries, CouiSlot(this, darkUi, primary) {
+                    SmallTitle(getString(heading))
                 })
                 val rows=column()
                 matches.forEachIndexed { index,(item,label) ->
-                    if(index!=0)divider(rows,56)
-                    add(rows,catalogRow(item,label?.let(::getString)))
+                    add(rows,catalogRow(item,label?.let(::getString),index,matches.size))
                 }
-                add(entries,card(rows),bottom=11)
+                add(entries,card(rows),bottom=16)
             }
             if(ranked.isEmpty() && transferMatches.isEmpty())add(entries,text(getString(R.string.ui_catalog_no_results),15f,true).apply {
                 gravity=Gravity.CENTER;setPadding(0,dp(36),0,0)
@@ -1245,7 +1246,7 @@ class MainActivity : AppCompatActivity() {
         fun placeSearch(){
             val expanded=maxOf(dp(64),heading.bottom).toFloat()
             val desired=topInset+CatalogSearchGeometry.top(searchProgress,expanded,resources.displayMetrics.density)
-            val y=if(restart==null)desired else {
+            val y=if(restart==null || restart.visibility != View.VISIBLE)desired else {
                 val horizontalGap=if(!restart.isLaidOut || !searchPanel.isLaidOut)0
                     else if(layer.layoutDirection==View.LAYOUT_DIRECTION_RTL)searchPanel.right-searchPanel.capsuleWidth-restart.right
                     else restart.left-searchPanel.left-searchPanel.capsuleWidth
@@ -1259,7 +1260,9 @@ class MainActivity : AppCompatActivity() {
         fun desiredSearchWidth(progress:Float):Int{
             val windowWidth=layer.width.takeIf {it>0} ?: page.width
             if(windowWidth<=0)return ViewGroup.LayoutParams.MATCH_PARENT
-            val reserved=(CatalogSearchGeometry.reservedWidth(progress)*resources.displayMetrics.density).roundToInt()
+            val editing = searchPanel.isInputFocused() || searchQuery.isNotEmpty()
+            val reserved = if (editing) 0 else
+                (CatalogSearchGeometry.reservedWidth(progress)*resources.displayMetrics.density).roundToInt()
             return (windowWidth-dp(16)*2-reserved).coerceAtLeast(1)
         }
         fun layoutSearch(progress:Float){
@@ -1298,11 +1301,21 @@ class MainActivity : AppCompatActivity() {
             }
             layoutSearch(searchProgress)
         }
+        var catalogScrollY: Int? = null
         val updateSearchMode={
             val searching=searchPanel.isInputFocused() || searchQuery.isNotEmpty()
             heading.visibility=if(searching)View.GONE else View.VISIBLE
-            if(pageLayer===layer)navigation?.first?.visibility=if(searchPanel.isInputFocused())View.INVISIBLE else View.VISIBLE
-            if(searching && searchPositionReady && pageLayer===layer && searchPanel.isInputFocused())scroll.scrollTo(0,0)
+            if (pageLayer === layer) {
+                navigation?.first?.visibility = if (searching) View.INVISIBLE else View.VISIBLE
+                restart?.visibility = if (searching) View.INVISIBLE else View.VISIBLE
+                if (searching && catalogScrollY == null) {
+                    catalogScrollY = scroll.scrollY
+                    scroll.scrollTo(0, 0)
+                } else if (!searching) {
+                    catalogScrollY?.let { previous -> scroll.post { scroll.scrollTo(0, previous) } }
+                    catalogScrollY = null
+                }
+            }
             positionSearch(scroll.scrollY)
         }
         syncSearchMode=updateSearchMode
@@ -1337,9 +1350,9 @@ class MainActivity : AppCompatActivity() {
         updateSearchMode()
     }
 
-    private fun catalogRow(item:Screen,matchedSetting:String?=null):View =
+    private fun catalogRow(item:Screen,matchedSetting:String?,index:Int,count:Int):View =
         CouiPreference(this,darkUi,primary,getString(item.title),matchedSetting,item.icon,Color.BLACK or item.tint,
-            catalog=true,onPreview={showFeaturePreview(item,it)}){haptic(it);openScreen(item)}
+            catalog=true,onPreview={showFeaturePreview(item,it)},position=cardListPositionOf(index,count)){haptic(it);openScreen(item)}
 
     private fun buildCameraZoom(body: LinearLayout) {
         val zoom = com.cosmod.launcherglass.camera.CameraZoomSettings
@@ -1741,7 +1754,6 @@ class MainActivity : AppCompatActivity() {
         status.minimumHeight=dp(90)
         add(body,status,bottom=12)
 
-        val info=column()
         val details=listOf(
             R.string.ui_device_region to OnextDeviceInfo.region(this),
             R.string.ui_device_android to getString(R.string.ui_device_android_value,Build.VERSION.RELEASE,Build.VERSION.SDK_INT),
@@ -1751,11 +1763,7 @@ class MainActivity : AppCompatActivity() {
             R.string.ui_device_fingerprint to Build.FINGERPRINT,
             R.string.ui_device_kernel to OnextDeviceInfo.kernelVersion
         )
-        for((index,entry) in details.withIndex()){
-            if(index!=0)divider(info)
-            add(info,informationRow(entry.first,entry.second))
-        }
-        add(body,card(info),bottom=10)
+        addDeviceInformation(body, details)
         add(body,card(preferenceLink(getString(R.string.ui_device_details),getString(R.string.ui_device_details_hint)){
             openScreen(Screen.DEVICE)
         }))
@@ -1764,6 +1772,23 @@ class MainActivity : AppCompatActivity() {
     private fun informationRow(label: Int, value: String): View =
         CouiInformation(this, darkUi, primary, getString(label),
             value.ifBlank { getString(R.string.ui_device_unknown) })
+
+    private fun addDeviceInformation(body: LinearLayout, entries: List<Pair<Int, String>>) {
+        val group = CouiSlot(this, darkUi, primary) {
+            CouiGroup {
+                CardListGroup {
+                    for ((label, value) in entries) item {
+                        BasicComponent(title = getString(label),
+                            summary = value.ifBlank { getString(R.string.ui_device_unknown) })
+                    }
+                }
+            }
+        }
+        body.addView(group, LinearLayout.LayoutParams(-1, -2).apply {
+            marginStart = -dp(16)
+            marginEnd = -dp(16)
+        })
+    }
 
     private fun preferenceLink(title:String,summary:String?=null,icon:Int?=null,
         iconTint:Int=onSurface,action:(View)->Unit):View =
@@ -1786,12 +1811,7 @@ class MainActivity : AppCompatActivity() {
             R.string.ui_device_display to (mode?.let {"${it.physicalWidth} × ${it.physicalHeight} · ${it.refreshRate.roundToInt()} Hz"} ?: ""),
             R.string.ui_device_patch to Build.VERSION.SECURITY_PATCH
         )
-        val content=column()
-        for((index,entry) in entries.withIndex()){
-            if(index!=0)divider(content)
-            add(content,informationRow(entry.first,entry.second))
-        }
-        add(body,card(content))
+        addDeviceInformation(body, entries)
     }
 
     private fun buildModule(body:LinearLayout){
@@ -1810,11 +1830,11 @@ class MainActivity : AppCompatActivity() {
         val people = CouiSlot(this, darkUi, primary) {
             androidx.compose.foundation.layout.Column {
                 CouiGroup {
-                    BasicComponent(title = getString(R.string.ui_cpi_edition), summary = "Kostubet Topics")
-                    HorizontalDivider()
-                    BasicComponent(title = getString(R.string.ui_contributor_help), summary = "@anime_killer2009")
-                    HorizontalDivider()
-                    BasicComponent(title = getString(R.string.ui_contributor_sources), summary = "Mahmud0808 · MiToverG422")
+                    CardListGroup {
+                        item { BasicComponent(title = getString(R.string.ui_cpi_edition), summary = "Kostubet Topics") }
+                        item { BasicComponent(title = getString(R.string.ui_contributor_help), summary = "@anime_killer2009") }
+                        item { BasicComponent(title = getString(R.string.ui_contributor_sources), summary = "Mahmud0808 · MiToverG422") }
+                    }
                 }
                 CouiGroup {
                     BasicComponent(title=getString(R.string.ui_contributor_beta),summary=testers.joinToString(", "))
