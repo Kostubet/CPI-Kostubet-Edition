@@ -313,12 +313,15 @@ object WallpaperHelper {
 
     fun forCanvas(bitmap: Bitmap, canvas: Canvas?): Bitmap {
 
-        if (canvas == null || canvas.isHardwareAccelerated || bitmap.config != Bitmap.Config.HARDWARE) return bitmap
+        if (canvas == null || canvas.isHardwareAccelerated) return bitmap
+        return forSoftwareCanvas(bitmap) ?: bitmap
+    }
 
-        // Only native offscreen software snapshots need this compatibility copy.
-
+    internal fun forSoftwareCanvas(bitmap: Bitmap): Bitmap? {
+        if (bitmap.isRecycled) return null
+        if (bitmap.config != Bitmap.Config.HARDWARE) return bitmap
         synchronized(softwareSnapshots){softwareSnapshots[bitmap]?.takeUnless {it.isRecycled}?.let {return it}}
-        val copy=bitmap.copy(Bitmap.Config.ARGB_8888,false) ?: return bitmap
+        val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return null
         synchronized(softwareSnapshots){softwareSnapshots[bitmap]=copy}
         return copy
 

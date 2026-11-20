@@ -265,7 +265,9 @@ internal object DesktopAppearancePanel {
         dialog.show()
         // Wallpaper I/O must not delay the host sheet animation.
         Thread({
-            val wallpaper = runCatching { WallpaperHelper.getRawScaledWallpaper(host.applicationContext) }.getOrNull()
+            val wallpaper = runCatching {
+                WallpaperHelper.getRawScaledWallpaper(host.applicationContext)?.let(WallpaperHelper::forSoftwareCanvas)
+            }.getOrNull()
             if (wallpaper != null) handler.post {
                 if (dialog.isShowing) previews.values.forEach { (icon, widgetView) ->
                     icon.setWallpaper(wallpaper)

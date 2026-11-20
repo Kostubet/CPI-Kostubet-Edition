@@ -19,6 +19,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.graphics.ColorUtils
 import com.cosmod.launcherglass.util.BackdropVibrancy
 import com.cosmod.launcherglass.util.VolumeRim
+import com.cosmod.launcherglass.util.WallpaperHelper
 import com.cosmod.launcherglass.util.PreviewIcons
 import com.cosmod.launcherglass.util.IconPalette
 import com.cosmod.launcherglass.util.FolderPreviewKind
@@ -112,7 +113,7 @@ internal class GlassPreview(context: Context, private val dark: Boolean, useDevi
 
     fun setWallpaper(wallpaper: Bitmap?) {
         if (this.wallpaper === wallpaper) return
-        this.wallpaper = wallpaper
+        this.wallpaper = wallpaper?.let(WallpaperHelper::forSoftwareCanvas)
         rebuildBackdrop()
         invalidate()
     }
