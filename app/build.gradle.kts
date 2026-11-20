@@ -11,7 +11,7 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 429
+        versionCode = 430
         versionName = "0.3.1"
     }
 
@@ -59,6 +59,7 @@ dependencies {
     val couiVersion = "2.0.0"
     implementation(platform(libs.androidx.compose.bom))
     implementation("androidx.activity:activity:1.13.0")
+    implementation(libs.coui.navigation.event)
     implementation("io.github.suqi8.coui.kmp:coui-ui-android:$couiVersion")
     implementation("io.github.suqi8.coui.kmp:coui-preference-android:$couiVersion")
     implementation("io.github.suqi8.coui.kmp:coui-icons-android:$couiVersion")

@@ -135,5 +135,17 @@ internal object DesktopAppearance {
             Keys.KEY_CLEAR_BRIGHTNESS, Keys.KEY_PHOTO_WIDGET_BLUR, "widget_elements_follow_background",
             Keys.KEY_PHOTO_WIDGET_MATERIAL, Keys.KEY_PHOTO_WIDGET_TINT, IconPalette.FOLLOW_WALLPAPER) ||
             key in Keys.colorKeys(true) || key in Keys.colorKeys(false) ||
-            key.startsWith("icon_logo_") || key.startsWith("widget_logo_") || key.startsWith("photo_widget_tint_")
+            key.startsWith("icon_logo_") || key.startsWith("widget_logo_") || key.startsWith("photo_widget_tint_") ||
+            key == WidgetSettings.WALLPAPER_TINT || key == Keys.KEY_PHOTO_WIDGET_SHADE
+
+    fun copyForManualEdit(settings: Bundle, profile: Profile, systemDark: Boolean, nativeDark: Boolean): Bundle {
+        val manual = Bundle(settings)
+        if (profile.mode == Mode.MANUAL || profile.mode == Mode.STOCK) return manual
+        apply(manual, profile, systemDark)
+        val effectiveKeys = Keys.colorKeys(profile.iconDark(systemDark))
+        Keys.colorKeys(nativeDark).zip(effectiveKeys).forEach { (native, effective) ->
+            manual.putInt(native, manual.getInt(effective))
+        }
+        return manual
+    }
 }

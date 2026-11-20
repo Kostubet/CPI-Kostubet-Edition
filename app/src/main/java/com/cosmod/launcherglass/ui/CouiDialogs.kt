@@ -1,6 +1,5 @@
 package com.cosmod.launcherglass.ui
 
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Box
@@ -16,23 +15,14 @@ import com.cosmod.launcherglass.ui.onextbox.ColorOs17Button
 import com.cosmod.launcherglass.ui.onextbox.ColorOs17ConfirmDialog
 import io.github.suqi8.coui.kmp.basic.ButtonDefaults
 import io.github.suqi8.coui.kmp.basic.Card
-import io.github.suqi8.coui.kmp.basic.CardDefaults
 import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.layout.DialogButtonBar
 import io.github.suqi8.coui.kmp.layout.DialogButtonBarAction
 import io.github.suqi8.coui.kmp.effect.LocalCOUIMaterialEffectEnabled
-import io.github.suqi8.coui.kmp.squircle.SquircleShape
-import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.window.WindowDialog
 
 @Composable
 internal fun CouiGroup(content: @Composable ColumnScope.() -> Unit) {
-    val edge = if (LocalCOUIMaterialEffectEnabled.current &&
-        CouiAppearance.read(LocalContext.current) == CouiAppearance.MODERN) {
-        val color = COUITheme.colorScheme
-        Modifier.border(1.dp, color.labelPrimary.copy(alpha = if (color.isDark) .13f else .09f),
-            SquircleShape(CardDefaults.CornerRadius))
-    } else Modifier
     Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
         AndroidView(factory = { context ->
             android.view.View(context).also {
@@ -40,7 +30,7 @@ internal fun CouiGroup(content: @Composable ColumnScope.() -> Unit) {
                 WinterEffects.mark(it)
             }
         }, modifier = Modifier.matchParentSize())
-        Card(Modifier.fillMaxWidth().then(edge), insideMargin = PaddingValues(0.dp), content = content)
+        Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(0.dp), content = content)
     }
 }
 

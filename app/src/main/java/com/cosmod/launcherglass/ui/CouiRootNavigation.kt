@@ -13,23 +13,29 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import com.cosmod.launcherglass.ui.onextbox.ColorOs17BottomNavigationBar
+import com.cosmod.launcherglass.ui.onextbox.ColorOsBottomBarMaterialView
 import io.github.suqi8.coui.kmp.basic.FloatingNavigationBar
+import io.github.suqi8.coui.kmp.basic.FloatingNavigationBarDefaults
 import io.github.suqi8.coui.kmp.basic.FloatingNavigationBarItem
 import io.github.suqi8.coui.kmp.basic.NavigationItem
 import kotlin.math.roundToInt
 
 /** Persistent upstream COUI navigation; restart actions live in the page toolbar. */
-internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
+internal class CouiRootNavigation(context:Context,private val dark:Boolean,accent:Int,
     icons:List<Int>,outlineIcons:List<Int>,labels:List<String>,selected:MutableIntState,surface:Int,
     onSelected:(Int)->Unit):CouiControl(context,dark,accent){
     var surfaceColor by mutableIntStateOf(surface)
-    private var hardwareBackdrop by mutableStateOf(false)
     private val capsuleBounds = Rect()
-    private val backdrop = CouiChromeBackdrop(context, dark) { hardwareBackdrop = it }
+    private val backdrop = if (appearance == CouiAppearance.MODERN && couiMaterialEnabled(context))
+        ColorOsBottomBarMaterialView(context, dark, surface, edgeOpacity = .48f) else null
 
     init {
         WinterEffects.mark(this, 28f, 3)
-        if (appearance == CouiAppearance.MODERN) addView(backdrop, 0, LayoutParams(0, 0))
+        backdrop?.let {
+            addView(it, 0, LayoutParams(0, 0))
+            // The native caustic shadow comes from elevation. Keep the COUI labels above it.
+            composition.translationZ = 25f * resources.displayMetrics.density
+        }
         composition.layoutParams=LayoutParams(-1,-1)
         composition.clipChildren=false;composition.clipToPadding=false
         content {
@@ -45,9 +51,14 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
                         unselectedIcons = outlineIcons.map { ImageVector.vectorResource(it) },
                     )
                 } else {
+                    val color = surfaceColor
+                    SideEffect { backdrop?.updateAppearance(dark, color) }
                     FloatingNavigationBar(
                         defaultWindowInsetsPadding = false,
-                        color = Color(surfaceColor).copy(alpha = if (hardwareBackdrop) .20f else 1f),
+                        materialEffect = false,
+                        showDivider = false,
+                        color = if (backdrop != null) Color.Transparent else Color(color),
+                        shadowElevation = if (backdrop != null) 0.dp else FloatingNavigationBarDefaults.ShadowElevation,
                         backgroundModifier = Modifier.onGloballyPositioned { coordinates ->
                             val bounds = coordinates.boundsInRoot()
                             capsuleBounds.set(bounds.left.roundToInt(), bounds.top.roundToInt(),
@@ -81,6 +92,7 @@ internal class CouiRootNavigation(context:Context,dark:Boolean,accent:Int,
     }
 
     private fun placeBackdrop() {
+        val backdrop = backdrop ?: return
         if (capsuleBounds.isEmpty) {
             backdrop.layout(0, 0, 0, 0)
             return

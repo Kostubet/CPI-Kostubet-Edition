@@ -436,9 +436,7 @@ class MainActivity : AppCompatActivity() {
     private fun card(content:View,inner:Boolean=false):FrameLayout {
         val color=if(coloredFeatures)withAlpha(Color.WHITE,if(darkUi)27 else 154)else if(inner)raised else panel
         val radius=if(inner)16 else 24
-        val edge=if(bool("coloros_ui_effects") && CouiAppearance.read(this)==CouiAppearance.MODERN)
-            withAlpha(onSurface,if(darkUi)33 else 23) else Color.TRANSPARENT
-        return CouiCardHost(this,color,radius,edge,content)
+        return CouiCardHost(this,color,radius,content)
     }
 
     private fun chromeSurface() = when {
@@ -502,8 +500,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun save(key: String, value: Any, vararg flags: Pair<String, Boolean>) {
         if(updatingUi)return
+        val editingProfile = DesktopAppearance.affectsManualSettings(key) &&
+            number(DesktopAppearance.MODE) != DesktopAppearance.Mode.MANUAL.ordinal
         prefs.edit().apply {
-            if (DesktopAppearance.affectsManualSettings(key)) {
+            if (editingProfile) {
+                val stored = settingsSnapshot()
+                val manual = manualAppearanceSnapshot(stored)
+                for (name in manual.keySet()) {
+                    if (!DesktopAppearance.affectsManualSettings(name) &&
+                        name != SettingsProvider.KEY_BLUR_VIBRANCY) continue
+                    when (val setting = manual.get(name)) {
+                        is Int -> if (setting != stored.get(name)) putInt(name, setting)
+                        is Boolean -> if (setting != stored.get(name)) putBoolean(name, setting)
+                    }
+                }
                 putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal)
             }
             if(key==FolderSettingsKeys.OWN && value==true){
@@ -527,7 +537,7 @@ class MainActivity : AppCompatActivity() {
             previewSettingsEpoch++
             page.removeCallbacks(refreshPreview);page.postDelayed(refreshPreview,160L)
         }
-        if(key==FolderSettingsKeys.OWN || key==SettingsProvider.KEY_DEVELOPER_MODE ||
+        if(editingProfile || key==FolderSettingsKeys.OWN || key==SettingsProvider.KEY_DEVELOPER_MODE ||
             key==WidgetSettings.HUE || key==com.cosmod.launcherglass.util.IconPalette.FOLLOW_WALLPAPER ||
             key in setOf("banner_plate_hue","banner_plate_saturation","banner_plate_brightness"))refreshControls()
         if(key=="coloros_ui_effects" || key=="coloros_feature_background")refreshCatalogStyle()
@@ -3474,11 +3484,25 @@ class MainActivity : AppCompatActivity() {
         if(preview.isAttachedToWindow)preview.postDelayed(capture,1500L)
     }
 
+    private fun settingsSnapshot() = Bundle().apply {
+        for ((key, value) in prefs.all) when (value) {
+            is Boolean -> putBoolean(key, value)
+            is Int -> putInt(key, value)
+        }
+    }
+
+    private fun manualAppearanceSnapshot(stored: Bundle): Bundle {
+        val systemDark = IconPalette.isSystemDark(applicationContext)
+        return DesktopAppearance.copyForManualEdit(stored, DesktopAppearance.read(stored, systemDark), systemDark, darkIcons())
+            .apply { putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal) }
+    }
+
     private fun updateGlassPreview(){
         val preview=glassPreview ?: return
         val screen=glassPreviewScreen ?: return
-        val bundle=Bundle()
-        for((key,value) in prefs.all)when(value){is Boolean->bundle.putBoolean(key,value);is Int->bundle.putInt(key,value)}
+        val stored = settingsSnapshot()
+        val bundle = if (number(DesktopAppearance.MODE) != DesktopAppearance.Mode.MANUAL.ordinal &&
+            previewDraft.keys.any(DesktopAppearance::affectsManualSettings)) manualAppearanceSnapshot(stored) else stored
         previewDraft.forEach {key,value->bundle.putInt(key,value)}
         val bannerDark=renderGlassPreview(preview,screen,bundle)
         if(bannerDark!=null && previewBannerDark!=bannerDark){

@@ -26,6 +26,7 @@ import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.WeakHashMap
@@ -131,6 +132,7 @@ internal object SoftGlassNative {
         private val effects = WeakHashMap<RenderEffect, EffectState>()
         private val nodes = WeakHashMap<RenderNode, Binding>()
         private val drawables = WeakHashMap<Drawable, Surface>()
+        private val rebound = WeakHashMap<RuntimeShader, Pair<Applied, WeakReference<RenderEffect>>>()
         private val sliderMaterial = if (sidebar) null else SoftGlassSliderMaterial(context)
         val panelTargets = SoftGlassPanelTargets({ Surface.CONTROL in profiles }) { canvas, drawable, target ->
             val view = target.view.get() ?: host(drawable) ?: return@SoftGlassPanelTargets
@@ -151,8 +153,13 @@ internal object SoftGlassNative {
         private val tilt = SoftGlassTilt(main, { context }, ::hasVisibleTilt) { x, y ->
             tiltX = x
             tiltY = y
-            drawables.keys.toList().filter { host(it)?.isShown == true }.forEach(Drawable::invalidateSelf)
-            legacyActivities.keys.toList().filter(View::isShown).forEach(View::postInvalidateOnAnimation)
+            for ((drawable, surface) in drawables) {
+                if (profiles[surface]?.let(::tracksTilt) == true && drawable.isVisible &&
+                    host(drawable)?.let { it.isShown && it.windowVisibility == View.VISIBLE } == true) drawable.invalidateSelf()
+            }
+            for (view in legacyActivities.keys) if (view.isShown && view.windowVisibility == View.VISIBLE) {
+                view.postInvalidateOnAnimation()
+            }
         }
 
         private data class EffectState(val shader: RuntimeShader, val state: Applied?)
@@ -331,9 +338,10 @@ internal object SoftGlassNative {
                             apply(shader, state)
                             synchronized(lock) { shaders[shader] = state }
                         }
-                        nodeFields.mapNotNull { it.get(plate) as? RenderNode }.forEach { node ->
+                        for (field in nodeFields) {
+                            val node = field.get(plate) as? RenderNode ?: continue
                             val binding = synchronized(lock) { nodes[node] }
-                            if (binding?.effect?.shader === shader && binding.effect.state != state) rebind(node, binding)
+                            if (binding?.effect?.shader === shader && binding.effect.state != state) rebind(node, binding, state)
                         }
                         if (surface != null && state.profile != null) panelTargets.nativeDrawn()
                         if (surface != null && state.profile != null && rendered.add(state.role))
@@ -402,8 +410,13 @@ internal object SoftGlassNative {
             }
         }
 
-        private fun rebind(node: RenderNode, binding: Binding) {
-            val effect = RenderEffect.createRuntimeShaderEffect(binding.effect.shader, SoftGlassShader.INPUT)
+        private fun rebind(node: RenderNode, binding: Binding, state: Applied) {
+            val shader = binding.effect.shader
+            val cached = rebound[shader]
+            val effect = cached?.second?.get()?.takeIf { cached.first == state }
+                ?: RenderEffect.createRuntimeShaderEffect(shader, SoftGlassShader.INPUT).also {
+                    rebound[shader] = state to WeakReference(it)
+                }
             if (binding.mode == null) binding.setter.invoke(node, effect) else binding.setter.invoke(node, effect, binding.mode)
         }
 

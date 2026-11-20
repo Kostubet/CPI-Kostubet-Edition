@@ -8,12 +8,14 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -103,17 +105,19 @@ internal object DesktopAppearancePanel {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(16), dp(20), dp(18))
         }
-        body.addView(label(labels.getString(R.string.desktop_appearance_title), 21f).apply {
+        body.addView(label(labels.getString(R.string.desktop_appearance_title), 17f).apply {
             typeface = Typeface.DEFAULT_BOLD
             isAccessibilityHeading = true
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(10))
+            setPadding(0, dp(4), 0, dp(16))
         })
-        val icons = IconGlassHook.snapshotPreviewIcons().take(1).ifEmpty {
-            PreviewIcons.readInstalled(host, emptyList(), limit = 1)
-        }
+        val weather = sequenceOf("net.oneplus.weather", "com.coloros.weather2", "com.oplus.weather", "com.coloros.weather.service")
+            .mapNotNull { name -> runCatching { host.packageManager.getApplicationIcon(name) }.getOrNull() }
+            .firstOrNull() ?: labels.getDrawable(R.drawable.ic_nav_light)
+        val icons = listOfNotNull(weather?.let { runCatching { PreviewIcons.fromDrawable(it) }.getOrNull() })
         val previews = mutableMapOf<Mode, GlassPreview>()
         val modeButtons = mutableMapOf<Mode, TextView>()
+        val indicators = mutableMapOf<Mode, View>()
         val themeButtons = mutableMapOf<Theme, TextView>()
         val colorControls = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
         val themeControls = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
@@ -131,7 +135,11 @@ internal object DesktopAppearancePanel {
         fun render(modes: Set<Mode> = previews.keys) {
             colorControls.visibility = if (profile.mode == Mode.TINTED) View.VISIBLE else View.GONE
             themeControls.visibility = if (profile.mode in setOf(Mode.DARK, Mode.CLEAR, Mode.TINTED)) View.VISIBLE else View.GONE
-            for ((mode, button) in modeButtons) highlight(button, mode == profile.mode)
+            for ((mode, button) in modeButtons) {
+                val selected = mode == profile.mode
+                highlight(button, selected)
+                indicators[mode]?.visibility = if (selected) View.VISIBLE else View.INVISIBLE
+            }
             for ((theme, button) in themeButtons) highlight(button, theme == profile.theme)
             for (mode in modes) {
                 val iconView = previews[mode] ?: continue
@@ -158,26 +166,46 @@ internal object DesktopAppearancePanel {
 
         val modes = LinearLayout(context).apply { isBaselineAligned = false }
         for (mode in listOf(Mode.STOCK, Mode.DARK, Mode.CLEAR, Mode.TINTED)) {
-            val card = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            val card = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+            }
             val iconView = GlassPreview(context, systemDark, useDeviceWallpaperColor = false, showWallpaper = false)
                 .apply { setScene(null, icons) }
             previews[mode] = iconView
-            card.addView(iconView, LinearLayout.LayoutParams(-1, dp(58)))
             val select = {
                 profile = profile.copy(mode = mode)
                 render(emptySet())
                 save(DesktopAppearance.MODE, mode.ordinal)
             }
             val choice = button(labels.getString(mode.label), select).apply {
-                textSize = 12f
+                textSize = 11f
                 setSingleLine(false)
                 setMaxLines(2)
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
+            val sample = FrameLayout(context).apply {
+                background = RippleDrawable(ColorStateList.valueOf(0x24ffffff), null,
+                    GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(Color.WHITE) })
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                setOnClickListener { choice.performClick() }
+            }
+            sample.addView(iconView, FrameLayout.LayoutParams(-1, -1))
+            val indicator = ImageView(context).apply {
+                setImageDrawable(labels.getDrawable(R.drawable.ic_check))
+                setColorFilter(Color.WHITE)
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(accent)
+                }
+                setPadding(dp(3), dp(3), dp(3), dp(3))
+            }
+            sample.addView(indicator, FrameLayout.LayoutParams(dp(17), dp(17), Gravity.BOTTOM or Gravity.END))
+            indicators[mode] = indicator
             iconView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            iconView.setOnClickListener { choice.performClick() }
+            card.addView(sample, LinearLayout.LayoutParams(-1, dp(64)))
             modeButtons[mode] = choice
-            card.addView(choice, LinearLayout.LayoutParams(-1, dp(48)))
+            card.addView(choice, LinearLayout.LayoutParams(-1, dp(40)))
             modes.addView(card, LinearLayout.LayoutParams(0, -2, 1f))
         }
         body.addView(modes)

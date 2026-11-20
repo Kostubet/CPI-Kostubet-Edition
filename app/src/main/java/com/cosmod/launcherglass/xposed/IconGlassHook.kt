@@ -51,6 +51,7 @@ object IconGlassHook {
     private val hosts=WeakHashMap<Drawable,WeakReference<View>>()
     private val liveViews=WeakHashMap<View,Boolean>()
     private val pendingIconBackdrops=WeakHashMap<View,Boolean>()
+    private var drawerBakeDeadline = 0L
     private var liveSnapshot=emptyList<WeakReference<View>>()
     private var liveSnapshotDirty=true
     internal fun registeredViews():List<WeakReference<View>> {
@@ -91,6 +92,7 @@ object IconGlassHook {
         val listener=ViewTreeObserver.OnPreDrawListener {
             val current=weak.get()
             var recovered=0
+            drawerBakeDeadline = 0L
             if(current!=null && PrefsHelper.enabled && PrefsHelper.wallpaperEffectsEnabled) {
                 val deferSampling=LiveBlurEngine.deferWorkspaceSampling
                 val liveSampling=!deferSampling && (!PrefsHelper.ltpoIdle || LiveBlurEngine.hasRecentMotion) &&
@@ -645,6 +647,17 @@ object IconGlassHook {
                 // Only the recording canvas may reject its own local content.
                 val sourceIcon=surfaceSource?.let {try {XposedHelpers.callMethod(it,"getIcon") as? Drawable}catch(_:Throwable){null}} ?: identity
                 if(SpecialIconSupport.isContainer(sourceIcon))return false
+                val drawer = owner != null && surfaceSource == null && isDrawerIcon(owner)
+                // Spread first-time icon processing over frames while RecyclerView binds a page.
+                if (drawer && owner != null && owner.isAttachedToWindow && canvas.isHardwareAccelerated &&
+                    layerCache[sourceIcon]?.revision != revision) {
+                    val now = System.nanoTime()
+                    if (drawerBakeDeadline == 0L) drawerBakeDeadline = now + 2_000_000L
+                    else if (now >= drawerBakeDeadline) {
+                        owner.postInvalidateOnAnimation()
+                        return false
+                    }
+                }
                 val nativeParts=cachedLayers(sourceIcon) ?: return false
                 // Native drag preview Picture: leave this plate's footprint
                 // empty and draw the same live material inside the DragView.
@@ -672,7 +685,7 @@ object IconGlassHook {
                 if(a!=null && bitmap!=null && !capture && !inTransition)anchors[bitmap]=a
                 if(LiveBlurEngine.isWorkspaceScrolling && scrollDrawLogs++<24)
                     GlassLogger.i("MaterialEngine","Scroll sample: host=${owner?.javaClass?.simpleName}, anchor=$a")
-                if(surfaceSource==null && a!=null)NativeSurfaceLive.prewarm(parts.plateMaskBitmap.width,a.screenW)
+                if(surfaceSource==null && a!=null && !drawer)NativeSurfaceLive.prewarm(parts.plateMaskBitmap.width,a.screenW)
                 val materialAlpha=drawable.alpha
                 if(NativeSurfaceLive.recordingMaterial){
                     val materialBounds=Rect(bounds)

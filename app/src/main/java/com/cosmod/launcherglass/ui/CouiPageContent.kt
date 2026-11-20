@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import com.cosmod.launcherglass.ui.onextbox.LocalChromeNativeBlurEnabled
 import io.github.suqi8.coui.kmp.basic.Scaffold
 import io.github.suqi8.coui.kmp.effect.LocalCOUIMaterialEffectEnabled
@@ -28,6 +29,7 @@ internal fun AppCompatActivity.setCouiPageContent(body: View, dark: Boolean, acc
             COUITheme(colors = colors) {
                 val effects = couiMaterialEnabled(context)
                 CompositionLocalProvider(
+                    LocalNavigationEventDispatcherOwner provides this@setCouiPageContent,
                     LocalCOUIMaterialEffectEnabled provides effects,
                     LocalChromeNativeBlurEnabled provides effects,
                 ) {

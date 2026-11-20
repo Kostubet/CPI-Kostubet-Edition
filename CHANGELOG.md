@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 430
+
+- Исправлено падение «Функций» при запуске поиска COUI. Обновлены экран обновлений и нижняя панель, убраны лишние обводки карточек, добавлен мягкий отскок меню выбора COUI 2.0.
+- В «Оформлении» все варианты показаны на системной иконке погоды. Ручное изменение цвета сохраняет выбранный профиль за основу.
+- Зимние залпы стартуют из разных частей баннера. Последний раскрывается в центре экрана большим золотым салютом.
+- Подложки восстанавливают образец обоев после сброса графических слоёв. Подготовка иконок меню приложений распределена между кадрами. Стекло шторки и боковой панели переиспользует эффекты и реже перерисовывается.
+
 ### Сборка 429
 
 - Экраны CPI, Haptic Studio и обновлений используют общий Scaffold COUI. Обновлены поиск с кнопкой отмены, группировка строк и оформление карточек.
@@ -163,6 +170,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 430
+
+- Fixed a crash when the Features tab initializes COUI search. Updated the Updates screen and floating tab bar, removed extra card borders, and added a gentle spring to COUI 2.0 menus.
+- Desktop Appearance uses the system Weather icon for all samples. Manual color edits start from the active profile.
+- Winter fireworks launch from different parts of the banner, ending with a large golden burst at the center of the screen.
+- Icon plates resample wallpaper after graphics layers are discarded. The app drawer spreads first-time icon processing across frames. The shades and sidebar reuse effects and redraw less often.
 
 ### Build 429
 

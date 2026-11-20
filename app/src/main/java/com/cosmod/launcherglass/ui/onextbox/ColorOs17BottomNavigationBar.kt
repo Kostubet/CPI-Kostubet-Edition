@@ -347,6 +347,7 @@ internal fun ColorOs17BottomNavigationBar(
                         context = context,
                         darkTheme = darkTheme,
                         fallbackColor = fallbackColor.toArgb(),
+                        edgeOpacity = .72f,
                     )
                 },
                 update = { view ->

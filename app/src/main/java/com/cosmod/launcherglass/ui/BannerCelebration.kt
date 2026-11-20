@@ -31,7 +31,13 @@ import kotlin.random.Random
 internal class BannerCelebration(context:Context):View(context) {
     private data class Spark(val vx:Float,val vy:Float,val size:Float,val color:Int,val phase:Float)
     private data class Tap(val amplitude:Int,val durationMs:Long)
-    private data class Burst(val time:Float,val x:Float,val y:Float,val color:Int,val tap:Tap?,val sparks:Array<Spark>)
+    private data class Burst(
+        val time: Float, val x: Float, val y: Float, val color: Int, val tap: Tap?,
+        val sparks: Array<Spark>, val launchX: Float, val launchY: Float, val finale: Boolean,
+    ) {
+        val flight get() = if (finale) .46f else .30f
+        val lifetime get() = if (finale) 1.85f else 1.32f
+    }
 
     private val density=resources.displayMetrics.density
     private val random=Random(136)
@@ -50,8 +56,15 @@ internal class BannerCelebration(context:Context):View(context) {
         WinterMelody.notes.mapIndexed { index, note ->
             val x = .17f + .66f * ((index * 5 + 3) % 11) / 10f
             val y = .19f + .29f * ((index * 3 + 2) % 7) / 6f
-            burst(note.ms / 1000f, x, y, palette[index % palette.size], Color.WHITE,
-                null, if (index == WinterMelody.notes.lastIndex) 40 else 22, 52f + 36f * note.strength)
+            val finale = index == WinterMelody.notes.lastIndex
+            burst(
+                note.ms / 1000f, if (finale) .5f else x, if (finale) .5f else y,
+                if (finale) 0xffffce80.toInt() else palette[index % palette.size], Color.WHITE,
+                null, if (finale) 72 else 22, if (finale) 180f else 52f + 36f * note.strength,
+                .10f + .80f * ((index * 7 + 1) % 11) / 10f,
+                .19f + .62f * ((index * 3 + 1) % 5) / 4f,
+                finale,
+            )
         }.toTypedArray()
     }
     private var bursts=originalBursts
@@ -64,6 +77,8 @@ internal class BannerCelebration(context:Context):View(context) {
     private var seconds=0f
     private var sourceX=0f
     private var sourceY=0f
+    private var sourceWidth=0
+    private var sourceHeight=0
     private val sourceLocation=IntArray(2)
     private val overlayLocation=IntArray(2)
     private val slop=ViewConfiguration.get(context).scaledTouchSlop
@@ -79,7 +94,7 @@ internal class BannerCelebration(context:Context):View(context) {
                 val burst=bursts[nextBurst++]
                 if(seconds-burst.time<.09f)burst.tap?.let(::vibrate)
             }
-            if(seconds < bursts.last().time + 1.32f){
+            if(seconds < bursts.last().time + bursts.last().lifetime){
                 invalidate()
                 postOnAnimation(this)
             }else visibility=INVISIBLE
@@ -91,14 +106,17 @@ internal class BannerCelebration(context:Context):View(context) {
         visibility=INVISIBLE
     }
 
-    private fun burst(time:Float,x:Float,y:Float,main:Int,accent:Int,tap:Tap?,count:Int,radius:Float):Burst {
+    private fun burst(
+        time: Float, x: Float, y: Float, main: Int, accent: Int, tap: Tap?, count: Int, radius: Float,
+        launchX: Float = .5f, launchY: Float = .6f, finale: Boolean = false,
+    ): Burst {
         val sparks=Array(count){index->
             val angle=(index+random.nextFloat()*.58f)*2*PI/count
             val velocity=radius*(if(index%3==0).48f+random.nextFloat()*.18f else .76f+random.nextFloat()*.24f)
             Spark(cos(angle).toFloat()*velocity,sin(angle).toFloat()*velocity,1f+random.nextFloat()*1.5f,
                 if(index%4==0)accent else main,random.nextFloat()*7f)
         }
-        return Burst(time,x,y,main,tap,sparks)
+        return Burst(time, x, y, main, tap, sparks, launchX, launchY, finale)
     }
 
     fun onBannerTouch(anchor:View,event:MotionEvent){
@@ -138,25 +156,28 @@ internal class BannerCelebration(context:Context):View(context) {
         winterPlaying=WinterEffects.melodyEnabled(context)
         anchor.getLocationInWindow(sourceLocation)
         getLocationInWindow(overlayLocation)
-        sourceX=sourceLocation[0]-overlayLocation[0]+anchor.width*.5f
-        sourceY=sourceLocation[1]-overlayLocation[1]+anchor.height*.6f
+        sourceX=sourceLocation[0]-overlayLocation[0].toFloat()
+        sourceY=sourceLocation[1]-overlayLocation[1].toFloat()
+        sourceWidth=anchor.width
+        sourceHeight=anchor.height
         if (winterPlaying) {
-            winter.play { startAnimation(winterBursts) }
+            val leadMs = if (ValueAnimator.areAnimatorsEnabled()) 300L else 0L
+            winter.play(leadMs) { startAnimation(winterBursts, leadMs) }
         } else {
             playOriginalAudio()
             startAnimation(originalBursts)
         }
     }
 
-    private fun startAnimation(sequence: Array<Burst>) {
+    private fun startAnimation(sequence: Array<Burst>, leadMs: Long = 0L) {
         if (!ValueAnimator.areAnimatorsEnabled() || !isAttachedToWindow) return
         bursts = sequence
         vibrator=if(!winterPlaying && Settings.System.getInt(context.contentResolver,Settings.System.HAPTIC_FEEDBACK_ENABLED,1)==1)
             context.getSystemService(VibratorManager::class.java)?.defaultVibrator?.takeIf {it.hasVibrator()}
             else null
-        seconds=0f
+        seconds=-leadMs/1000f
         nextBurst=0
-        startedAt=SystemClock.uptimeMillis()
+        startedAt=SystemClock.uptimeMillis()+leadMs
         visibility=VISIBLE
         postOnAnimation(update)
     }
@@ -185,15 +206,17 @@ internal class BannerCelebration(context:Context):View(context) {
             val centerX=width*burst.x
             val centerY=height*burst.y
             if(time<0f){
-                if(time>=-.38f)drawRocket(canvas,burst,centerX,centerY,(1f+time/.38f).coerceIn(0f,1f))
+                if(time>=-burst.flight)drawRocket(canvas,burst,centerX,centerY,(1f+time/burst.flight).coerceIn(0f,1f))
                 continue
             }
-            if(time>1.32f)continue
-            val progress=time/1.32f
+            if(time>burst.lifetime)continue
+            val progress=time/burst.lifetime
             val fade=(1f-progress)*(1f-progress)
-            if(time<.27f){
-                val flare=1f-time/.27f
-                val radius=(19f+time*170f)*density
+            val scale = if (burst.finale) minOf(density, width / 390f, height / 460f) else density
+            val flashTime = if (burst.finale) .42f else .27f
+            if(time<flashTime){
+                val flare=1f-time/flashTime
+                val radius=(19f+time*170f)*scale*(if (burst.finale) 1.8f else 1f)
                 glowMatrix.setScale(radius,radius)
                 glowMatrix.postTranslate(centerX,centerY)
                 glow.setLocalMatrix(glowMatrix)
@@ -202,9 +225,10 @@ internal class BannerCelebration(context:Context):View(context) {
                 canvas.drawCircle(centerX,centerY,radius,paint)
                 paint.shader=null
             }
-            val distance=travel(progress)*density
+            if (burst.finale) drawFinaleRing(canvas, centerX, centerY, progress, scale, fade)
+            val distance=travel(progress)*scale
             val previous=(progress-.066f).coerceAtLeast(0f)
-            val tail=travel(previous)*density
+            val tail=travel(previous)*scale
             val drop=48f*progress*progress*density
             val tailDrop=48f*previous*previous*density
             for(spark in burst.sparks){
@@ -213,11 +237,11 @@ internal class BannerCelebration(context:Context):View(context) {
                 val shimmer=if(progress<.38f)1f else .76f+.24f*cos(spark.phase+time*29f)
                 paint.color=spark.color
                 paint.alpha=(218f*fade*shimmer).toInt()
-                paint.strokeWidth=spark.size*density*(.55f+.45f*fade)
+                paint.strokeWidth=spark.size*scale*(.55f+.45f*fade)
                 canvas.drawLine(centerX+spark.vx*tail,centerY+spark.vy*tail+tailDrop,x,y,paint)
                 paint.color=Color.WHITE
                 paint.alpha=(239f*fade*shimmer).toInt()
-                canvas.drawCircle(x,y,spark.size*density*.52f,paint)
+                canvas.drawCircle(x,y,spark.size*scale*.52f,paint)
             }
         }
     }
@@ -227,18 +251,41 @@ internal class BannerCelebration(context:Context):View(context) {
         return 1f-remaining*remaining*remaining
     }
 
+    private fun drawFinaleRing(canvas: Canvas, x: Float, y: Float, progress: Float, scale: Float, fade: Float) {
+        paint.style = Paint.Style.STROKE
+        paint.color = 0xffffdc9c.toInt()
+        paint.alpha = (156 * fade * (1f - progress)).toInt()
+        paint.strokeWidth = 1.6f * scale
+        canvas.drawCircle(x, y, (12f + 119f * travel(progress)) * scale, paint)
+        paint.style = Paint.Style.FILL
+        paint.color = Color.WHITE
+        paint.alpha = (215 * fade).toInt()
+        for (index in 0 until 8) {
+            val angle = index * PI / 4
+            val length = (8f + 88f * travel(progress)) * scale
+            val sx = x + cos(angle).toFloat() * length
+            val sy = y + sin(angle).toFloat() * length
+            val arm = (2f + 3f * fade) * scale
+            paint.strokeWidth = 1.1f * scale
+            canvas.drawLine(sx - arm, sy, sx + arm, sy, paint)
+            canvas.drawLine(sx, sy - arm, sx, sy + arm, paint)
+        }
+    }
+
     private fun drawRocket(canvas:Canvas,burst:Burst,x:Float,y:Float,t:Float){
         val progress=t*t*(3f-2f*t)
-        val headX=sourceX+(x-sourceX)*progress
-        val headY=sourceY+(y-sourceY)*progress
+        val startX=sourceX+sourceWidth*burst.launchX
+        val startY=sourceY+sourceHeight*burst.launchY
+        val headX=startX+(x-startX)*progress
+        val headY=startY+(y-startY)*progress
         val trail=(progress-.14f).coerceAtLeast(0f)
         paint.color=burst.color
         paint.alpha=(180f*t).toInt()
-        paint.strokeWidth=1.9f*density
-        canvas.drawLine(sourceX+(x-sourceX)*trail,sourceY+(y-sourceY)*trail,headX,headY,paint)
+        paint.strokeWidth=(if (burst.finale) 3.3f else 1.9f)*density
+        canvas.drawLine(startX+(x-startX)*trail,startY+(y-startY)*trail,headX,headY,paint)
         paint.color=Color.WHITE
         paint.alpha=(235f*t).toInt()
-        canvas.drawCircle(headX,headY,2.1f*density,paint)
+        canvas.drawCircle(headX,headY,(if (burst.finale) 3.4f else 2.1f)*density,paint)
     }
 
     private fun releaseAudio(){

@@ -32,6 +32,7 @@ internal class ColorOsBottomBarMaterialView(
     context: Context,
     darkTheme: Boolean,
     fallbackColor: Int,
+    private val edgeOpacity: Float = 1f,
 ) : View(context) {
     private val density = resources.displayMetrics.density
     private val fallbackPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -58,6 +59,8 @@ internal class ColorOsBottomBarMaterialView(
     private var nativeCornerRadius = Float.NaN
 
     init {
+        fallbackEdgePaint.alpha = (255 * edgeOpacity).roundToInt()
+        colorOsEdgePaint.alpha = (255 * edgeOpacity).roundToInt()
         setWillNotDraw(false)
         clipToOutline = true
         outlineProvider = object : ViewOutlineProvider() {
@@ -179,7 +182,7 @@ internal class ColorOsBottomBarMaterialView(
 
         // TYPE_FRAMEWORK_CAPSULE_3, exactly as BaseBottomFloatingMenuView.V() applies it in MMS.
         val shadowFadeIn = if (darkTheme) 0.03f else 0.1f
-        val edgeAlpha = if (darkTheme) 0.8f else 0.25f
+        val edgeAlpha = (if (darkTheme) 0.8f else 0.25f) * edgeOpacity
         val edgeParams = edgeParamsClass.getConstructor(
             Int::class.javaPrimitiveType,
             Float::class.javaPrimitiveType,

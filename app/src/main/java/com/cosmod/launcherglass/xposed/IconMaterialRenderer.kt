@@ -179,6 +179,8 @@ object IconMaterialRenderer {
     private fun ensureContents(sampler:Sampler):Boolean {
         if(sampler.node.hasDisplayList())return false
         sampler.folderPanel=null
+        sampler.source=null
+        sampler.worldValid=false
         val canvas=sampler.node.beginRecording(sampler.node.width,sampler.node.height)
         canvas.drawColor(if(sampler.style.folderBackdrop)Color.TRANSPARENT else Color.BLACK)
         sampler.node.endRecording()
@@ -473,8 +475,8 @@ object IconMaterialRenderer {
                 // Bake permanent tint and shading once; the moving GPU shader
                 // then samples only wallpaper and alpha mask.
                 val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-                if (tintAlpha > 0) {
-                    val tint = (tintAlpha.coerceIn(0, 255) shl 24) or (color and 0x00ffffff)
+                if (key.opacity > 0) {
+                    val tint = (key.opacity.coerceIn(0, 255) shl 24) or (key.color and 0x00ffffff)
                     paint.colorFilter = PorterDuffColorFilter(tint, PorterDuff.Mode.SRC_IN)
                     target.drawBitmap(mask, null, Rect(0, 0, width, height), paint)
                     paint.colorFilter = null

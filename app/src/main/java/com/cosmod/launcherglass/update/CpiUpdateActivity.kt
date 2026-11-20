@@ -11,37 +11,43 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.ScrollView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.CouiAction
 import com.cosmod.launcherglass.ui.CouiGroup
-import com.cosmod.launcherglass.ui.CouiSlot
+import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.ui.UiLanguage
-import com.cosmod.launcherglass.ui.setCouiPageContent
+import io.github.suqi8.coui.kmp.basic.Scaffold
+import io.github.suqi8.coui.kmp.basic.SmallTopAppBar
 import io.github.suqi8.coui.kmp.basic.Icon
 import io.github.suqi8.coui.kmp.basic.IconButton
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
+import io.github.suqi8.coui.kmp.theme.darkColorScheme
+import io.github.suqi8.coui.kmp.theme.lightColorScheme
 
 class CpiUpdateActivity : AppCompatActivity() {
     private var release by mutableStateOf<CpiReleases.Release?>(null)
@@ -64,48 +70,72 @@ class CpiUpdateActivity : AppCompatActivity() {
     override fun attachBaseContext(newBase: Context) = super.attachBaseContext(UiLanguage.wrap(newBase))
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        delegate.localNightMode = when (getSharedPreferences(SettingsProvider.PREFS_NAME, MODE_PRIVATE).getInt("ui_theme", 0)) {
+            1 -> AppCompatDelegate.MODE_NIGHT_NO
+            2 -> AppCompatDelegate.MODE_NIGHT_YES
+            else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        }
         super.onCreate(savedInstanceState)
         val dark = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val canvas = ContextCompat.getColor(this, R.color.cpi_ui_background)
-        val accent = ContextCompat.getColor(this, android.R.color.system_accent1_400)
-        val screen = CouiSlot(this, dark, accent) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { finish() }) {
-                        Icon(painterResource(R.drawable.ic_arrow_back), getString(R.string.ui_cancel),
-                            tint = COUITheme.colorScheme.labelPrimary)
+        val accent = Color(ContextCompat.getColor(this, android.R.color.system_accent1_400))
+        val panel = Color(ContextCompat.getColor(this, R.color.cpi_ui_panel))
+        val colors = if (dark) darkColorScheme(primary = accent, surface = panel)
+            else lightColorScheme(primary = accent, surface = panel)
+        val screen = ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                COUITheme(colors = colors) {
+                    Scaffold(
+                        modifier = Modifier.fillMaxSize(),
+                        containerColor = Color(canvas),
+                        topBar = {
+                            SmallTopAppBar(
+                                title = getString(R.string.cpi_updates_title),
+                                color = Color(canvas),
+                                showDivider = false,
+                                navigationIcon = {
+                                    IconButton(onClick = { onBackPressedDispatcher.onBackPressed() }) {
+                                        Icon(painterResource(R.drawable.ic_arrow_back), getString(R.string.ui_back),
+                                            tint = COUITheme.colorScheme.labelPrimary)
+                                    }
+                                },
+                            )
+                        },
+                    ) { insets ->
+                        Column(
+                            Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets)
+                                .verticalScroll(rememberScrollState()).padding(top = 12.dp, bottom = 12.dp),
+                        ) {
+                            CouiGroup {
+                                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(status, style = COUITheme.textStyles.headlineS,
+                                        color = COUITheme.colorScheme.labelPrimary)
+                                    Text(getString(R.string.cpi_updates_current, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
+                                        style = COUITheme.textStyles.bodyM, color = COUITheme.colorScheme.labelSecondary)
+                                    if (release != null) {
+                                        CouiAction(getString(R.string.cpi_updates_install), primary = true,
+                                            onClick = ::install, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                                    } else {
+                                        CouiAction(getString(R.string.cpi_updates_check), primary = false,
+                                            onClick = ::check, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                                    }
+                                }
+                            }
+                            CouiGroup {
+                                SwitchPreference(checked = alerts, onCheckedChange = ::toggleAlerts,
+                                    title = getString(R.string.cpi_updates_notifications))
+                            }
+                        }
                     }
-                    Text(getString(R.string.cpi_updates_title), style = COUITheme.textStyles.headlineS)
-                }
-                CouiGroup {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text(getString(R.string.cpi_updates_current, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
-                            style = COUITheme.textStyles.bodyM, color = COUITheme.colorScheme.labelSecondary)
-                        Text(status, style = COUITheme.textStyles.bodyL)
-                        if (release != null) CouiAction(getString(R.string.cpi_updates_install), primary = true,
-                            onClick = ::install, modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                        CouiAction(getString(R.string.cpi_updates_check), primary = false,
-                            onClick = ::check, modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                    }
-                }
-                CouiGroup {
-                    SwitchPreference(checked = alerts, onCheckedChange = ::toggleAlerts,
-                        title = getString(R.string.cpi_updates_notifications))
                 }
             }
         }
-        val scroller = ScrollView(this).apply { setBackgroundColor(canvas); addView(screen) }
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        setCouiPageContent(scroller, dark, accent)
-        WindowCompat.getInsetsController(window, scroller).apply {
+        setContentView(screen)
+        WindowCompat.getInsetsController(window, screen).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(scroller) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
         }
         check()
     }

@@ -15,8 +15,9 @@ internal class WinterMelodyPlayback(private val context: Context) {
     private var motor: HapticMotor? = null
     private var slide: (() -> Unit)? = null
     private var cursor = WinterMelody.Cursor()
+    private var started = false
     val playing get() = player != null
-    val positionMs: Int? get() = player?.let { runCatching { it.currentPosition }.getOrNull() }
+    val positionMs: Int? get() = player?.takeIf { started }?.let { runCatching { it.currentPosition }.getOrNull() }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -29,7 +30,7 @@ internal class WinterMelodyPlayback(private val context: Context) {
         }
     }
 
-    fun play(onStarted: () -> Unit) {
+    fun play(leadMs: Long, onPrepared: () -> Unit) {
         stop()
         if (Settings.System.getInt(context.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 1) {
             motor = runCatching { HapticMotor(context, touchFeedback = true) }.getOrNull()
@@ -43,12 +44,17 @@ internal class WinterMelodyPlayback(private val context: Context) {
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
         audio.setOnPreparedListener {
             if (player !== it) return@setOnPreparedListener
-            runCatching {
-                cursor = WinterMelody.Cursor()
-                it.start()
-                onStarted()
-                handler.post(tick)
-            }.onFailure { stop() }
+            onPrepared()
+            val start = Runnable {
+                if (player !== audio) return@Runnable
+                runCatching {
+                    cursor = WinterMelody.Cursor()
+                    audio.start()
+                    started = true
+                    handler.post(tick)
+                }.onFailure { stop() }
+            }
+            if (leadMs > 0) handler.postDelayed(start, leadMs) else start.run()
         }
         audio.setOnCompletionListener { if (player === it) stop() }
         audio.setOnErrorListener { p, _, _ -> if (player === p) stop(); true }
@@ -64,6 +70,7 @@ internal class WinterMelodyPlayback(private val context: Context) {
         handler.removeCallbacksAndMessages(null)
         val audio = player
         player = null
+        started = false
         audio?.setOnCompletionListener(null)
         audio?.setOnErrorListener(null)
         audio?.setOnPreparedListener(null)
