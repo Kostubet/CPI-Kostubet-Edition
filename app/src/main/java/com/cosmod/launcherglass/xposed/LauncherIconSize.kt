@@ -3,6 +3,7 @@ package com.cosmod.launcherglass.xposed
 import android.animation.ValueAnimator
 import android.content.res.TypedArray
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
@@ -114,8 +115,8 @@ internal object LauncherIconSize {
 
     fun onNativeIconReturned(view: View) {
         if (!large && largeProgress == 0f) return
-        if (view in workspaceViews) scaleWorkspaceIcon?.invoke(view)
         if (view in containers) runCatching { updateContainer(view) }
+        else scaleWorkspaceIcon?.invoke(view)
     }
 
     private const val SHORTCUT="com.android.launcher3.viewcontainer.ShortcutContainer"
@@ -227,6 +228,29 @@ internal object LauncherIconSize {
                 scaleAround(view, ratio, iconBounds.exactCenterX(), iconBounds.exactCenterY())
             }
             scaleWorkspaceIcon = { view -> runCatching { resizeWorkspaceIcon(view) } }
+            val floating = XposedHelpers.findClassIfExists("com.android.launcher3.views.FloatingIconView", loader)
+            floating?.declaredMethods?.firstOrNull {
+                it.name == "getLocationBoundsForView" && java.lang.reflect.Modifier.isStatic(it.modifiers) &&
+                    it.parameterTypes.drop(1) == listOf(View::class.java, Boolean::class.javaPrimitiveType,
+                        RectF::class.java, Rect::class.java)
+            }?.let { method ->
+                ModuleHooks.hookMethod(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (param.hasThrowable() || param.args[2] != false || workspaceScale == 1f) return
+                        val view = param.args[1] as? View ?: return
+                        if (!type.isInstance(view)) return
+                        val bounds = param.args[3] as? RectF ?: return
+                        if (bounds.isEmpty) return
+                        val scale = scales[view] ?: return
+                        if (scale.nativeX <= 0f || scale.nativeY <= 0f) return
+                        // ColorOS omits View matrices when it computes the closing target.
+                        // Reapply only CPI's scale so the flying icon lands at its visible size.
+                        val extraX = (scale.appliedX / scale.nativeX - 1f) * bounds.width() / 2f
+                        val extraY = (scale.appliedY / scale.nativeY - 1f) * bounds.height() / 2f
+                        bounds.inset(-extraX, -extraY)
+                    }
+                })
+            }
             fun trackWorkspaceIcon(view: View) {
                 if (!isWorkspaceIcon(view) || hasScaledContainer(view, targets)) return
                 labelViews[view] = true

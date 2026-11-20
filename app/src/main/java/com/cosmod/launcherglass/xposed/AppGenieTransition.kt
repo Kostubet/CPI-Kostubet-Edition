@@ -26,7 +26,7 @@ internal object AppGenieTransition {
         val iconWidth: Double, val row: Double,
         val opening: Boolean, val time: Long,
         val droplet: Float, val swipe: Boolean,
-        val config: Ba31kAppTransitions.Config, val nativeAlpha: Float,
+        val config: Ba31kAppTransitions.Config,
         var radiusTarget: Any? = null, var replayMatrix: FloatArray? = null
     )
     private val warped = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<SurfaceControl, Boolean>()))
@@ -61,7 +61,7 @@ internal object AppGenieTransition {
 
     fun usesProjectedIcon(): Boolean {
         val config = Ba31kAppTransitions.config ?: return false
-        return installed && layers?.iconInstalled == true && config.projectsWindow &&
+        return installed && layers?.supportsIconProjection() == true && config.projectsWindow &&
             (config.opening || config.closing) && ValueAnimator.areAnimatorsEnabled()
     }
 
@@ -102,9 +102,6 @@ internal object AppGenieTransition {
             }.apply { isAccessible = true }
             val anchorHeight = params.getDeclaredField("d").apply { isAccessible = true }
             check(anchorHeight.type == Float::class.javaPrimitiveType)
-            val windowAlpha = params.declaredFields.singleOrNull {
-                it.name == "b" && it.type == Float::class.javaPrimitiveType
-            }?.apply { isAccessible = true }
             val setMatrix = contract.surface.matrix
             val setPerspective = contract.surface.perspective
             val surface = builder.declaredFields.single {
@@ -218,8 +215,7 @@ internal object AppGenieTransition {
                         if (!config.projectsWindow && droplet == 0f) return
                         frame.set(Frame(matrix.get(p.thisObject) as Matrix, crop.get(p.thisObject) as Rect,
                             RectF(rect), primary, p.args[3], p.args[4], 1.0 - progress, (fromX + 1.0 - iconWidth) * .5,
-                            iconWidth.toDouble(), fromY.toDouble(), opening, time, droplet, swipe, config,
-                            windowAlpha?.getFloat(parameters) ?: Float.NaN))
+                            iconWidth.toDouble(), fromY.toDouble(), opening, time, droplet, swipe, config))
                     } catch (error: Throwable) {
                         GlassLogger.limited("AppGenieTransition", "frame") { "Native transition retained: $error" }
                     }
@@ -277,7 +273,7 @@ internal object AppGenieTransition {
                                 FloatArray(16) { i -> identity[i] + (matrix[i] - identity[i]) * weight.toFloat() }
                             }
                             val appMatrix = iconPerspective?.let { FloatArray(9).also(current.native::getValues) }
-                            GenieTransitionLayers.SharedProjection(iconPerspective, appMatrix, fraction, current.nativeAlpha)
+                            GenieTransitionLayers.SharedProjection(iconPerspective, appMatrix, pose, weight.toFloat())
                         } else null
 
                         transitionLayers.stageWindow(current.transaction, current.screen, current.time, overlap)

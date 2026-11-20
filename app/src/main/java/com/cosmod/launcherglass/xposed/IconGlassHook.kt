@@ -421,7 +421,7 @@ object IconGlassHook {
                 }else IconBitmapProcessor.previewLayers(source,100) ?: continue
                 try {
                     output.add(PreviewIcons.Icon(copy(source),
-                        ProcessedIcon(copy(parts.glyphBitmap), copy(parts.plateMaskBitmap), parts.bgColor)))
+                        parts.copy(glyphBitmap = copy(parts.glyphBitmap), plateMaskBitmap = copy(parts.plateMaskBitmap))))
                     packageOf(view)?.let(found::add)
                 }finally {parts.glyphBitmap.recycle();parts.plateMaskBitmap.recycle()}
             }finally {source.recycle()}
@@ -503,8 +503,7 @@ object IconGlassHook {
     }
     private fun render(canvas:Canvas,bounds:Rect,parts:ProcessedIcon,a:Anchor?,wallpaper:Bitmap?,binding:IconMaterialRenderer.Binding?=null) {
         if (PrefsHelper.desktopLightIconGlass) {
-            GlyphMaterialRenderer.draw(canvas, bounds, parts.glyphBitmap,
-                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            drawIconGlyph(canvas, bounds, parts)
             return
         }
         // The native surface can be screen-wide. Reuse the desktop material
@@ -557,9 +556,16 @@ object IconGlassHook {
             if(PrefsHelper.iconStroke && PrefsHelper.strokeOpacity>0){
                 target.drawBitmap(GlassGeometry.rim(plateMask),null,local,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
             }
-            GlyphMaterialRenderer.draw(target,local,parts.glyphBitmap,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            drawIconGlyph(target, local, parts)
         }
     }
+    private fun drawIconGlyph(canvas: Canvas, bounds: Rect, parts: ProcessedIcon) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val glyph = WallpaperHelper.forCanvas(parts.glyphBitmap, canvas)
+        if (parts.artwork) canvas.drawBitmap(glyph, null, bounds, paint)
+        else GlyphMaterialRenderer.draw(canvas, bounds, glyph, paint)
+    }
+
     private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled && !PrefsHelper.desktopLightIconGlass &&
         (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) &&
         (a?.drawer!=true || PrefsHelper.drawerBlurEnabled) && a?.openFolder!=true
@@ -840,8 +846,11 @@ object IconGlassHook {
             val original=floating.declaredFields.firstOrNull {it.name=="mOriginalIcon"}?.apply {isAccessible=true}
             if(original!=null)for(method in listOf("onAnimationEnd","fastFinish")){
                 ModuleHooks.hookAllMethods(floating,method,object:XC_MethodHook(){
-                    override fun beforeHookedMethod(param:MethodHookParam){
-                        onNativeIconReturned(original.get(param.thisObject) as? View)
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        param.setObjectExtra("cpiReturningIcon", original.get(param.thisObject) as? View)
+                    }
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!param.hasThrowable()) onNativeIconReturned(param.getObjectExtra("cpiReturningIcon") as? View)
                     }
                 })
             }

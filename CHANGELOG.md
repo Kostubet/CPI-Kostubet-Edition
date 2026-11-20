@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 437
+
+- Карточка «Оформление» использует общую механику растягивания COUI. Угловые кнопки используют материал, тень и подсветку панели COUI. Действия под цветовыми шкалами остаются компактными иконками с откликом на касание.
+- Образцы «Погоды» точнее передают тёмный и однотонный стили. Исправлено отделение фона классических иконок, из-за которого на рабочем столе и в доке появлялись полосы.
+- При входе и выходе иконка сохраняет штатное затухание и получает деформацию вокруг своего центра, если общая проекция выходит за её границы. После закрытия восстанавливается настроенный размер значка.
+
 ### Сборка 436
 
 - «Оформление» тянется в любую сторону и плавнее отпружинивает по кривой COUI. Свечение следует за пальцем, угловые кнопки светлее, а три действия под ползунками отображаются иконками.
@@ -209,6 +215,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 437
+
+- The Appearance sheet now uses the shared COUI stretch motion. Its corner controls use the COUI toolbar material, shadow, and touch lighting. Color actions retain their compact icon layout with touch feedback.
+- The Weather samples more closely represent dark and tinted styles. Updated classic icon background separation to remove bands from icons on the desktop and in the dock.
+- App transitions retain the launcher’s icon fade and use centered deformation when shared perspective exceeds the icon bounds. The configured icon size is restored after the launcher hands the icon back.
 
 ### Build 436
 

@@ -6,7 +6,7 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.view.SurfaceControl
 import android.view.View
-import com.cosmod.launcherglass.util.Ba31kGenieMotion
+import com.cosmod.launcherglass.util.AppWindowDeformation
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -28,8 +28,6 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
         val transaction: Any, val time: Long,
     ) {
         var builder: Any? = null
-        var nativeAlpha: Float? = null
-        var shared: SharedProjection? = null
     }
     private data class IconTarget(val pass: IconPass, val builder: Any, val crop: Rect)
     private data class Window(
@@ -38,15 +36,10 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
     )
     private data class ViewIcon(val view: View, val screen: RectF, val time: Long)
     data class Replay(val matrix: FloatArray, val time: Long)
-    data class SharedProjection(val perspective: FloatArray?, val nativeMatrix: FloatArray?,
-                                val openFraction: Double, val nativeAlpha: Float) {
-        fun iconAlpha(alpha: Float): Float {
-            if (!nativeAlpha.isFinite() || !alpha.isFinite()) return alpha
-            val overlap = Ba31kGenieMotion.ease((openFraction - .11) / .30)
-            val windowVisible = Ba31kGenieMotion.ease((nativeAlpha - .15) / .70)
-            return (alpha * (1 - overlap * windowVisible)).toFloat()
-        }
-    }
+    data class SharedProjection(
+        val perspective: FloatArray?, val nativeMatrix: FloatArray?,
+        val deformation: AppWindowDeformation?, val weight: Float,
+    )
 
     private val passes = ThreadLocal<IconPass>()
     private val icons = ThreadLocal<IconTarget>()
@@ -60,12 +53,13 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
     private data class DrawPose(val matrix: Matrix, val time: Long)
     private val viewPoses = Collections.synchronizedMap(WeakHashMap<View, DrawPose>())
     private val drawingView = ThreadLocal<View>()
-    private var alphaSetter: Method? = null
     private val frameDepth = ThreadLocal<Int>()
     private val projectedFrames = java.util.concurrent.atomic.AtomicLong()
     fun projectedFrames() = projectedFrames.get()
     var iconInstalled = false
         private set
+    private var viewIconInstalled = false
+    fun supportsIconProjection() = iconInstalled || viewIconInstalled
     var replayInstalled = false
         private set
 
@@ -133,15 +127,6 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
             val count = projectedFrames.incrementAndGet()
             if (count == 1L) GlassLogger.i("AppGenieTransition", "Icon uses the window's deformation")
         }
-        icon.pass.shared = shared
-        icon.pass.nativeAlpha?.let { alpha ->
-            val factor = shared.iconAlpha(alpha)
-            if (factor != alpha) {
-                alphaSetter?.let { setter ->
-                    XposedBridge.invokeOriginalMethod(setter, icon.builder, arrayOf(factor))
-                }
-            }
-        }
     }
 
     private fun near(icon: RectF, window: Window): Boolean {
@@ -164,21 +149,6 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
             val crop = updater.declaredFields.single {
                 !Modifier.isStatic(it.modifiers) && it.type == Rect::class.java
             }.apply { isAccessible = true }
-            // The named and obfuscated builder setters both receive a normalized alpha.
-            alphaSetter = surface.builder.declaredMethods.singleOrNull { method ->
-                method.name in setOf("b", "setAlpha") &&
-                    method.parameterTypes.contentEquals(arrayOf(Float::class.javaPrimitiveType))
-            }?.apply { isAccessible = true }
-            alphaSetter?.let { method ->
-                hooks += XposedBridge.hookMethod(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(p: MethodHookParam) {
-                        val pass = passes.get()?.takeIf { it.builder === p.thisObject } ?: return
-                        val alpha = p.args[0] as? Float ?: return
-                        pass.nativeAlpha = alpha
-                        pass.shared?.let { p.args[0] = it.iconAlpha(alpha) }
-                    }
-                })
-            }
             hooks += XposedBridge.hookMethod(updateIcon, object : XC_MethodHook() {
                 override fun beforeHookedMethod(p: MethodHookParam) {
                     p.setObjectExtra("cpiPriorIconPass", passes.get())
@@ -231,7 +201,7 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
 
     private fun installViewIcon(loader: ClassLoader, hooks: MutableList<XC_MethodHook.Unhook>,
                                 active: () -> Boolean) {
-        bind(hooks, "classic floating icon") {
+        viewIconInstalled = bind(hooks, "classic floating icon") {
             val floating = loader.loadClass("com.android.launcher3.views.FloatingIconView")
             val clip = floating.getDeclaredField("mClipIconView").apply { isAccessible = true }
             val oplus = runCatching { loader.loadClass("com.android.launcher3.views.OplusFloatingIconView") }.getOrNull()
@@ -266,11 +236,13 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
                     })
                 }
             }
+            var drawHooks = 0
             for (name in listOf("ClipIconView", "OplusClipIconView")) {
                 val owner = runCatching { loader.loadClass("com.android.launcher3.views.$name") }.getOrNull() ?: continue
                 val draw = owner.declaredMethods.firstOrNull {
                     it.name == "draw" && it.parameterTypes.contentEquals(arrayOf(Canvas::class.java))
                 } ?: continue
+                drawHooks++
                 hooks += XposedBridge.hookMethod(draw, object : XC_MethodHook() {
                     override fun beforeHookedMethod(p: MethodHookParam) {
                         val view = p.thisObject as View
@@ -298,6 +270,7 @@ internal class GenieTransitionLayers(private val setter: Method, private val ide
                     }
                 })
             }
+            check(drawHooks > 0)
         }
     }
 
