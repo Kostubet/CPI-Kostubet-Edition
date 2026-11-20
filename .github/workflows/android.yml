@@ -37,6 +37,8 @@ jobs:
           packages: 'platforms;android-37.0 build-tools;36.0.0'
       - name: Run Gradle checks
         run: ./gradlew --no-daemon --console=plain :app:assembleRelease :app:lintRelease :app:testDebugUnitTest
+      - name: Test update feed publisher
+        run: python3 -m unittest discover -s tools -p 'test_update_feed.py'
       - name: Upload test and lint reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -137,3 +139,11 @@ jobs:
           fi
           gh release upload "$TAG" dist/*.apk dist/*.sha256 --clobber
           gh release edit "$TAG" --draft=false
+
+  update_feed:
+    name: Refresh public update manifest
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/update-feed.yml

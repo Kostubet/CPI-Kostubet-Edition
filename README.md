@@ -48,6 +48,8 @@
 
 Откройте **О модуле → Обновления**, чтобы проверить опубликованные сборки, включить уведомления и установить подписанный APK прямо из CPI. Android может запросить разрешение на установку или показать окно подтверждения.
 
+Начиная со сборки 426, проверка использует публичный файл версии и резервное зеркало; API GitHub остаётся запасным источником. Файл обновляется автоматически после публикации релиза. Если старая сборка не находит обновление из-за лимита API, установите новый APK вручную один раз. Фоновые проверки выполняются примерно раз в 8 часов с учётом ограничений Android; кнопка проверки запрашивает данные сразу.
+
 В каждом разделе стекла настройки «Размытие» и «Прозрачность размытия» находятся сразу после выбора материала. Прозрачность определяет, сколько исходного фона видно через размытый слой. У нового движка остаются настройки оптики. Живой фон обновляется автоматически с целью до 120 к/с. Фактическая частота зависит от дисплея и того, как быстро система отдаёт новые кадры.
 
 Настройки материала сгруппированы по размытию, качеству и частоте обновления, а также оптике. Уровень размытия нового движка регулируется до 200%. Яркость фона можно менять отдельно от размытия и непрозрачности стекла.
@@ -108,6 +110,8 @@ To test smooth zoom, add stock Camera to the LSPosed scope and reopen it. In CPI
 Soft-light glass has independent profiles for control center, notification shade, lock-screen notifications and expanded live activities, and Smart Sidebar. Select **System UI** in LSPosed for the first three, or **Smart Sidebar** (`com.coloros.smartsidebar`) for the sidebar. Restart the affected system app after enabling the effect for the first time. The Smart Sidebar settings have a restart button. Soft Light is the only card material for Control Center and Notification Center. In other glass sections, choose it under Glass type to adjust the refraction width.
 
 Open **About → Updates** to check releases, receive update notifications, and install a signed build from CPI. Android may ask for installation permission or confirmation.
+
+Starting with build 426, checks use a public release manifest and a fallback mirror, with the GitHub API as a backup. Release publication refreshes the manifest automatically. If an older build cannot discover updates because of the API quota, install the new APK manually once. Background checks run roughly every eight hours subject to Android scheduling; the check button requests fresh data immediately.
 
 ### Build and release
 

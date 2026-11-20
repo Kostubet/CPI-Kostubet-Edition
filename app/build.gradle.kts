@@ -11,7 +11,7 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 425
+        versionCode = 426
         versionName = "0.3.1"
     }
 
@@ -71,6 +71,7 @@ dependencies {
         implementation("androidx.drawerlayout:drawerlayout:1.1.1")
     }
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
 
 val featureSearchOutput=layout.buildDirectory.dir("generated/featureSearch/java")

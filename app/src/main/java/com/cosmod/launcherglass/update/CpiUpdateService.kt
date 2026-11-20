@@ -49,6 +49,7 @@ class CpiUpdateService : JobService() {
         internal const val RELEASE_ID = 21020
         private const val ENABLED = "allow_update_alerts"
         private const val LAST = "notified_build"
+        private const val INSTALLED = "installed_build"
         private fun prefs(context: Context) = context.getSharedPreferences("cpi_update_state", Context.MODE_PRIVATE)
         fun enabled(context: Context) = prefs(context).getBoolean(ENABLED, true)
         fun setEnabled(context: Context, enabled: Boolean) {
@@ -57,6 +58,10 @@ class CpiUpdateService : JobService() {
         }
 
         fun reconcile(context: Context) {
+            val state = prefs(context)
+            if (state.getInt(INSTALLED, 0) != BuildConfig.VERSION_CODE) {
+                state.edit().putInt(INSTALLED, BuildConfig.VERSION_CODE).putInt(LAST, BuildConfig.VERSION_CODE).apply()
+            }
             val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
             if (!enabled(context) || context.getSystemService(NotificationManager::class.java)?.areNotificationsEnabled() != true) {
                 scheduler.cancel(JOB_ID)

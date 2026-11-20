@@ -1,0 +1,30 @@
+name: Publish update feed
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cpi-update-feed
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Test feed validation
+        run: python3 -m unittest discover -s tools -p 'test_update_feed.py'
+      - name: Publish manifest for the latest published APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/update_feed.py --publish

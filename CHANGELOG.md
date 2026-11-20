@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 426 — исправление обновлений
+
+- Проверка обновлений использует публичный файл версии и резервное зеркало без расходования анонимного лимита API GitHub. API сохранён как запасной источник. Ручная проверка обходит кэш.
+- При откате версии сбрасывается отметка уже показанного уведомления. Ошибка проверки не выдаётся за отсутствие обновлений; ограничение запросов получает отдельное сообщение.
+- Публикация релиза автоматически обновляет файл версии с номером сборки, размером APK и SHA-256. Проверка подписи при установке сохранена.
+- Для старых сборок, использующих только API, может потребоваться одно ручное обновление.
+
 ### Сборка 425 — релиз 0.3.1
 
 - Опубликовано зимнее обновление со всеми изменениями сборок 405–424. Номер сборки повышен для доставки через встроенные обновления. С наступающим! ❄️🎄
@@ -141,6 +148,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 426 — update discovery fix
+
+- Update checks use a public release manifest and a fallback mirror without consuming GitHub's anonymous API quota. The API remains a fallback, and manual checks bypass caches.
+- Downgrading resets the last-notified build. Failed checks are never reported as up to date; request limits receive a separate message.
+- Release publication automatically refreshes the manifest with the build number, APK size, and SHA-256. APK signing-certificate verification is preserved.
+- Older API-only builds may need one manual update.
 
 ### Build 425 — version 0.3.1
 

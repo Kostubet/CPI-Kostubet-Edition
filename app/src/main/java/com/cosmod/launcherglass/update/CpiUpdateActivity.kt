@@ -146,12 +146,17 @@ class CpiUpdateActivity : AppCompatActivity() {
         busy = true
         status = getString(R.string.cpi_updates_checking)
         CpiUpdateInstaller.executor.execute {
-            val result = runCatching { CpiReleases.latest()?.takeIf { it.build > BuildConfig.VERSION_CODE } }
+            val result = runCatching { CpiReleases.latest(fresh = true)?.takeIf { it.build > BuildConfig.VERSION_CODE } }
+            result.exceptionOrNull()?.let { android.util.Log.w("CPI.Updates", "Release check failed", it) }
             show {
                 busy = false
                 release = result.getOrNull()
                 status = release?.let { getString(R.string.cpi_updates_version, it.version, it.build) }
-                    ?: getString(if (result.isSuccess) R.string.cpi_updates_current_latest else R.string.cpi_updates_check_error)
+                    ?: getString(when {
+                        result.isSuccess -> R.string.cpi_updates_current_latest
+                        (result.exceptionOrNull() as? CpiReleases.HttpFailure)?.status in listOf(403, 429) -> R.string.cpi_updates_rate_limit
+                        else -> R.string.cpi_updates_check_error
+                    })
             }
         }
     }
