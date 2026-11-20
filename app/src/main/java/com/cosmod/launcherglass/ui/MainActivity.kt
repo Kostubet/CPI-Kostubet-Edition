@@ -500,6 +500,9 @@ class MainActivity : AppCompatActivity() {
     private fun save(key: String, value: Any, vararg flags: Pair<String, Boolean>) {
         if(updatingUi)return
         prefs.edit().apply {
+            if (DesktopAppearance.affectsManualSettings(key)) {
+                putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal)
+            }
             if(key==FolderSettingsKeys.OWN && value==true){
                 FolderSettingsKeys.integers.forEach {base -> val own=FolderSettingsKeys.key(base);if(!prefs.contains(own))putInt(own,number(base))}
                 FolderSettingsKeys.booleans.forEach {base -> val own=FolderSettingsKeys.key(base);if(!prefs.contains(own))putBoolean(own,bool(base))}
@@ -532,7 +535,11 @@ class MainActivity : AppCompatActivity() {
         currentScroll?.let {scroll->scroll.post {scroll.scrollTo(0,y)}}
     }
     private fun applySavedSettings(keys:Set<String>,values:Map<String,Any>){
-        SettingsTransfer.write(prefs.edit(),values,keys).apply()
+        SettingsTransfer.write(prefs.edit(),values,keys).apply {
+            if (DesktopAppearance.MODE !in keys && keys.any(DesktopAppearance::affectsManualSettings)) {
+                putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal)
+            }
+        }.apply()
         contentResolver.notifyChange(SettingsProvider.CONTENT_URI,null)
         refreshCatalogStyle()
     }
@@ -1460,6 +1467,7 @@ class MainActivity : AppCompatActivity() {
         if(section.name in FeatureSections.sections){
             add(common,card(switchRow(getString(R.string.ui_section_enabled),FeatureSections.key(section.name))),bottom=8)
         }
+        if (section == Screen.ICONS || section == Screen.PHOTO) addDesktopAppearance(common)
         val savedPosition=common.childCount
         when(section){
             Screen.GLASS->globalGlassSection(body,general,colors)
@@ -1485,6 +1493,42 @@ class MainActivity : AppCompatActivity() {
         if(separated){
             for(tab in listOf(general,colors,body))add(pageBody,tab)
         }
+    }
+
+    private fun addDesktopAppearance(parent: LinearLayout) {
+        val controls = column()
+        val summary = TextView(this).apply {
+            textSize = 14f
+            setTextColor(if (darkUi) 0xffc7c7cb.toInt() else 0xff515159.toInt())
+            setPadding(dp(16), dp(12), dp(16), 0)
+        }
+        add(controls, summary)
+        add(controls, preferenceLink(getString(R.string.desktop_appearance_restore_manual)) {
+            save(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal)
+            refreshCatalogStyle()
+        })
+        val appearanceCard = card(controls)
+        fun refresh() {
+            val mode = DesktopAppearance.Mode.entries.getOrElse(prefs.getInt(DesktopAppearance.MODE, 0)) {
+                DesktopAppearance.Mode.MANUAL
+            }
+            appearanceCard.visibility = if (mode == DesktopAppearance.Mode.MANUAL) View.GONE else View.VISIBLE
+            summary.text = getString(R.string.desktop_appearance_active, getString(mode.label))
+        }
+        val observer = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == DesktopAppearance.MODE) refresh()
+        }
+        appearanceCard.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                prefs.registerOnSharedPreferenceChangeListener(observer)
+                refresh()
+            }
+            override fun onViewDetachedFromWindow(view: View) {
+                prefs.unregisterOnSharedPreferenceChangeListener(observer)
+            }
+        })
+        refresh()
+        add(parent, appearanceCard, bottom = 8)
     }
 
     private fun accordionCard(parent:LinearLayout,title:Int,children:LinearLayout){
@@ -3427,7 +3471,11 @@ class MainActivity : AppCompatActivity() {
         GlobalGlassSettings.apply(bundle)
         FeatureSections.apply(bundle)
         val wallpaperTone by lazy {IconPalette.wallpaperTone(this)}
-        val iconDark=darkIcons()
+        val systemDark = IconPalette.isSystemDark(applicationContext)
+        val appearance = DesktopAppearance.read(bundle, systemDark)
+        if (screen == Screen.ICONS || screen == Screen.PHOTO) DesktopAppearance.apply(bundle, appearance, systemDark)
+        val iconDark = if (screen == Screen.ICONS && appearance.mode !in setOf(DesktopAppearance.Mode.MANUAL, DesktopAppearance.Mode.STOCK))
+            appearance.iconDark(systemDark) else darkIcons()
         fun read(key:String):Int {
             if(bundle.containsKey(key))return bundle.getInt(key)
             val base=key.removePrefix("folder_")

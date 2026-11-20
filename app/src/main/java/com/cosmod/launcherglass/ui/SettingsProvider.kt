@@ -71,6 +71,22 @@ class SettingsProvider : ContentProvider() {
                     }
                 }
             }
+            METHOD_SET_DESKTOP_APPEARANCE -> {
+                if (callingPackage != "com.android.launcher" && Binder.getCallingUid() != Process.myUid()) {
+                    throw SecurityException("Only the stock launcher or CPI may change desktop appearance")
+                }
+                if (extras == null || !prefs.getBoolean(KEY_ENABLED, SettingsDefaults.boolean(KEY_ENABLED))) return bundle
+                val changes = DesktopAppearance.ranges.mapNotNull { (key, range) ->
+                    if (!extras.containsKey(key)) return@mapNotNull null
+                    val value = extras.getInt(key).coerceIn(range)
+                    if (value != prefs.getInt(key, DesktopAppearance.defaults.getValue(key))) key to value else null
+                }
+                if (changes.isNotEmpty()) {
+                    prefs.edit().apply { changes.forEach { (key, value) -> putInt(key, value) } }.apply()
+                    context?.contentResolver?.notifyChange(CONTENT_URI, null)
+                }
+                bundle.putBoolean("applied", true)
+            }
             METHOD_GET_ALL -> {
                 bundle.putInt(KEY_NATIVE_FLUX_SUPPORT,prefs.getInt(KEY_NATIVE_FLUX_SUPPORT,0))
                 OpticalSettings.booleans.forEach {(k,v)->bundle.putBoolean(k,prefs.getBoolean(k,v))}
@@ -271,6 +287,7 @@ class SettingsProvider : ContentProvider() {
         const val PREFS_NAME = "launcher_monet_prefs"
 
         const val METHOD_REPORT_ICON_APPEARANCE = "reportIconAppearance"
+        const val METHOD_SET_DESKTOP_APPEARANCE = "setDesktopAppearance"
         const val METHOD_REPORT_RUNTIME = "reportRuntime"
         const val KEY_NATIVE_ICON_DARK = "native_icon_dark"
         const val KEY_NATIVE_FLUX_SUPPORT = "native_flux_support"

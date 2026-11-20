@@ -33,8 +33,8 @@ object OpticalSettings {
         WidgetSettings.SCOPE to WidgetSettings.ALL,"large_folder_glass_style" to 1,"large_folder_glass_width" to 40,
         "large_folder_glass_strength" to 100,"large_folder_glass_opacity" to 15) +
         GlassDispersionSettings.defaults + EdgeSettings.integers + LockscreenSettings.integers + SurfaceTintSettings.integers + GlobalGlassSettings.defaults +
-        com.cosmod.launcherglass.util.Ba31kAnimationSettings.integers + ShadeGlassSettings.integers + GlassEngineSettings.integers + SoftGlassSettings.integers
-    fun maximum(key:String)=SoftGlassSettings.range(key)?.last ?: ShadeGlassSettings.range(key)?.last ?: GlassEngineSettings.maximum(key) ?:
+        com.cosmod.launcherglass.util.Ba31kAnimationSettings.integers + ShadeGlassSettings.integers + GlassEngineSettings.integers + SoftGlassSettings.integers + DesktopAppearance.defaults
+    fun maximum(key:String)=DesktopAppearance.ranges[key]?.last ?: SoftGlassSettings.range(key)?.last ?: ShadeGlassSettings.range(key)?.last ?: GlassEngineSettings.maximum(key) ?:
         LockscreenSettings.maximums[key] ?: GlobalGlassSettings.maximums[key] ?: when {
         key in SurfaceTintSettings.integers -> if(key.endsWith("hue"))360 else 100
         else -> maximumLegacy(key)
@@ -63,7 +63,7 @@ object OpticalSettings {
         "banner_plate_hue","photo_widget_tint_hue"->360
         else->100
     }
-    fun minimum(key:String):Int=SoftGlassSettings.range(key)?.first ?: ShadeGlassSettings.range(key)?.first ?: if(key in SurfaceTintSettings.integers && key.endsWith("lightness"))-100 else when(key){
+    fun minimum(key:String):Int=DesktopAppearance.ranges[key]?.first ?: SoftGlassSettings.range(key)?.first ?: ShadeGlassSettings.range(key)?.first ?: if(key in SurfaceTintSettings.integers && key.endsWith("lightness"))-100 else when(key){
         in com.cosmod.launcherglass.util.Ba31kAnimationSettings.integers->com.cosmod.launcherglass.util.Ba31kAnimationSettings.minimum(key)
         LockscreenSettings.NOTIFICATION_CORNER->-1
         LockscreenSettings.UNLOCK_SPEED->LockscreenSettings.MIN_UNLOCK_SPEED

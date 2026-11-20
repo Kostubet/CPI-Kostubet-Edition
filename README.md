@@ -50,6 +50,8 @@
 
 Начиная со сборки 426, проверка использует публичный файл версии и резервное зеркало; API GitHub остаётся запасным источником. Файл обновляется автоматически после публикации релиза. Если старая сборка не находит обновление из-за лимита API, установите новый APK вручную один раз. Фоновые проверки выполняются примерно раз в 8 часов с учётом ограничений Android; кнопка проверки запрашивает данные сразу.
 
+На совместимом лаунчере ColorOS 17 войдите в режим редактирования рабочего стола и нажмите **Оформление**. Режим «По умолчанию» возвращает штатный вид иконок и виджетов. Чтобы снова применить прежние настройки CPI, выберите **Использовать ручные настройки** в разделе «Иконки» или «Виджеты».
+
 В каждом разделе стекла настройки «Размытие» и «Прозрачность размытия» находятся сразу после выбора материала. Прозрачность определяет, сколько исходного фона видно через размытый слой. У нового движка остаются настройки оптики. Живой фон обновляется автоматически с целью до 120 к/с. Фактическая частота зависит от дисплея и того, как быстро система отдаёт новые кадры.
 
 Настройки материала сгруппированы по размытию, качеству и частоте обновления, а также оптике. Уровень размытия нового движка регулируется до 200%. Яркость фона можно менять отдельно от размытия и непрозрачности стекла.
@@ -112,6 +114,8 @@ Soft-light glass has independent profiles for control center, notification shade
 Open **About → Updates** to check releases, receive update notifications, and install a signed build from CPI. Android may ask for installation permission or confirmation.
 
 Starting with build 426, checks use a public release manifest and a fallback mirror, with the GitHub API as a backup. Release publication refreshes the manifest automatically. If an older build cannot discover updates because of the API quota, install the new APK manually once. Background checks run roughly every eight hours subject to Android scheduling; the check button requests fresh data immediately.
+
+On a compatible ColorOS 17 launcher, enter home screen edit mode and tap **Appearance**. Default restores the stock icon and widget appearance. Select **Use manual settings** in Icons or Widgets to reapply your saved CPI settings.
 
 ### Build and release
 

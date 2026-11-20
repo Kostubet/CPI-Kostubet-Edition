@@ -419,6 +419,7 @@ class HookEntry : IXposedHookLoadPackage {
             }
 
             IconGlassHook.init(lpparam)
+            DesktopAppearanceToolbar.install(lpparam.classLoader)
             try {
                 val config = XposedHelpers.findClassIfExists(
                     "com.android.launcher.theme.LauncherIconConfig", lpparam.classLoader)

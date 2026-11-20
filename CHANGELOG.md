@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 427 — оформление рабочего стола
+
+- В режиме редактирования ColorOS 17 между «Группа» и «Готово» добавлено «Оформление». Панель COUI показывает штатные иконки, тёмный, прозрачный и однотонный варианты. Для стекла доступны светлый, тёмный и автоматический варианты, для однотонного режима — цвет и насыщенность.
+- Профили используют действующие движки стекла и перекраски CPI. Ручные значения сохраняются и снова применяются через «Иконки» или «Виджеты».
+
 ### Сборка 426 — исправление обновлений
 
 - Проверка обновлений использует публичный файл версии и резервное зеркало без расходования анонимного лимита API GitHub. API сохранён как запасной источник. Ручная проверка обходит кэш.
@@ -148,6 +153,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 427 — desktop appearance
+
+- ColorOS 17 home screen edit mode gains an Appearance button between Group and Done. The COUI sheet offers default, dark, clear, and tinted previews, plus light, dark, and automatic variants and tinted hue and saturation controls.
+- Profiles use CPI's existing glass and tint engines. Manual values are retained and can be restored from Icons or Widgets.
 
 ### Build 426 — update discovery fix
 

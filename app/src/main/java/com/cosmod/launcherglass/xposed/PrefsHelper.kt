@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import com.cosmod.launcherglass.ui.GlassDispersionSettings
+import com.cosmod.launcherglass.ui.DesktopAppearance
 import com.cosmod.launcherglass.ui.SettingsDefaults
 import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.util.GlassLogger
@@ -91,6 +92,7 @@ object PrefsHelper {
     @Volatile var blurColorFilter: android.graphics.ColorMatrixColorFilter? = null
     private var initialized = false
     @Volatile private var loaded=false
+    private var appearanceMode = DesktopAppearance.Mode.MANUAL
     private var followsWallpaper=false
     private var wallpaperTone:IconPalette.WallpaperTone?=null
 
@@ -139,12 +141,17 @@ object PrefsHelper {
 
     fun loadPrefs(context: Context, systemDark: Boolean? = null,wallpaperOverride:IconPalette.WallpaperTone?=null) {
         try {
-            val bundle = context.contentResolver.call(
+            val stored = context.contentResolver.call(
                 SettingsProvider.CONTENT_URI,
                 SettingsProvider.METHOD_GET_ALL,
                 null,
                 null
             ) ?: return
+            val actualSystemDark = systemDark ?: IconPalette.isSystemDark(context)
+            val appearance = DesktopAppearance.read(stored, actualSystemDark)
+            val appearanceChanged = appearance.mode != appearanceMode
+            val bundle = if (appearance.mode == DesktopAppearance.Mode.MANUAL) stored else Bundle(stored)
+            DesktopAppearance.apply(bundle, appearance, actualSystemDark)
 
             val previousWallpaperEffects=wallpaperEffectsEnabled
             val newIconsFeatureEnabled=bundle.getBoolean(com.cosmod.launcherglass.ui.FeatureSections.key("ICONS"),true)
@@ -224,17 +231,18 @@ object PrefsHelper {
                 configuration.uiMode = (configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or
                     (if (systemDark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO)
             }
-            val darkIcons = NativeIconAppearance.read(context, configuration)
-                ?: (systemDark ?: com.cosmod.launcherglass.util.IconPalette.isSystemDark(context))
+            val nativeDarkIcons = NativeIconAppearance.read(context, configuration) ?: actualSystemDark
+            val darkIcons = if (appearance.mode == DesktopAppearance.Mode.MANUAL ||
+                appearance.mode == DesktopAppearance.Mode.STOCK) nativeDarkIcons else appearance.iconDark(actualSystemDark)
             val fluxSupport=FluxIconSupport.read(context)
             if(fluxSupport!=FluxIconSupport.UNKNOWN && bundle.getInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,0)!=fluxSupport) {
                 context.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_REPORT_ICON_APPEARANCE,
                     null,android.os.Bundle().apply {putInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,fluxSupport)})
             }
             if (!bundle.containsKey(SettingsProvider.KEY_NATIVE_ICON_DARK) ||
-                bundle.getBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK) != darkIcons) {
+                bundle.getBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK) != nativeDarkIcons) {
                 context.contentResolver.call(SettingsProvider.CONTENT_URI, SettingsProvider.METHOD_REPORT_ICON_APPEARANCE,
-                    null, android.os.Bundle().apply { putBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK, darkIcons) })
+                    null, android.os.Bundle().apply { putBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK, nativeDarkIcons) })
             }
             val colorKeys = SettingsProvider.colorKeys(darkIcons)
             val hue=bundle.getInt(colorKeys[0],SettingsDefaults.integer(colorKeys[0]))
@@ -344,7 +352,11 @@ object PrefsHelper {
             }
             if (masterChanged || backendChanged || iconsSectionChanged) {
                 IconGlassHook.onIconThemeChanged()
-                IconGlassHook.reloadNativeIcons()
+                // Switching appearance in edit mode only changes draw-time
+                // materials. A native model reload would exit the edit session.
+                if (!appearanceChanged || !LiveBlurEngine.isEditing || masterChanged || backendChanged) {
+                    IconGlassHook.reloadNativeIcons()
+                }
             }
 
             if(enabled){
@@ -366,6 +378,7 @@ object PrefsHelper {
                 ModuleHooks.setEnabled(false)
             }
             loaded=true
+            appearanceMode = appearance.mode
 
             GlassLogger.i(
                 "PrefsHelper",
