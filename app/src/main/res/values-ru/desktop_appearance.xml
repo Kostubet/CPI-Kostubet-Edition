@@ -6,6 +6,8 @@
     <string name="desktop_appearance_clear">Прозрачные</string>
     <string name="desktop_appearance_tinted">Однотонные</string>
     <string name="desktop_appearance_hue">Цвет</string>
+    <string name="desktop_appearance_monochrome">Монохромные иконки и виджеты</string>
+    <string name="desktop_appearance_wallpaper_colors">Цвета обоев</string>
     <string name="desktop_appearance_saturation">Насыщенность</string>
     <string name="desktop_appearance_variant">Вариант оформления</string>
     <string name="desktop_appearance_light">Светлые</string>

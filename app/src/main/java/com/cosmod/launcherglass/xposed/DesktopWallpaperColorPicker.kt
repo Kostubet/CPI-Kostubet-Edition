@@ -19,7 +19,8 @@ internal class DesktopWallpaperColorPicker(
     private val onColor: (Int) -> Unit,
 ) : View(context) {
     private val density = resources.displayMetrics.density
-    private val radius = 30f * density
+    private val radius = 33f * density
+    private val lift = 62f * density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val crop = RectF()
     private val lens = Path()
@@ -55,8 +56,10 @@ internal class DesktopWallpaperColorPicker(
         paint.isFilterBitmap = true
         canvas.drawBitmap(wallpaper, null, crop, paint)
 
-        val lensX = x.coerceIn(radius, max(radius, width - radius))
-        val lensY = y.coerceIn(radius, max(radius, height - radius))
+        val margin = radius + 5f * density
+        val lensX = x.coerceIn(margin, max(margin, width - margin))
+        val liftedY = if (y >= margin + lift) y - lift else y + lift
+        val lensY = liftedY.coerceIn(margin, max(margin, height - margin))
         lens.rewind()
         lens.addCircle(lensX, lensY, radius, Path.Direction.CW)
         val saved = canvas.save()
@@ -67,16 +70,38 @@ internal class DesktopWallpaperColorPicker(
         canvas.drawBitmap(wallpaper, null, crop, paint)
         canvas.restoreToCount(saved)
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 2f * density
-        paint.color = Color.WHITE
+        paint.strokeWidth = 7f * density
+        paint.color = 0xdb191919.toInt()
+        canvas.drawCircle(lensX, lensY, radius, paint)
+        paint.strokeWidth = 5f * density
+        paint.color = sampledColor()
         canvas.drawCircle(lensX, lensY, radius, paint)
         paint.strokeWidth = density
-        val mark = 2.5f * density
-        canvas.drawRect(lensX - mark, lensY - mark, lensX + mark, lensY + mark, paint)
+        paint.color = Color.WHITE
+        canvas.drawCircle(lensX, lensY, radius + 3f * density, paint)
+        drawTarget(canvas, lensX, lensY, 5f * density)
+        drawTarget(canvas, x, y, 8f * density)
+    }
+
+    private fun drawTarget(canvas: Canvas, cx: Float, cy: Float, length: Float) {
+        fun lines() {
+            val gap = 2f * density
+            canvas.drawLine(cx - length, cy, cx - gap, cy, paint)
+            canvas.drawLine(cx + gap, cy, cx + length, cy, paint)
+            canvas.drawLine(cx, cy - length, cx, cy - gap, paint)
+            canvas.drawLine(cx, cy + gap, cx, cy + length, paint)
+        }
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.color = Color.BLACK
+        paint.strokeWidth = 3f * density
+        lines()
+        paint.color = Color.WHITE
+        paint.strokeWidth = 1.25f * density
+        lines()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (!isEnabled) return false
+        if (!isEnabled) return true
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
                 x = event.x.coerceIn(0f, width.toFloat())

@@ -11,11 +11,12 @@ internal object DesktopAppearance {
     const val THEME = "desktop_appearance_theme"
     const val HUE = "desktop_appearance_hue"
     const val SATURATION = "desktop_appearance_saturation"
+    const val COLOR_SOURCE = "desktop_appearance_color_source"
     const val LARGE_ICONS = "desktop_appearance_large_icons"
     const val DIM_WALLPAPER = "desktop_appearance_dim_wallpaper"
     const val LARGE_ICON_PERCENT = 118
-    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1, LARGE_ICONS to 0, DIM_WALLPAPER to 0)
-    val ranges = mapOf(MODE to 0..4, THEME to 0..2, HUE to -1..360, SATURATION to -1..100,
+    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1, COLOR_SOURCE to 0, LARGE_ICONS to 0, DIM_WALLPAPER to 0)
+    val ranges = mapOf(MODE to 0..4, THEME to 0..2, HUE to -1..360, SATURATION to -1..100, COLOR_SOURCE to 0..2,
         LARGE_ICONS to 0..1, DIM_WALLPAPER to 0..1)
 
     enum class Mode(val label: Int) {
@@ -32,7 +33,12 @@ internal object DesktopAppearance {
         DARK(R.string.desktop_appearance_dark)
     }
 
-    data class Profile(val mode: Mode, val theme: Theme, val hue: Int, val saturation: Int) {
+    enum class ColorSource { MANUAL, MONOCHROME, WALLPAPER }
+
+    data class Profile(
+        val mode: Mode, val theme: Theme, val hue: Int, val saturation: Int,
+        val colorSource: ColorSource = ColorSource.MANUAL,
+    ) {
         val hasTintControls get() = mode == Mode.TINTED
 
         val themeChoices: List<Theme> get() = when (mode) {
@@ -65,13 +71,14 @@ internal object DesktopAppearance {
         fun usesLightGlass(systemDark: Boolean) = mode == Mode.CLEAR && !iconDark(systemDark)
 
         fun clearOpacity(opacity: Int, systemDark: Boolean) =
-            if (usesLightGlass(systemDark)) opacity.coerceIn(6, 10) else opacity.coerceIn(32, 54)
+            if (usesLightGlass(systemDark)) opacity.coerceIn(13, 20) else opacity.coerceIn(32, 54)
     }
 
     fun read(settings: Bundle, systemDark: Boolean): Profile {
         val mode = Mode.entries.getOrElse(settings.getInt(MODE)) { Mode.MANUAL }
         val theme = Theme.entries.getOrElse(settings.getInt(THEME)) { Theme.AUTO }
-        val profile = Profile(mode, theme, 0, 0).selectMode(mode)
+        val source = ColorSource.entries.getOrElse(settings.getInt(COLOR_SOURCE)) { ColorSource.MANUAL }
+        val profile = Profile(mode, theme, 0, 0, source).selectMode(mode)
         val dark = profile.iconDark(systemDark)
         val keys = Keys.colorKeys(dark)
         fun color(custom: String, manual: String, max: Int): Int {
@@ -101,19 +108,25 @@ internal object DesktopAppearance {
         val transparent = profile.mode == Mode.CLEAR
         val brightness = profile.brightness(systemDark)
         val hue = if (tinted) profile.hue else 0
-        val saturation = if (tinted) profile.saturation else 0
+        val wallpaper = tinted && profile.colorSource == ColorSource.WALLPAPER
+        val monochrome = tinted && profile.colorSource == ColorSource.MONOCHROME
+        val saturation = when {
+            wallpaper -> 50
+            tinted && !monochrome -> profile.saturation
+            else -> 0
+        }
         if (settings.getBoolean(iconSection, true)) {
             settings.putBoolean(Keys.KEY_BLUR_ENABLED, true)
             settings.putBoolean(Keys.KEY_BLUR_TONE_ENABLED, true)
             settings.putInt(Keys.KEY_COLOR_MODE, 1)
             settings.putInt(Keys.KEY_ICON_APPEARANCE, if (transparent) 0 else 1)
-            settings.putBoolean(IconPalette.FOLLOW_WALLPAPER, false)
+            settings.putBoolean(IconPalette.FOLLOW_WALLPAPER, wallpaper)
             val keys = Keys.colorKeys(profile.iconDark(systemDark))
             settings.putInt(keys[0], hue)
             settings.putInt(keys[1], saturation)
             settings.putInt(keys[2], brightness)
             settings.putInt(Keys.KEY_CLEAR_BRIGHTNESS, brightness)
-            settings.putBoolean("icon_logo_tint", true)
+            settings.putBoolean("icon_logo_tint", !wallpaper)
             settings.putInt("icon_logo_hue", hue)
             settings.putInt("icon_logo_saturation", if (tinted) saturation / 3 else 0)
             settings.putInt("icon_logo_brightness", if (profile.mode == Mode.DARK && dark) 92 else 100)
@@ -137,18 +150,18 @@ internal object DesktopAppearance {
             settings.putBoolean(Keys.KEY_PHOTO_WIDGET_BLUR, true)
             if (profile.mode != Mode.DARK) settings.putInt(Keys.KEY_PHOTO_WIDGET_MATERIAL, 1)
             settings.putBoolean(Keys.KEY_PHOTO_WIDGET_TINT, !transparent)
-            settings.putBoolean(WidgetSettings.WALLPAPER_TINT, false)
+            settings.putBoolean(WidgetSettings.WALLPAPER_TINT, wallpaper)
             settings.putInt(WidgetSettings.HUE, hue)
             settings.putInt(WidgetSettings.TINT_SATURATION, saturation)
             settings.putInt(WidgetSettings.LIGHTNESS, 0)
             settings.putInt("photo_widget_tint_brightness", if (profile.mode == Mode.DARK) 12 + brightness else brightness)
-            settings.putInt(WidgetSettings.TINT_TRANSPARENCY, if (tinted) 48 else 0)
+            settings.putInt(WidgetSettings.TINT_TRANSPARENCY, if (tinted && !monochrome) 48 else 0)
             if (transparent) {
                 val shade = settings.getInt(Keys.KEY_PHOTO_WIDGET_SHADE, SettingsDefaults.integer(Keys.KEY_PHOTO_WIDGET_SHADE))
-                settings.putInt(Keys.KEY_PHOTO_WIDGET_SHADE, if (dark) shade.coerceIn(12, 35) else shade.coerceIn(0, 10))
+                settings.putInt(Keys.KEY_PHOTO_WIDGET_SHADE, if (dark) shade.coerceIn(12, 35) else 0)
             }
-            // Keep internal labels readable and keep photos and caption rendering on their existing paths.
-            settings.putBoolean("widget_elements_follow_background", false)
+            // Tint through the native foreground path without flattening widget text styles.
+            settings.putBoolean("widget_elements_follow_background", monochrome || wallpaper)
             settings.putBoolean("widget_logo_tint", false)
         }
     }

@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 435
+
+- В «Оформлении» стиль «По умолчанию» включает классические иконки ColorOS. Карточка стала шире, угловые кнопки используют стеклянный материал COUI, а образцы берутся из оригинальной иконки «Погоды».
+- В однотонном режиме добавлены кнопки монохрома, цветов обоев и пипетки. Пипетка показывает точку забора и выбранный оттенок, а тап по цветовой шкале плавно перемещает бегунок.
+- Карточка растягивается при лёгком движении вверх и возвращается пружиной. Она закрывается при уходе с рабочего стола. Иконки и папки увеличиваются от центра, а подписи плавно гаснут.
+- Светлое прозрачное стекло сохраняет больше света. Заголовки и кнопки CPI учитывают высоту статус-бара.
+
 ### Сборка 434
 
 - Нижний переключатель сохраняет положение и плавно меняет сегменты при смене стиля. Цветовые ползунки раскрываются над ним.
@@ -194,6 +201,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 435
+
+- Default Appearance selects ColorOS Classic icons. The wider panel uses native COUI glass buttons and samples based on the original Weather icon.
+- Tinted mode adds monochrome, wallpaper colors and an eyedropper that marks the sampled point and color. Tapping the color track moves its thumb smoothly.
+- The panel stretches on a small upward pull and springs back. It closes when leaving the home screen. Icons and folders grow from their centers, and labels fade out.
+- Light clear glass admits more light. CPI headings and controls account for the status-bar inset.
 
 ### Build 434
 

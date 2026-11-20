@@ -1,9 +1,13 @@
 package com.cosmod.launcherglass.xposed
 
+import android.animation.ValueAnimator
 import android.content.res.TypedArray
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
 import android.view.View
+import android.view.animation.PathInterpolator
 import com.cosmod.launcherglass.ui.DesktopAppearance
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
@@ -14,37 +18,91 @@ import java.util.WeakHashMap
 internal object LauncherIconSize {
     private data class Size(val native:Int,val applied:Int)
     private val sizes=WeakHashMap<View,Size>()
-    private data class Scale(val nativeX:Float,val nativeY:Float,val appliedX:Float,val appliedY:Float)
-    private val containers=WeakHashMap<View,Scale>()
+    private data class Scale(
+        val nativeX: Float, val nativeY: Float, val appliedX: Float, val appliedY: Float,
+        val nativePivotX: Float, val nativePivotY: Float, val pivotX: Float, val pivotY: Float,
+    )
+    private val scales = WeakHashMap<View, Scale>()
+    private val containers = WeakHashMap<View, Boolean>()
+    private val workspaceViews = WeakHashMap<View, Boolean>()
+    private val labelAlpha = WeakHashMap<View, Float>()
+    private val labelViews = WeakHashMap<View, Boolean>()
+    private var scaleWorkspaceIcon: ((View) -> Unit)? = null
+    private var updateLabel: ((View) -> Unit)? = null
 
-    private fun scaleContainer(view:View,ratio:Float,nativeScale:Float?=null){
+    private fun scaleAround(
+        view: View, ratio: Float, centerX: Float, centerY: Float, nativeScale: Float? = null,
+    ) {
         val currentX=view.scaleX
         val currentY=view.scaleY
-        val previous=containers[view]
+        val previous = scales[view]
         val nativeX=nativeScale ?: previous?.takeIf {it.appliedX==currentX}?.nativeX ?: currentX
         val nativeY=nativeScale ?: previous?.takeIf {it.appliedY==currentY}?.nativeY ?: currentY
         val x=nativeX*ratio
         val y=nativeY*ratio
-        if(x!=currentX)view.scaleX=x
-        if(y!=currentY)view.scaleY=y
-        if(previous==null || previous.appliedX!=x || previous.appliedY!=y || previous.nativeX!=nativeX || previous.nativeY!=nativeY)
-            containers[view]=Scale(nativeX,nativeY,x,y)
+        if (x != currentX) view.scaleX = x
+        if (y != currentY) view.scaleY = y
+        val nativePivotX = previous?.takeIf { view.pivotX == it.pivotX }?.nativePivotX ?: view.pivotX
+        val nativePivotY = previous?.takeIf { view.pivotY == it.pivotY }?.nativePivotY ?: view.pivotY
+        if (ratio == 1f) {
+            if (previous != null) {
+                view.pivotX = nativePivotX
+                view.pivotY = nativePivotY
+                scales.remove(view)
+            }
+            return
+        }
+        view.pivotX = centerX
+        view.pivotY = centerY
+        scales[view] = Scale(nativeX, nativeY, x, y, nativePivotX, nativePivotY, centerX, centerY)
     }
     private var refresh:((View)->Unit)?=null
     private var lastPercent=100
     private var lastLarge = false
     private val large get() = PrefsHelper.enabled && PrefsHelper.desktopLargeIcons
     private val percent get()=if(PrefsHelper.enabled)PrefsHelper.launcherIconSize else 100
-    private val workspacePercent get() = if (large) (percent * DesktopAppearance.LARGE_ICON_PERCENT / 100).coerceAtMost(130) else percent
+    private var largeProgress = 0f
+    private var largeMotion: ValueAnimator? = null
+    private val workspaceScale get() = 1f + largeProgress *
+        ((DesktopAppearance.LARGE_ICON_PERCENT / 100f).coerceAtMost(130f / percent) - 1f)
 
-    fun onSettingsChanged(){
-        if(percent==lastPercent && large==lastLarge)return
-        lastPercent=percent
-        lastLarge=large
-        for(view in containers.keys.weakSnapshot())if(view.isAttachedToWindow)updateContainer(view)
-        val apply=refresh ?: return
-        for(view in synchronized(sizes){sizes.keys.weakSnapshot()}){
-            if(view.isAttachedToWindow)apply(view)
+    private fun updateWorkspaceSizes() {
+        for (view in containers.keys.weakSnapshot()) if (view.isAttachedToWindow) updateContainer(view)
+        val update = scaleWorkspaceIcon
+        if (update != null) for (view in workspaceViews.keys.weakSnapshot()) if (view.isAttachedToWindow) update(view)
+        val showLabel = updateLabel
+        if (showLabel != null) for (view in labelViews.keys.weakSnapshot()) if (view.isAttachedToWindow) showLabel(view)
+    }
+
+    fun onSettingsChanged() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post(::onSettingsChanged)
+            return
+        }
+        if (percent != lastPercent) {
+            lastPercent = percent
+            refresh?.let { apply ->
+                for (view in synchronized(sizes) { sizes.keys.weakSnapshot() }) if (view.isAttachedToWindow) apply(view)
+            }
+            updateWorkspaceSizes()
+        }
+        if (large == lastLarge) return
+        lastLarge = large
+        largeMotion?.cancel()
+        val target = if (large) 1f else 0f
+        if (!ValueAnimator.areAnimatorsEnabled() || (workspaceViews.isEmpty() && containers.isEmpty())) {
+            largeProgress = target
+            updateWorkspaceSizes()
+            return
+        }
+        largeMotion = ValueAnimator.ofFloat(largeProgress, target).apply {
+            duration = 350L
+            interpolator = PathInterpolator(.24f, .1f, .28f, 1f)
+            addUpdateListener {
+                largeProgress = it.animatedValue as Float
+                updateWorkspaceSizes()
+            }
+            start()
         }
     }
 
@@ -52,13 +110,16 @@ internal object LauncherIconSize {
     private const val FOLDER="com.android.launcher3.folder.FolderIcon"
     private const val FLEX_FOLDER="com.android.launcher3.folder.FlexibleFolderIcon"
     private var folderTypes:List<Class<*>> = emptyList()
+    private var shortcutType: Class<*>? = null
 
     private fun hasScaledContainer(view: View, targets: List<Class<*>>): Boolean =
         generateSequence(view.parent as? View) { it.parent as? View }
             .any { parent -> targets.any { it.isInstance(parent) } }
 
-    private fun updateContainer(view:View,nativeScale:Float?=null){
-        val large = if (folderTypes.any { it.isInstance(view) }) {
+    private fun updateContainer(view: View, nativeScale: Float? = null) {
+        containers[view] = true
+        val isShortcut = shortcutType?.isInstance(view) == true
+        val isLargeFolder = if (!isShortcut && folderTypes.any { it.isInstance(view) }) {
             val item = NativeIconAccess.call(view, "getItemInfo") ?: view.tag
             val width = item?.let { NativeIconAccess.field(it, "spanX") as? Int }
             val height = item?.let { NativeIconAccess.field(it, "spanY") as? Int }
@@ -66,12 +127,23 @@ internal object LauncherIconSize {
             else NativeIconAccess.call(view, "isBigFolderIcon") == true ||
                 (NativeIconAccess.call(view, "getSpanRange") as? Rect)?.let { it.width() > 1 && it.height() > 1 } == true
         } else false
-        scaleContainer(view,if(large)1f else workspacePercent/100f,nativeScale)
+        val child = if (isShortcut) NativeIconAccess.call(view, "getMRecyclerView") as? View else null
+        val plate = child ?: view
+        if (plate.width == 0 || plate.height == 0) return
+        val bounds = (NativeIconAccess.call(view, if (isShortcut) "getBackgroundBounds" else "getItemIconBounds") as? Rect)
+            ?.takeUnless { it.isEmpty }
+        val centerX = bounds?.exactCenterX()?.minus(child?.left ?: 0) ?: plate.width / 2f
+        val centerY = bounds?.exactCenterY()?.minus(child?.top ?: 0) ?: plate.height / 2f
+        val label = if (isShortcut) NativeIconAccess.call(view, "getMContainerName") as? View else null
+        if (label != null) labelViews[label] = true
+        val ratio = if (isLargeFolder) 1f else workspaceScale * percent / 100f
+        scaleAround(plate, ratio, centerX, centerY, nativeScale)
     }
 
     fun install(loader:ClassLoader){
         val targets=listOf(FOLDER,FLEX_FOLDER,SHORTCUT).mapNotNull {XposedHelpers.findClassIfExists(it,loader)}
         folderTypes=targets.filter {it.name!=SHORTCUT}
+        shortcutType = targets.firstOrNull { it.name == SHORTCUT }
         val methods=targets.mapNotNull {type->
             generateSequence(type) {it.superclass}.firstNotNullOfOrNull {owner->
                 owner.declaredMethods.firstOrNull {it.name=="onLayout" && it.parameterCount==5}
@@ -114,8 +186,7 @@ internal object LauncherIconSize {
                 return synchronized(sizes){
                     val previous=sizes[view]
                     val native=previous?.takeIf {!nativeOverride && it.applied==observed}?.native ?: observed
-                    val scale = if (surface == drawer) percent
-                        else if (hasScaledContainer(view, targets)) 100 else workspacePercent
+                    val scale = if (surface == workspace && hasScaledContainer(view, targets)) 100 else percent
                     val adjusted=(native*scale+50)/100
                     if(previous==null || previous.native!=native || previous.applied!=adjusted)sizes[view]=Size(native,adjusted)
                     adjusted
@@ -128,11 +199,41 @@ internal object LauncherIconSize {
             }
             val oplus=XposedHelpers.findClassIfExists("com.android.launcher3.OplusBubbleTextView",loader)
             val textAlpha = type.getDeclaredMethod("setTextAlpha", Float::class.javaPrimitiveType)
+            val nativeText = type.getDeclaredField("mTextAlpha").apply { isAccessible = true }
+            val getIconBounds = type.getDeclaredMethod("getIconBounds", Rect::class.java)
+            val iconBounds = Rect()
+            fun resizeWorkspaceIcon(view: View) {
+                if (view.width == 0 || view.height == 0 || display.getInt(view) != workspace ||
+                    hasScaledContainer(view, targets)) return
+                iconBounds.setEmpty()
+                getIconBounds.invoke(view, iconBounds)
+                if (!iconBounds.isEmpty) scaleAround(view, workspaceScale, iconBounds.exactCenterX(), iconBounds.exactCenterY())
+            }
+            scaleWorkspaceIcon = { view -> runCatching { resizeWorkspaceIcon(view) } }
+            fun trackWorkspaceIcon(view: View) {
+                if (display.getInt(view) != workspace || hasScaledContainer(view, targets)) return
+                labelViews[view] = true
+                if (workspaceViews.put(view, true) == null) {
+                    view.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> scaleWorkspaceIcon?.invoke(v) }
+                }
+                resizeWorkspaceIcon(view)
+            }
             ModuleHooks.hookMethod(textAlpha, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (large && display.getInt(param.thisObject) == workspace) param.args[0] = 0f
+                    val view = param.thisObject as View
+                    if (view !in labelViews && (display.getInt(view) != workspace || hasScaledContainer(view, targets))) return
+                    val wanted = param.args[0] as Float
+                    labelViews[view] = true
+                    labelAlpha[view] = wanted
+                    param.args[0] = wanted * (1f - largeProgress)
                 }
             })
+            updateLabel = { view ->
+                runCatching {
+                    val wanted = labelAlpha[view] ?: nativeText.getFloat(view)
+                    textAlpha.invoke(view, wanted)
+                }
+            }
             // Adjust the stock size after the device profile and any XML override have been resolved.
             val initialize=object:XC_MethodHook(){
                 override fun afterHookedMethod(param:MethodHookParam){
@@ -153,6 +254,9 @@ internal object LauncherIconSize {
             })
             ModuleHooks.hookMethod(update,object:XC_MethodHook(){
                 override fun beforeHookedMethod(param:MethodHookParam){apply(param.thisObject as View)}
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (!param.hasThrowable()) runCatching { trackWorkspaceIcon(param.thisObject as View) }
+                }
             })
             oplus?.declaredMethods?.firstOrNull {
                 it.name=="setIconSize" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
@@ -168,7 +272,6 @@ internal object LauncherIconSize {
                     apply(view)
                     val drawable=icon.get(view) as? Drawable
                     if(drawable!=null)XposedHelpers.callMethod(view,"applyCompoundDrawables",drawable)
-                    if(display.getInt(view)==workspace) NativeIconAccess.call(view, "setTextVisibility")
                     view.requestLayout()
                     view.invalidate()
                 }.onFailure {GlassLogger.limited("LauncherIconSize","refresh"){"Native icon size refresh unavailable: $it"}}

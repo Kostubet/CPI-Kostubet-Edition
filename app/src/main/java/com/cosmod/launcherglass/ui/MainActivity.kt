@@ -264,10 +264,12 @@ class MainActivity : AppCompatActivity() {
         root = column().apply { clipChildren=false;clipToPadding=false;setBackgroundColor(this@MainActivity.background) }
         setCouiPageContent(root, darkUi, primary)
         updateSystemBars()
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            // The scene fills the window; only controls and the scroll end avoid navigation.
-            view.setPadding(bars.left, 0, bars.right, 0)
+        fun updatePageInsets(insets: WindowInsetsCompat) {
+            val types = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            val bars = insets.getInsetsIgnoringVisibility(types)
+            // Keep the edge-to-edge backdrop while measuring the controls against
+            // the real window insets, before Compose or the AndroidView consumes them.
+            root.setPadding(bars.left, 0, bars.right, 0)
             if(topInset!=bars.top){
                 topInset=bars.top
                 applyHeaderInset?.invoke(topInset)
@@ -278,8 +280,14 @@ class MainActivity : AppCompatActivity() {
                 applyBottomInset?.invoke(bottomInset)
                 backBottomInset?.invoke(bottomInset)
             }
-            insets
         }
+        val decor = window.decorView
+        updatePageInsets(WindowInsetsCompat.toWindowInsetsCompat(windowManager.currentWindowMetrics.windowInsets, decor))
+        ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
+            updatePageInsets(insets)
+            ViewCompat.onApplyWindowInsets(view, insets)
+        }
+        ViewCompat.requestApplyInsets(decor)
         page = FrameLayout(this).apply { isFocusableInTouchMode=true;clipChildren=false;clipToPadding=false }
         root.addView(page, LinearLayout.LayoutParams(-1, -1))
         showPageWithDestination()
@@ -1090,7 +1098,7 @@ class MainActivity : AppCompatActivity() {
         val fade=(y/travel).coerceIn(0f,1f)
         floating.alpha=1f-fade*fade*(3f-2f*fade)
         floating.translationX=0f
-        floating.translationY=topInset+large.top-y.toFloat()
+        floating.translationY=(topInset+large.top-y.toFloat()).coerceAtLeast(topInset.toFloat())
         floating.scaleX=1f;floating.scaleY=1f
     }
 

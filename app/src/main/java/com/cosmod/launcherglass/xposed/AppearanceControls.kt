@@ -1,6 +1,9 @@
 package com.cosmod.launcherglass.xposed
 
+import android.animation.ValueAnimator
 import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Color
@@ -10,6 +13,7 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.PathInterpolator
 import android.widget.ImageView
 import androidx.core.view.doOnLayout
 import com.cosmod.launcherglass.ui.DesktopAppearance.Mode
@@ -66,23 +70,21 @@ internal class AppearanceSegment(val view: View, val select: (Int) -> Unit)
 internal class AppearanceButtonContract(loader: ClassLoader) {
     private val type = loader.loadClass("com.coui.appcompat.searchview.SearchBarIconButton")
     private val constructor = type.getConstructor(Context::class.java)
+    private val blur = type.getMethod("setBlurEffectEnable", Boolean::class.javaPrimitiveType)
     private val stroke = type.getMethod("setStrokeEffectEnable", Boolean::class.javaPrimitiveType)
     private val spotlight = type.getMethod("setSpotLightEnabled", Boolean::class.javaPrimitiveType)
     private val motion = type.getMethod("setTouchAnimationEnable", Boolean::class.javaPrimitiveType)
 
     fun create(context: Context): ImageView = (constructor.newInstance(context) as ImageView).apply {
+        blur.invoke(this, true)
         stroke.invoke(this, true)
         spotlight.invoke(this, true)
         motion.invoke(this, true)
     }
 }
 
-internal class AppearanceSample(
-    context: Context,
-    private var weather: PreviewIcons.Icon?,
-    private val mode: Mode,
-    private val accent: Int,
-) : View(context) {
+internal class AppearanceSample(context: Context, private val mode: Mode) : View(context) {
+    private var weather: AppearanceWeather? = null
     private val density = resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val bounds = RectF()
@@ -95,7 +97,7 @@ internal class AppearanceSample(
     private var rim: LinearGradient? = null
     private var logoFilter = shadedGlyph(glyph)
 
-    fun setWeather(icon: PreviewIcons.Icon) {
+    fun setWeather(icon: AppearanceWeather) {
         weather = icon
         invalidate()
     }
@@ -114,7 +116,7 @@ internal class AppearanceSample(
         val radius = density * 13
         bounds.set(inset, inset, w - inset, h - inset)
         iconBounds.set(bounds)
-        iconBounds.inset(density * 4, density * 4)
+        iconBounds.inset(density * 1.5f, density * 1.5f)
         mask.rewind()
         if (!addOplusSmoothRoundRect(mask, bounds, radius)) {
             mask.addRoundRect(bounds, radius, radius, android.graphics.Path.Direction.CW)
@@ -149,7 +151,7 @@ internal class AppearanceSample(
             canvas.drawPath(mask, paint)
             paint.shader = null
         }
-        val image = if (stock) weather?.source else weather?.layers?.glyphBitmap ?: weather?.source
+        val image = if (stock) weather?.source else weather?.glyph
         if (image != null) {
             paint.alpha = 255
             if (!stock && mode != Mode.DARK) {
@@ -162,12 +164,55 @@ internal class AppearanceSample(
             paint.colorFilter = null
         }
         if (selected || !stock) {
-            paint.color = if (selected) accent else Color.WHITE
+            paint.color = Color.WHITE
             paint.shader = if (selected) null else rim
-            paint.strokeWidth = density * if (selected) 1.25f else .75f
+            paint.strokeWidth = density * if (selected) 1.1f else .6f
             paint.style = Paint.Style.STROKE
             canvas.drawPath(mask, paint)
             paint.shader = null
+        }
+    }
+}
+
+/** Load Weather's package resource directly so the currently applied icon pack cannot tint the sample. */
+internal class AppearanceWeather(val source: Bitmap, val glyph: Bitmap) {
+    companion object {
+        fun load(context: Context): AppearanceWeather? {
+            val manager = context.packageManager
+            for (name in listOf("net.oneplus.weather", "com.coloros.weather2", "com.oplus.weather")) {
+                val icon = runCatching {
+                    val app = manager.getApplicationInfo(name, 0)
+                    val resources = manager.getResourcesForApplication(app)
+                    val classicId = resources.getIdentifier("ic_launcher_weather", "drawable", name)
+                    if (classicId != 0) {
+                        val source = Bitmap.createBitmap(144, 144, Bitmap.Config.ARGB_8888)
+                        resources.getDrawable(classicId, null).apply {
+                            setBounds(0, 0, source.width, source.height)
+                            draw(Canvas(source))
+                        }
+                        // The stock art is flattened over a blue tile. Remove its blue
+                        // backing while retaining the yellow sun and softly shaded cloud.
+                        val pixels = IntArray(source.width * source.height)
+                        source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+                        for (i in pixels.indices) {
+                            val p = pixels[i]
+                            val blueKey = (Color.blue(p) - Color.red(p) - 32).coerceIn(0, 100)
+                            pixels[i] = (p and 0x00ffffff) or ((Color.alpha(p) * (100 - blueKey) / 100) shl 24)
+                        }
+                        AppearanceWeather(source, Bitmap.createBitmap(pixels, source.width, source.height,
+                            Bitmap.Config.ARGB_8888))
+                    } else {
+                        val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(name)
+                        val activity = manager.resolveActivity(launch, 0)?.activityInfo
+                        val resourceId = activity?.iconResource?.takeIf { it != 0 } ?: app.icon
+                        PreviewIcons.fromDrawable(resources.getDrawable(resourceId, null))?.let {
+                            AppearanceWeather(it.source, it.layers.glyphBitmap)
+                        }
+                    }
+                }.getOrNull()
+                if (icon != null) return icon
+            }
+            return null
         }
     }
 }
@@ -184,11 +229,38 @@ internal class AppearanceSpectrum(context: Context, private val range: Int) : Vi
     private var inputStart = Float.NaN
     private var inputLength = 0f
     var position = 0
-        set(value) {
-            if (field == value) return
-            field = value
+        private set
+    var displayedPosition = 0f
+        private set
+    var onPositionDrawn: (() -> Unit)? = null
+    private var motion: ValueAnimator? = null
+
+    fun moveTo(value: Int, animate: Boolean = false) {
+        if (position == value && (animate || displayedPosition == value.toFloat())) return
+        position = value
+        motion?.cancel()
+        fun show(progress: Float) {
+            displayedPosition = progress
             invalidate()
+            onPositionDrawn?.invoke()
         }
+        if (!animate || !isAttachedToWindow || !ValueAnimator.areAnimatorsEnabled()) {
+            show(value.toFloat())
+            return
+        }
+        motion = ValueAnimator.ofFloat(displayedPosition, value.toFloat()).apply {
+            duration = 190L
+            interpolator = PathInterpolator(.2f, .65f, .3f, 1f)
+            addUpdateListener { show(it.animatedValue as Float) }
+            start()
+        }
+    }
+
+    override fun onDetachedFromWindow() {
+        motion?.cancel()
+        displayedPosition = position.toFloat()
+        super.onDetachedFromWindow()
+    }
 
     fun setColors(value: IntArray) {
         if (colors.contentEquals(value)) return
@@ -234,13 +306,13 @@ internal class AppearanceSpectrum(context: Context, private val range: Int) : Vi
         paint.color = Color.WHITE
         canvas.drawRoundRect(start - radius, y - radius, end + radius, y + radius, radius, radius, paint)
         paint.shader = null
-        val fraction = position.toFloat() / range
+        val fraction = displayedPosition / range
         val x = start + (end - start) * if (layoutDirection == LAYOUT_DIRECTION_RTL) 1f - fraction else fraction
         paint.color = 0x59000000
         canvas.drawCircle(x, y + density, 11f * density, paint)
         paint.color = Color.WHITE
         canvas.drawCircle(x, y, 10.5f * density, paint)
-        cursorHsv[0] = position.toFloat() % 360f
+        cursorHsv[0] = displayedPosition % 360f
         paint.color = handle ?: Color.HSVToColor(cursorHsv)
         canvas.drawCircle(x, y, radius, paint)
     }
