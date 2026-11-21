@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 445
+
+- Наклон окон при открытии и возврате на рабочий стол на ColorOS 16 применяется в транзакции лаунчера. Системная миниатюра сохраняет штатную анимацию.
+
 ### Сборка 444
 
 - Кнопка «Оформление» берёт высоту и размер текста у штатных кнопок редактора ColorOS.
@@ -254,6 +258,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 445
+
+- ColorOS 16 applies window tilt during app launch and return to home in the launcher's surface transaction. The system thumbnail keeps its native animation.
 
 ### Build 444
 
