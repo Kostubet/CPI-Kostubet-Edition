@@ -33,17 +33,25 @@ internal class SoftGlassPanelTargets(
         private set
 
     fun current() = drawing.get()?.owner
-    fun nativeDrawn() { drawing.get()?.rendered = true }
+    fun nativeDrawn(owner: Owner) {
+        var current = drawing.get()
+        while (current != null && current.owner.sameTrack(owner)) {
+            current.rendered = true
+            current = current.nested
+        }
+    }
+
+    private fun Owner.sameTrack(other: Owner): Boolean =
+        this === other || (kind == other.kind && view.get()?.let { it === other.view.get() } == true)
 
     fun owner(drawable: Drawable): Owner? {
-        current()?.let { return it }
         var link: Drawable? = drawable
         repeat(12) {
             val node = link ?: return null
             owners[node]?.let { return it }
             link = node.callback as? Drawable
         }
-        return null
+        return current()
     }
 
     fun install(loader: ClassLoader) {

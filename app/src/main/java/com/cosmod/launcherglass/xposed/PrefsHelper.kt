@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import com.cosmod.launcherglass.ui.GlassDispersionSettings
+import com.cosmod.launcherglass.ui.DesktopAppearance
 import com.cosmod.launcherglass.ui.SettingsDefaults
 import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.util.GlassLogger
@@ -17,6 +18,7 @@ import com.cosmod.launcherglass.util.WallpaperHelper
 
 object PrefsHelper {
     @Volatile var iconsFeatureEnabled=true
+    @Volatile internal var nativeClassicIcons = false
         private set
     @Volatile var nativeIconsSupported=true
         private set
@@ -41,6 +43,9 @@ object PrefsHelper {
     @Volatile var iconDispersion=0
     @Volatile var dockDispersion=0
     @Volatile var dockColorFilter:android.graphics.ColorMatrixColorFilter?=null
+        private set
+    private var lastDockSaturation = 100
+    private var lastDockDarkness = 0
     @Volatile var dockBlur=14
     @Volatile var dockStyle=0
     @Volatile var dockOpacity=0
@@ -79,6 +84,12 @@ object PrefsHelper {
     @Volatile var iconPalette = com.cosmod.launcherglass.util.IconPalette.from(0, 0, 0, 0)
     @Volatile var launcherIconSize=100
         private set
+    @Volatile var desktopLargeIcons = false
+        private set
+    @Volatile var desktopLightIconGlass = false
+        private set
+    @Volatile var desktopDimWallpaper = false
+        private set
 
     @Volatile var blurVibrancy = 0
         private set
@@ -91,6 +102,8 @@ object PrefsHelper {
     @Volatile var blurColorFilter: android.graphics.ColorMatrixColorFilter? = null
     private var initialized = false
     @Volatile private var loaded=false
+    @Volatile private var currentDesktopAppearance: DesktopAppearance.Profile? = null
+    fun usesDesktopAppearance() = enabled && currentDesktopAppearance?.let { it.mode != DesktopAppearance.Mode.MANUAL } == true
     private var followsWallpaper=false
     private var wallpaperTone:IconPalette.WallpaperTone?=null
 
@@ -122,9 +135,11 @@ object PrefsHelper {
         })
 
         try {
-            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            val main = Handler(Looper.getMainLooper())
+            val reload = Runnable { loadPrefs(context) }
+            val observer = object : ContentObserver(main) {
                 override fun onChange(selfChange: Boolean, uri: Uri?) {
-                    loadPrefs(context)
+                    if (!main.hasCallbacks(reload)) main.post(reload)
                 }
             }
             context.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, true, observer)
@@ -137,14 +152,28 @@ object PrefsHelper {
         }
     }
 
+    fun retryOnResume(context: Context) {
+        if (!loaded) loadPrefs(context)
+    }
+
     fun loadPrefs(context: Context, systemDark: Boolean? = null,wallpaperOverride:IconPalette.WallpaperTone?=null) {
         try {
-            val bundle = context.contentResolver.call(
+            val stored = context.contentResolver.call(
                 SettingsProvider.CONTENT_URI,
                 SettingsProvider.METHOD_GET_ALL,
                 null,
                 null
             ) ?: return
+            val actualSystemDark = systemDark ?: IconPalette.isSystemDark(context)
+            val appearance = DesktopAppearance.read(stored, actualSystemDark)
+            val previousAppearance = currentDesktopAppearance
+            val appearanceChanged = appearance.mode != (previousAppearance?.mode ?: DesktopAppearance.Mode.MANUAL)
+            val updatingDesktopProfile = previousAppearance != null && previousAppearance != appearance &&
+                appearance.mode != DesktopAppearance.Mode.MANUAL
+            val lightIconGlass = appearance.usesLightGlass(actualSystemDark)
+            val iconPlateFinishChanged = desktopLightIconGlass != lightIconGlass
+            val bundle = if (appearance.mode == DesktopAppearance.Mode.MANUAL) stored else Bundle(stored)
+            DesktopAppearance.apply(bundle, appearance, actualSystemDark)
 
             val previousWallpaperEffects=wallpaperEffectsEnabled
             val newIconsFeatureEnabled=bundle.getBoolean(com.cosmod.launcherglass.ui.FeatureSections.key("ICONS"),true)
@@ -153,9 +182,12 @@ object PrefsHelper {
             nativeIconsSupported=bundle.getInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,0)!=2
             val performanceChanged=com.cosmod.launcherglass.util.PerformancePolicy.update(context,bundle)
             Ba31kAppTransitions.update(bundle)
-            Ba31kShadeMotion.update(bundle)
             DockMaterial.updateUnlock(bundle)
             launcherIconSize=bundle.getInt("launcher_icon_size",100).coerceIn(70,130)
+            desktopLargeIcons = bundle.getInt(DesktopAppearance.LARGE_ICONS) == 1
+            val previousWallpaperDim = desktopDimWallpaper
+            desktopDimWallpaper = bundle.getBoolean(SettingsProvider.KEY_ENABLED, true) &&
+                bundle.getInt(DesktopAppearance.DIM_WALLPAPER) == 1
             val newEnabled = bundle.getBoolean(SettingsProvider.KEY_ENABLED, SettingsDefaults.boolean(SettingsProvider.KEY_ENABLED))
             val toneEnabled=bundle.getBoolean(SettingsProvider.KEY_BLUR_TONE_ENABLED,true)
             val newBgOpacity = if (toneEnabled)
@@ -224,17 +256,23 @@ object PrefsHelper {
                 configuration.uiMode = (configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or
                     (if (systemDark) android.content.res.Configuration.UI_MODE_NIGHT_YES else android.content.res.Configuration.UI_MODE_NIGHT_NO)
             }
-            val darkIcons = NativeIconAppearance.read(context, configuration)
-                ?: (systemDark ?: com.cosmod.launcherglass.util.IconPalette.isSystemDark(context))
+            val nativeDarkIcons = NativeIconAppearance.read(context, configuration) ?: actualSystemDark
+            val classicIcons = NativeIconAppearance.isClassic(context)
+            val classicChanged = classicIcons != nativeClassicIcons
+            nativeClassicIcons = classicIcons
+            val darkIcons = if (appearance.mode == DesktopAppearance.Mode.MANUAL ||
+                appearance.mode == DesktopAppearance.Mode.STOCK) nativeDarkIcons else appearance.iconDark(actualSystemDark)
             val fluxSupport=FluxIconSupport.read(context)
-            if(fluxSupport!=FluxIconSupport.UNKNOWN && bundle.getInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,0)!=fluxSupport) {
-                context.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_REPORT_ICON_APPEARANCE,
-                    null,android.os.Bundle().apply {putInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,fluxSupport)})
-            }
-            if (!bundle.containsKey(SettingsProvider.KEY_NATIVE_ICON_DARK) ||
-                bundle.getBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK) != darkIcons) {
-                context.contentResolver.call(SettingsProvider.CONTENT_URI, SettingsProvider.METHOD_REPORT_ICON_APPEARANCE,
-                    null, android.os.Bundle().apply { putBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK, darkIcons) })
+            val reportSupport = fluxSupport != FluxIconSupport.UNKNOWN &&
+                bundle.getInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT, 0) != fluxSupport
+            val reportTheme = !bundle.containsKey(SettingsProvider.KEY_NATIVE_ICON_DARK) ||
+                bundle.getBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK) != nativeDarkIcons
+            if (reportSupport || reportTheme) {
+                val report = Bundle().apply {
+                    if (reportSupport) putInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT, fluxSupport)
+                    if (reportTheme) putBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK, nativeDarkIcons)
+                }
+                context.contentResolver.call(SettingsProvider.CONTENT_URI, SettingsProvider.METHOD_REPORT_ICON_APPEARANCE, null, report)
             }
             val colorKeys = SettingsProvider.colorKeys(darkIcons)
             val hue=bundle.getInt(colorKeys[0],SettingsDefaults.integer(colorKeys[0]))
@@ -261,15 +299,12 @@ object PrefsHelper {
             val paletteChanged = newPalette != iconPalette
             val masterChanged = newEnabled != enabled
 
-            if (newBgOpacity != bgOpacity || newEnabled != enabled) {
-                IconBitmapProcessor.clearCache()
-            }
             val blurRadiusChanged=newBlurRadius!=blurRadius
             val blurModeChanged=newBlurMode!=blurMode
             val blurEnabledChanged=newBlurEnabled!=blurEnabled
             val drawerChanged=newDrawerBlurEnabled!=drawerBlurEnabled
             val folderEnabledChanged=newFolderBlurEnabled!=folderBlurEnabled
-            val materialChanged=iconsSectionChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
+            val materialChanged=iconsSectionChanged || classicChanged || iconPlateFinishChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
                 newFolderBlurEnabled!=folderBlurEnabled || newFolderIconsBlurEnabled!=folderIconsBlurEnabled || newDrawerBlurEnabled!=drawerBlurEnabled ||
                 newIconStroke != iconStroke || newStrokeOpacity != strokeOpacity ||
                 newGradientOpacity != gradientOpacity || glyphOutlineChanged || paletteChanged ||
@@ -285,6 +320,7 @@ object PrefsHelper {
             enabled = newEnabled
             gpuEffects=newGpuEffects
             bgOpacity = newBgOpacity
+            desktopLightIconGlass = lightIconGlass
             blurEnabled = newBlurEnabled
             colorDepthBits=newColorDepth
             colorDepthStage=newDepthStage
@@ -296,8 +332,13 @@ object PrefsHelper {
             drawerBlurEnabled = newDrawerBlurEnabled
             val dockSaturation=bundle.getInt("dock_backdrop_saturation",100).coerceIn(0,200)
             val dockDarkness=bundle.getInt("dock_backdrop_darkness",0).coerceIn(0,100)
-            dockColorFilter=if(dockSaturation==100 && dockDarkness==0)null else android.graphics.ColorMatrixColorFilter(
-                com.cosmod.launcherglass.util.DockToneMatrix.values(dockSaturation,dockDarkness))
+            if (lastDockSaturation != dockSaturation || lastDockDarkness != dockDarkness) {
+                dockColorFilter = if (dockSaturation == 100 && dockDarkness == 0) null
+                else android.graphics.ColorMatrixColorFilter(
+                    com.cosmod.launcherglass.util.DockToneMatrix.values(dockSaturation, dockDarkness))
+                lastDockSaturation = dockSaturation
+                lastDockDarkness = dockDarkness
+            }
             dockBlur=bundle.getInt(SettingsProvider.KEY_DOCK_BLUR,14).coerceIn(0,40)
             dockStyle=bundle.getInt(SettingsProvider.KEY_DOCK_STYLE,0).coerceIn(0,2)
             dockOpacity=com.cosmod.launcherglass.ui.GlobalGlassSettings.opacity(bundle).coerceIn(0,100)
@@ -332,17 +373,19 @@ object PrefsHelper {
             // In particular, a contour toggle must rebuild the overlay itself,
             // not only update the wallpaper sampling RenderNode.
             if (materialChanged || folderChanged) {
-                IconGlassHook.invalidateShaders()
-            }
-            if (paletteChanged) {
-                IconBitmapProcessor.clearTintCache()
-                IconMaterialRenderer.clear()
+                if (updatingDesktopProfile && !masterChanged && !backendChanged && !folderChanged &&
+                    !geometryChanged && !edgeChanged && !opticsChanged && !glassEngineChanged) {
+                    // The renderer reuses its RenderNodes and switches the keyed material
+                    // on draw when the profile only changes color, opacity or style.
+                    IconGlassHook.invalidateFolderPreviews()
+                } else IconGlassHook.invalidateShaders()
             }
             if(materialChanged || folderChanged || paletteChanged){
-                IconGlassHook.invalidateFolderPreviews()
                 IconGlassHook.invalidateActiveIcons()
             }
-            if (masterChanged || backendChanged || iconsSectionChanged) {
+            // Quick appearance profiles use the same native drawables. Preserve
+            // their source layers and skip a native model reload when entering or leaving Stock.
+            if (masterChanged || backendChanged || (iconsSectionChanged && !appearanceChanged)) {
                 IconGlassHook.onIconThemeChanged()
                 IconGlassHook.reloadNativeIcons()
             }
@@ -360,12 +403,18 @@ object PrefsHelper {
             if(masterChanged || widgetChanged || widgetElementsChanged || photoSourceChanged || edgeChanged || glassEngineChanged)PhotoWidgetMaterial.onSettingsChanged()
             DockMaterial.onSettingsChanged()
             LauncherIconSize.onSettingsChanged()
+            if (previousWallpaperDim != desktopDimWallpaper) DesktopAppearanceToolbar.updateWallpaperShade()
             if(!enabled){
                 IconGlassHook.onModuleDisabled()
                 com.cosmod.launcherglass.util.LauncherWallpaperCapture.onModuleDisabled()
                 ModuleHooks.setEnabled(false)
             }
             loaded=true
+            currentDesktopAppearance = appearance
+            DesktopAppearanceTransition.onSettingsApplied(stored)
+            if (enabled && (appearanceChanged || masterChanged) && appearance.mode != DesktopAppearance.Mode.MANUAL) {
+                NativeFluxIconStyle.request(context)
+            }
 
             GlassLogger.i(
                 "PrefsHelper",

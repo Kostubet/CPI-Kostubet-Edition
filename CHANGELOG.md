@@ -1,8 +1,150 @@
-# CPI Kostubet Edition 0.3.1
+# CPI Kostubet Edition 0.3.2
 
 [Русский](#русский) · [English](#english)
 
 ## Русский
+
+### Сборка 450 — релиз 0.3.2
+
+- Добавлена проверка версии Android для диагностики стекла. Пипетка сохраняет резервный источник при отказе в доступе к файлу обоев.
+
+### Сборка 449
+
+- «Оформление» выбирает обработчик ползунка COUI по его сигнатуре. Исправлено исчезновение кнопки на ColorOS 17 с двумя вариантами обработчика.
+
+### Сборка 448
+
+- Кнопка «Оформление» подключается при появлении штатной панели редактирования рабочего стола и учитывает состояние лаунчера ColorOS.
+- Удалён эффект «Шторка уведомлений» из раздела «Анимации iOS».
+
+### Сборка 447
+
+- «Тёмные» используют Frosted для иконок и виджетов. Цвет и насыщенность логотипов настраиваются отдельно. «Прозрачные» и «Однотонные» возвращают жидкое стекло.
+- Смена стиля и цвета в «Оформлении» плавно обновляет видимые иконки и виджеты рабочего стола.
+- На ColorOS 16 штатная подготовка размытия обоев выполняется на фоновом потоке с Looper, если лаунчер запустил её из потока без Looper.
+- Расчёт наклона использует границы окна и на кадрах, где штатная матрица не сохраняет форму прямоугольника.
+
+### Сборка 446
+
+- ColorOS 16 сохраняет точку применения наклона при оптимизации кода лаунчера.
+- На ColorOS 16 и 17 частота копирования фона учитывает профиль, нагрев и энергосбережение. Ползунки переиспользуют состояние стекла, а новые установки начинают с профиля «Авто».
+
+### Сборка 445
+
+- Наклон окон при открытии и возврате на рабочий стол на ColorOS 16 применяется в транзакции лаунчера. Системная миниатюра сохраняет штатную анимацию.
+
+### Сборка 444
+
+- Кнопка «Оформление» берёт высоту и размер текста у штатных кнопок редактора ColorOS.
+- Стекло виджетов на ColorOS 16 использует границы карточки и системное сглаживание углов.
+- Анимация возврата домой обрабатывает кадры без обрезки окна. Если настройки не загрузились при запуске, лаунчер повторяет чтение при разблокировке и возвращении на экран.
+- Защита от сбоя `CardTracker` на ColorOS 16 включается до загрузки настроек CPI.
+
+### Сборка 442
+
+- На ColorOS 16 с лаунчером 16.6.20 восстановлено подключение кнопки «Оформление» и движка анимаций iOS к системному лаунчеру.
+- Стекло клавиатуры PIN использует расположение кнопок штатной клавиатуры ColorOS.
+- Панель громкости на ColorOS 16 использует геометрию штатного ползунка COUI и поддерживает настройку системного размытия.
+
+### Сборка 441
+
+- В «Оформление → Однотонные» добавлен ползунок «Прозрачность цвета» для иконок и виджетов.
+- Заголовки вкладок и панель Haptic Studio учитывают реальные границы окна и высоту системных панелей.
+- На ColorOS 16 стекло использует штатный радиус скругления карточек. Перекраска сохраняет детали аватаров, а отрисовка запоминает доступные методы и переиспользует матрицу между кадрами. Лаунчер пропускает несовместимую инициализацию трекера карточек при известной ошибке `OplusTrack.getInstance`.
+- Раздельная обработка фона и логотипа Flux выбирается по возможностям лаунчера. Поддержка распространяется на проверенный интерфейс Launcher 16.6.20.
+
+### Сборка 440
+
+- Стекло «Мягкий свет» переиспользует входные текстуры и параметры шейдера для ползунков и живых оповещений на экране блокировки. Вложенные обёртки больше не запускают резервную отрисовку поверх нативной.
+- Захват фона ползунков прекращает запрашивать перерисовку, когда подходящего кадра нет. Изменение приоритета стекла на панели громкости сразу обновляет материал.
+- Лаунчер пропускает повторную перерисовку неизменившихся образцов стекла. Перекраска виджетов без выцветания использует один слой вместо двух, а хуки анимаций переиспользуют память для матриц.
+- Системные процессы объединяют повторные уведомления об изменении настроек. System UI восстанавливает штатный режим отрисовки фона живых оповещений при отключении эффекта.
+- «Прозрачные → Светлые» используют лёгкий нейтральный оттенок стекла для иконок и делают подложки виджетов прозрачнее.
+
+### Сборка 439
+
+- В «Оформлении» CPI переключает классические значки и светлый вариант Flux на «Градиент → Тёмный». Уже настроенный тёмный или автоматический режим Flux сохраняется.
+- Увеличение иконок и папок плавно доходит до границы ячейки. Подписи продолжают исчезать при пересоздании текстового слоя лаунчером.
+
+### Сборка 438
+
+- Все стили «Оформления» используют нативные иконки Flux. Исправлены образцы «Погоды» для тёмного, прозрачного и однотонного стилей.
+- Светлый прозрачный стиль сохраняет размытие и преломление без затемняющего слоя.
+- Увеличение учитывает границы ячеек, включая растянутые ярлыки и папки. Перспектива при переходе сохраняет центр движущейся иконки.
+
+### Сборка 437
+
+- Карточка «Оформление» использует общую механику растягивания COUI. Угловые кнопки используют материал, тень и подсветку панели COUI. Действия под цветовыми шкалами остаются компактными иконками с откликом на касание.
+- Образцы «Погоды» точнее передают тёмный и однотонный стили. Исправлено отделение фона классических иконок, из-за которого на рабочем столе и в доке появлялись полосы.
+- При входе и выходе иконка сохраняет штатное затухание и получает деформацию вокруг своего центра, если общая проекция выходит за её границы. После закрытия восстанавливается настроенный размер значка.
+
+### Сборка 436
+
+- «Оформление» тянется в любую сторону и плавнее отпружинивает по кривой COUI. Свечение следует за пальцем, угловые кнопки светлее, а три действия под ползунками отображаются иконками.
+- Образцы используют скругление лаунчера. Подложки тёмных однотонных иконок стали немного светлее. В светлом прозрачном режиме виден только логотип.
+- Улучшены перекраска классических иконок и передача изображения между окном и значком при открытии и возврате.
+- Размер больших значков восстанавливается после обновления иконок. Значки дока увеличиваются в пределах его скруглённой подложки.
+- Haptic Studio открыт внизу вкладки «Функции» и доступен через поиск.
+
+### Сборка 435
+
+- В «Оформлении» стиль «По умолчанию» включает классические иконки ColorOS. Карточка стала шире, угловые кнопки используют стеклянный материал COUI, а образцы берутся из оригинальной иконки «Погоды».
+- В однотонном режиме добавлены кнопки монохрома, цветов обоев и пипетки. Пипетка показывает точку забора и выбранный оттенок, а тап по цветовой шкале плавно перемещает бегунок.
+- Карточка растягивается при лёгком движении вверх и возвращается пружиной. Она закрывается при уходе с рабочего стола. Иконки и папки увеличиваются от центра, а подписи плавно гаснут.
+- Светлое прозрачное стекло сохраняет больше света. Заголовки и кнопки CPI учитывают высоту статус-бара.
+
+### Сборка 434
+
+- Нижний переключатель сохраняет положение и плавно меняет сегменты при смене стиля. Цветовые ползунки раскрываются над ним.
+- Кнопки «Оформления» используют компоненты COUI с контуром и откликом на касание. У переключателя «Светлые / Тёмные / Авто» включено родное краевое освещение.
+- Пипетка сначала читает исходное статическое изображение, в том числе на прошивках с эффектом глубины. Образцы используют системную иконку «Погоды» и сохраняют детали логотипа.
+- Светлый прозрачный стиль сохраняет подложку из прозрачного стекла. Смена стиля переиспользует подготовленные слои, а перерисовка образца при движении ползунков выполняется максимум один раз за кадр.
+- Рядом с пипеткой добавлена кнопка размера. Исправлено двойное масштабирование в растянутых контейнерах. «Оформление» ждёт выхода из штатного редактора, а затемнение обоев видно и за статус-баром.
+
+### Сборка 433
+
+- «Оформление» плавно открывается у нижнего края, закрывается свайпом вниз и при открытии завершает редактирование рабочего стола штатной анимацией ColorOS.
+- Выбор темы использует сегменты COUI. Образцы «Погоды» одного размера, пипетка переехала в правый верхний угол и использует более чёткие обои.
+- Ползунки обновляют образец под пальцем и применяют цвет при отпускании. Переключение стилей сохраняет кэш исходных слоёв иконок. Светлый прозрачный стиль показывает только логотип, тёмный оставляет затемнённое стекло.
+
+### Сборка 432
+
+- «Оформление» закреплено снизу и меняет высоту при переключении стилей. Карточка использует исходный материал COUI. Открытие больше не накладывает общую маску на рабочий стол.
+- Добавлены выбор цвета пипеткой с обоев, переключение размера и подписей иконок и ручное затемнение обоев. Ползунки оттенка и насыщенности применяются к рабочему столу при движении.
+
+### Сборка 431
+
+- «Оформление» открывается компактной панелью COUI над рабочим столом. Убраны затемнение и размытие за пределами панели.
+- Четыре варианта собраны в одну строку с иконками «Погоды». Для однотонного режима показаны градиентные ползунки цвета и насыщенности.
+
+### Сборка 430
+
+- Исправлено падение «Функций» при запуске поиска COUI. Обновлены экран обновлений и нижняя панель, убраны лишние обводки карточек, добавлен мягкий отскок меню выбора COUI 2.0.
+- В «Оформлении» все варианты показаны на системной иконке погоды. Ручное изменение цвета сохраняет выбранный профиль за основу.
+- Зимние залпы стартуют из разных частей баннера. Последний раскрывается в центре экрана большим золотым салютом.
+- Подложки восстанавливают образец обоев после сброса графических слоёв. Подготовка иконок меню приложений распределена между кадрами. Стекло шторки и боковой панели переиспользует эффекты и реже перерисовывается.
+
+### Сборка 429
+
+- Экраны CPI, Haptic Studio и обновлений используют общий Scaffold COUI. Обновлены поиск с кнопкой отмены, группировка строк и оформление карточек.
+- «Оформление» использует нативную панель COUI с размытием, четырьмя образцами в одну строку и градиентной шкалой насыщенности выбранного оттенка.
+- В зимнем эффекте баннера 11 салютов синхронизированы с 11 нотами. Вибрация сильнее, с запасным режимом для моторов без регулировки амплитуды.
+
+### Сборка 428
+
+- Исправлено падение лаунчера при открытии «Оформления» с обоями, загруженными в аппаратный Bitmap.
+
+### Сборка 427 — оформление рабочего стола
+
+- В режиме редактирования ColorOS 17 между «Группа» и «Готово» добавлено «Оформление». Панель COUI показывает штатные иконки, тёмный, прозрачный и однотонный варианты. Для стекла доступны светлый, тёмный и автоматический варианты, для однотонного режима — цвет и насыщенность.
+- Профили используют действующие движки стекла и перекраски CPI. Ручные значения сохраняются и снова применяются через «Иконки» или «Виджеты».
+
+### Сборка 426 — исправление обновлений
+
+- Проверка обновлений использует публичный файл версии и резервное зеркало без расходования анонимного лимита API GitHub. API сохранён как запасной источник. Ручная проверка обходит кэш.
+- При откате версии сбрасывается отметка уже показанного уведомления. Ошибка проверки не выдаётся за отсутствие обновлений; ограничение запросов получает отдельное сообщение.
+- Публикация релиза автоматически обновляет файл версии с номером сборки, размером APK и SHA-256. Проверка подписи при установке сохранена.
+- Для старых сборок, использующих только API, может потребоваться одно ручное обновление.
 
 ### Сборка 425 — релиз 0.3.1
 
@@ -141,6 +283,148 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 450 — version 0.3.2
+
+- Added an Android version guard for glass diagnostics. The eyedropper retains its fallback when wallpaper file access is denied.
+
+### Build 449
+
+- Appearance resolves the COUI slider listener by signature, restoring the button on ColorOS 17 builds with two listener overloads.
+
+### Build 448
+
+- The Appearance button binds when the stock home screen editing toolbar attaches and follows the ColorOS Launcher state.
+- Removed the Notification shade effect from iOS Animations.
+
+### Build 447
+
+- Dark Appearance uses Frosted for icons and widgets, with separate icon logo hue and saturation. Clear and Tinted restore Liquid Glass.
+- Changing the Appearance style or color fades between the old and new looks of visible home screen icons and widgets.
+- On ColorOS 16, stock wallpaper blur preparation runs on a background Looper when launched from a thread without one.
+- Window tilt uses mapped bounds even when the stock transform does not preserve a rectangle.
+
+### Build 446
+
+- Keeps the ColorOS 16 window tilt hook reachable when the launcher code is optimized.
+- Backdrop capture on ColorOS 16 and 17 follows the selected performance profile, temperature, and battery saver. Sliders retain their glass state and new installs start in Auto mode.
+
+### Build 445
+
+- ColorOS 16 applies window tilt during app launch and return to home in the launcher's surface transaction. The system thumbnail keeps its native animation.
+
+### Build 444
+
+- The Appearance button inherits the height and text size of the native ColorOS edit controls.
+- Widget glass on ColorOS 16 uses the card bounds and native corner smoothing.
+- Home transitions handle frames without a window crop. The launcher retries reading settings on unlock and resume if they were unavailable at startup.
+- The ColorOS 16 `CardTracker` guard is active before CPI settings load.
+
+### Build 442
+
+- Restored the Appearance entry and iOS animation engine on ColorOS 16 with System Launcher 16.6.20.
+- PIN glass follows the stock ColorOS keyboard button positions.
+- Volume panel glass uses the stock COUI slider geometry and supports adjusting native blur on ColorOS 16.
+
+### Build 441
+
+- Added a color transparency slider for icons and widgets in Appearance → Tinted.
+- Tab headings and the Haptic Studio toolbar use the current window and system bar insets.
+- ColorOS 16 glass uses the stock widget corner radius. Tinting preserves avatar detail, and rendering caches supported methods and reuses the frame matrix. The launcher skips incompatible card tracking initialization when it encounters the known `OplusTrack.getInstance` error.
+- Flux separates the icon backdrop and glyph according to launcher capabilities, including the verified Launcher 16.6.20 contract.
+
+### Build 440
+
+- Soft Glass reuses input textures and shader uniforms for sliders and lock-screen live activity cards. Nested drawables no longer paint the fallback over the native material.
+- Slider backdrop capture stops requesting redraws when no suitable frame is available. Changing volume-panel material priority refreshes the panel.
+- The launcher skips redraws for unchanged glass samples, combines widget tint and opacity when there is no fade, and reuses matrix storage in transition hooks.
+- System processes coalesce repeated preference notifications. System UI restores the original live activity background drawing mode when the effect is disabled.
+- The light Clear appearance adds a subtle neutral tint to icon glass and makes widget backgrounds more transparent.
+
+### Build 439
+
+- CPI Appearance switches Classic and bright Flux icons to Gradient → Dark. Existing dark and automatic Gradient modes are preserved.
+- Icons and folders scale smoothly to their grid limit, and launcher label fades survive text layer rebinds.
+
+### Build 438
+
+- All Appearance styles use native Flux icons. Corrected the Weather samples for the dark, transparent, and tinted styles.
+- The light transparent style retains blur and refraction without a dark tint.
+- Enlarged icons and stretched shortcuts and folders respect their grid cells. Perspective effects keep the animated icon centered on its path.
+
+### Build 437
+
+- The Appearance sheet now uses the shared COUI stretch motion. Its corner controls use the COUI toolbar material, shadow, and touch lighting. Color actions retain their compact icon layout with touch feedback.
+- The Weather samples more closely represent dark and tinted styles. Updated classic icon background separation to remove bands from icons on the desktop and in the dock.
+- App transitions retain the launcher’s icon fade and use centered deformation when shared perspective exceeds the icon bounds. The configured icon size is restored after the launcher hands the icon back.
+
+### Build 436
+
+- Appearance stretches in every direction and settles more smoothly with COUI's resistance curve. The spotlight follows the touch, header buttons are lighter, and the three color actions are icon-only.
+- Style samples use the launcher's icon rounding. Dark tinted backgrounds are slightly brighter. Light clear icons show the glyph alone.
+- Improved Classic icon tinting and the visual handoff between the app window and its icon.
+- Large icons keep their size after native icon updates. Dock icons grow within the rounded dock background.
+- Haptic Studio is available at the bottom of Features and through search.
+
+### Build 435
+
+- Default Appearance selects ColorOS Classic icons. The wider panel uses native COUI glass buttons and samples based on the original Weather icon.
+- Tinted mode adds monochrome, wallpaper colors and an eyedropper that marks the sampled point and color. Tapping the color track moves its thumb smoothly.
+- The panel stretches on a small upward pull and springs back. It closes when leaving the home screen. Icons and folders grow from their centers, and labels fade out.
+- Light clear glass admits more light. CPI headings and controls account for the status-bar inset.
+
+### Build 434
+
+- The bottom selector stays anchored and smoothly changes segments when switching styles. Color sliders expand above it.
+- Desktop Appearance uses native COUI buttons with outlines and touch feedback. The light, dark, and auto selector enables the native edge effect.
+- The eyedropper prefers the original static wallpaper even when the firmware has the wallpaper-depth effect enabled. Style samples use the system Weather icon and retain its details.
+- Light clear icons retain their glass plate. Switching styles reuses prepared layers, and slider movement updates the sample at most once per frame.
+- A size button sits beside the eyedropper. Resizable containers apply their scale once. Desktop Appearance waits for the stock editor to exit and shows wallpaper dimming behind the status bar.
+
+### Build 433
+
+- Desktop Appearance opens smoothly at the bottom, dismisses on a downward swipe, and exits the stock editor with the ColorOS transition.
+- Theme choices use COUI segments. Weather samples have a consistent size, and the eyedropper moves to the upper right and uses a sharper wallpaper source.
+- Color sliders preview changes immediately and apply them on release. Style changes retain the cached icon layers. The light transparent style shows only the glyph, and the dark variant keeps shaded glass.
+
+### Build 432
+
+- Desktop Appearance uses the original COUI material and stays bottom-aligned while switching styles. Opening it no longer adds a scrim over the home screen.
+- Added a wallpaper eyedropper, a large-icon mode with hidden labels, and manual wallpaper darkening. The home screen updates while dragging the hue and saturation sliders.
+
+### Build 431
+
+- Desktop Appearance opens in a compact COUI panel over the home screen without dimming or blurring the area outside it.
+- Four styles appear in a row with Weather icons. Tinted mode shows gradient hue and saturation sliders.
+
+### Build 430
+
+- Fixed a crash when the Features tab initializes COUI search. Updated the Updates screen and floating tab bar, removed extra card borders, and added a gentle spring to COUI 2.0 menus.
+- Desktop Appearance uses the system Weather icon for all samples. Manual color edits start from the active profile.
+- Winter fireworks launch from different parts of the banner, ending with a large golden burst at the center of the screen.
+- Icon plates resample wallpaper after graphics layers are discarded. The app drawer spreads first-time icon processing across frames. The shades and sidebar reuse effects and redraw less often.
+
+### Build 429
+
+- CPI, Haptic Studio and Updates use a shared COUI Scaffold, with updated search cancellation, grouped rows and cards.
+- Desktop Appearance uses the native COUI sheet and blur, with four samples in one row and a gradient for the selected hue's saturation.
+- The winter banner launches 11 fireworks on the melody's 11 notes. Haptics are stronger with a fallback for motors without amplitude control.
+
+### Build 428
+
+- Fixed a launcher crash when opening Appearance with a hardware-backed wallpaper bitmap.
+
+### Build 427 — desktop appearance
+
+- ColorOS 17 home screen edit mode gains an Appearance button between Group and Done. The COUI sheet offers default, dark, clear, and tinted previews, plus light, dark, and automatic variants and tinted hue and saturation controls.
+- Profiles use CPI's existing glass and tint engines. Manual values are retained and can be restored from Icons or Widgets.
+
+### Build 426 — update discovery fix
+
+- Update checks use a public release manifest and a fallback mirror without consuming GitHub's anonymous API quota. The API remains a fallback, and manual checks bypass caches.
+- Downgrading resets the last-notified build. Failed checks are never reported as up to date; request limits receive a separate message.
+- Release publication automatically refreshes the manifest with the build number, APK size, and SHA-256. APK signing-certificate verification is preserved.
+- Older API-only builds may need one manual update.
 
 ### Build 425 — version 0.3.1
 

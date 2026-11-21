@@ -35,6 +35,7 @@ object NativeSurfaceLive {
     private val controls=ConcurrentHashMap<SurfaceControl,Lease>()
     private data class Sample(val capture:Capture,val draw:Draw,val pose:Pose?)
     private val sampling=ThreadLocal<Sample?>()
+    private val transformValues = ThreadLocal.withInitial { FloatArray(9) }
     private data class Draw(val matrix: Matrix, val clip: Rect, val render: (Canvas) -> Unit)
     private data class Capture(val surface: Surface, val source: View?, val tag: Any?,
         val lease: Lease?, val recordId: Int?, val token: Any, val draws: MutableList<Draw> = ArrayList(),
@@ -150,7 +151,7 @@ object NativeSurfaceLive {
             val y=(param.args.getOrNull(2) as? Number)?.toFloat() ?: return
             lease.pose.updateAndGet {old -> if(old.positioned && old.x==x && old.y==y)old else old.copy(x=x,y=y,positioned=true,version=old.version+1)}
         }else{
-            val values=FloatArray(9)
+            val values = transformValues.get()!!
             val matrix=param.args.getOrNull(1) as? Matrix
             if(matrix!=null)matrix.getValues(values) else {
                 if(param.args.size<5)return
@@ -239,6 +240,10 @@ object NativeSurfaceLive {
         }
     }
     private val displayPacer=com.cosmod.launcherglass.util.FramePacer()
+    private fun transitionCaptureFps(): Int {
+        val fps = com.cosmod.launcherglass.util.PerformancePolicy.captureFps()
+        return if (PrefsHelper.liveFps <= 60) minOf(30, fps) else fps
+    }
     private fun schedule() {
         if(!active || !pending.compareAndSet(false,true))return
         // A single in-flight job, aligned to display frames. The launcher UI
@@ -246,7 +251,7 @@ object NativeSurfaceLive {
         main.post {
             Choreographer.getInstance().postFrameCallback {time->
                 val performance=com.cosmod.launcherglass.util.PerformancePolicy
-                if(!displayPacer.ready(time,performance.glassFps(),performance.capturePacingHz)){
+                if(!displayPacer.ready(time,transitionCaptureFps(),performance.capturePacingHz)){
                     pending.set(false)
                     if(active)schedule()
                     return@postFrameCallback
@@ -271,7 +276,7 @@ object NativeSurfaceLive {
                 frames.entries.map {it.key to it.value}
             }
             val now = SystemClock.uptimeMillis()
-            val fps=PrefsHelper.liveFps.let {if(it>60)it else minOf(30,it)}
+            val fps=transitionCaptureFps()
             val nowNs=System.nanoTime()
             val wallpaper = WallpaperHelper.getBlurredWallpaper(IconGlassHook.appContext)
             for((surface,frame) in work) {
@@ -397,8 +402,8 @@ object NativeSurfaceLive {
             it.name=="appIconView" && View::class.java.isAssignableFrom(it.type)
         }?.apply {isAccessible=true}
         if(sourceField!=null)ModuleHooks.hookAllMethods(type,"showOriginalIcon",object:XC_MethodHook(){
-            override fun beforeHookedMethod(param:MethodHookParam){
-                if(PrefsHelper.iconsFeatureEnabled)IconGlassHook.onNativeIconReturned(sourceField.get(param.thisObject) as? View)
+            override fun afterHookedMethod(param:MethodHookParam){
+                if (!param.hasThrowable()) IconGlassHook.onNativeIconReturned(sourceField.get(param.thisObject) as? View)
             }
         })
         val renderer=modern ?: type

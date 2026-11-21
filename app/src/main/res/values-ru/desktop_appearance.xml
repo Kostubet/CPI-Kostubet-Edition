@@ -1,0 +1,24 @@
+<resources>
+    <string name="desktop_appearance_title">Оформление</string>
+    <string name="desktop_appearance_manual">Ручные настройки CPI</string>
+    <string name="desktop_appearance_stock">По умолчанию</string>
+    <string name="desktop_appearance_dark">Тёмные</string>
+    <string name="desktop_appearance_clear">Прозрачные</string>
+    <string name="desktop_appearance_tinted">Однотонные</string>
+    <string name="desktop_appearance_hue">Цвет</string>
+    <string name="desktop_appearance_monochrome">Монохромные иконки и виджеты</string>
+    <string name="desktop_appearance_wallpaper_colors">Цвета обоев</string>
+    <string name="desktop_appearance_saturation">Насыщенность</string>
+    <string name="desktop_appearance_dark_logo_color">Цвет логотипов иконок</string>
+    <string name="desktop_appearance_tint_transparency">Прозрачность цвета</string>
+    <string name="desktop_appearance_variant">Вариант оформления</string>
+    <string name="desktop_appearance_light">Светлые</string>
+    <string name="desktop_appearance_auto">Авто</string>
+    <string name="desktop_appearance_active">Оформление рабочего стола · %1$s</string>
+    <string name="desktop_appearance_restore_manual">Использовать ручные настройки</string>
+    <string name="desktop_appearance_dim_wallpaper">Затемнить обои</string>
+    <string name="desktop_appearance_icon_size_toggle">Крупные иконки</string>
+    <string name="desktop_appearance_pick_color">Выбрать цвет с обоев</string>
+    <string name="desktop_appearance_wallpaper_unavailable">Не удалось получить изображение обоев</string>
+    <string name="desktop_appearance_dark_always">Всегда</string>
+</resources>

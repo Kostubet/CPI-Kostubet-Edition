@@ -31,7 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
+import com.cosmod.launcherglass.ui.observeCouiWindowInsets
 import androidx.core.widget.NestedScrollView
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.ColorosScrollView
@@ -50,7 +50,7 @@ import com.cosmod.launcherglass.ui.CouiSwitchRow
 import com.cosmod.launcherglass.ui.SettingsProvider
 import com.cosmod.launcherglass.ui.UiLanguage
 import com.cosmod.launcherglass.ui.CouiAction
-import com.cosmod.launcherglass.ui.couiMaterialEnabled
+import com.cosmod.launcherglass.ui.setCouiPageContent
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
 import io.github.suqi8.coui.kmp.basic.HorizontalDivider
 import io.github.suqi8.coui.kmp.basic.SmallTitle
@@ -201,20 +201,18 @@ class HapticStudioActivity : AppCompatActivity() {
             playback?.update(ms, player.playing)
         }, { message(t("Cannot play this selection", "Не удалось воспроизвести фрагмент")) })
         root = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
-        setContentView(root)
-        root.setBackgroundColor(canvasColor)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        setCouiPageContent(root, dark, accent)
+        root.setBackgroundColor(canvasColor)
         WindowCompat.getInsetsController(window, root).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
         }
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(safe.left, 0, safe.right, 0)
+        observeCouiWindowInsets { safe ->
+            root.setPadding(safe.left, 0, safe.right, 0)
             topInset = safe.top
             bottomInset = safe.bottom
             applyInsets()
-            insets
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -1365,10 +1363,7 @@ class HapticStudioActivity : AppCompatActivity() {
         val box = column()
         content(box)
         if (divided) for (index in (box.childCount - 1) downTo 1) divider(box, index)
-        val edge = if (couiMaterialEnabled(this)) androidx.core.graphics.ColorUtils.setAlphaComponent(
-            ContextCompat.getColor(this, R.color.cpi_ui_text), if (dark) 33 else 23
-        ) else android.graphics.Color.TRANSPARENT
-        parent.addView(CouiCardHost(this, surface, 20, edge, box),
+        parent.addView(CouiCardHost(this, surface, 20, box),
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
     }
     private fun choose(title: String, options: List<String>, action: (Int) -> Unit) {

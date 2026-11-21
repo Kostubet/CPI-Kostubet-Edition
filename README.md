@@ -2,7 +2,7 @@
 
 **Frosted и Liquid Glass для ColorOS** · модуль LSPosed на Kotlin
 
-Зимнее оформление добавляет снег на страницы приложения и праздничную мелодию с мягкой вибрацией при зажатии баннера CPI. Оба эффекта отключаются отдельно в **О модуле → Настройки**. Прежние звук и вибрация сохранены и возвращаются при отключении праздничной мелодии.
+Зимнее оформление добавляет снег на страницы приложения. Зажатие баннера CPI запускает праздничную мелодию с салютом и вибрацией на каждой ноте. Оба эффекта отключаются отдельно в **О модуле → Настройки**. Прежние звук и вибрация возвращаются при отключении праздничной мелодии.
 
 [![Kostubet Topics in Telegram](https://img.shields.io/badge/Telegram-Kostubet%20Topics-229ED9?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/KostubetTopics)
 
@@ -29,12 +29,12 @@
 
 ### Установка и совместимость
 
-В разделе «Анимации приложений iOS 27» можно отдельно включить движок ba31k. Пока он включён, действуют его параметры. После отключения возвращается прежний движок, если он был включён. Анимации шторки требуют области лаунчера, а прозрачный фон шторки — области System UI. Движок оставляет штатный переход на прошивках, где системный метод не удаётся подтвердить.
+В разделе «Анимации iOS» можно включить движок переходов между приложениями и рабочим столом, настроить наклон и деформацию. На прошивках, где системный переход не поддерживается, CPI сохраняет штатную анимацию.
 
 1. Скачайте подписанный APK из [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases).
 2. Установите его и включите **CPI Kostubet Edition** в LSPosed. Совместимость отдельных функций с Vector ограничена.
 3. Выберите системный лаунчер в области действия модуля. Для эффектов уведомлений, громкости и экрана блокировки выберите также **System UI**.
-4. Для оформления иконок выберите **Flux** в настройках ColorOS. После изменения области действия перезапустите соответствующий процесс.
+4. В настройках значков ColorOS стиль Flux называется **«Градиент»**. При выборе стиля в «Оформлении» CPI переводит классический режим и «Градиент → Чёткий» в **«Градиент → Тёмный»**. После изменения области действия перезапустите соответствующий процесс.
 
 Основная конфигурация разработки — OnePlus 13, ColorOS 17 и системный лаунчер 17.3.12. Доступность отдельных эффектов зависит от версии прошивки и лаунчера. [Подробнее об установке](INSTALL.md#русский)
 
@@ -47,6 +47,10 @@
 У стекла «Мягкий свет» независимые профили для центра управления, центра уведомлений, уведомлений и развёрнутых активностей на экране блокировки и умной боковой панели. Для первых трёх выберите область **System UI**, для боковой панели — **Умная боковая панель** (`com.coloros.smartsidebar`). После первого включения перезапустите соответствующее системное приложение. Кнопка перезапуска боковой панели находится вверху её раздела. Для плиток и уведомлений в шторке «Мягкий свет» — единственный стиль. В остальных разделах его можно выбрать в меню «Тип стекла» и настроить ширину зоны преломления отдельно.
 
 Откройте **О модуле → Обновления**, чтобы проверить опубликованные сборки, включить уведомления и установить подписанный APK прямо из CPI. Android может запросить разрешение на установку или показать окно подтверждения.
+
+Начиная со сборки 426, проверка использует публичный файл версии и резервное зеркало; API GitHub остаётся запасным источником. Файл обновляется автоматически после публикации релиза. Если старая сборка не находит обновление из-за лимита API, установите новый APK вручную один раз. Фоновые проверки выполняются примерно раз в 8 часов с учётом ограничений Android; кнопка проверки запрашивает данные сразу.
+
+На совместимом лаунчере ColorOS 17 войдите в режим редактирования рабочего стола и нажмите **Оформление**. Режим «По умолчанию» возвращает штатный вид иконок и виджетов. Чтобы снова применить прежние настройки CPI, выберите **Использовать ручные настройки** в разделе «Иконки» или «Виджеты».
 
 В каждом разделе стекла настройки «Размытие» и «Прозрачность размытия» находятся сразу после выбора материала. Прозрачность определяет, сколько исходного фона видно через размытый слой. У нового движка остаются настройки оптики. Живой фон обновляется автоматически с целью до 120 к/с. Фактическая частота зависит от дисплея и того, как быстро система отдаёт новые кадры.
 
@@ -82,7 +86,7 @@ git push origin v0.2.78-build328
 
 ## English
 
-Winter decoration adds snowfall throughout the app and a festive melody with gentle haptics when holding the CPI banner. Both effects have separate switches in **About → Settings**. Disabling the festive melody restores the original audio and vibration.
+Winter decoration adds snowfall throughout the app. Holding the CPI banner plays a festive melody with a firework and haptic tap on every note. Both effects have separate switches in **About → Settings**. Disabling the festive melody restores the original audio and vibration.
 
 An LSPosed module written in Kotlin that brings Frosted and Liquid Glass design to launcher icons. A beautiful icon backdrop engine with nice customisation. A fork of [CherryPick Icons](https://github.com/immorgue/CherryPick-Icons).
 
@@ -99,15 +103,19 @@ An LSPosed module written in Kotlin that brings Frosted and Liquid Glass design 
 
 ### Installation
 
-The iOS 27 App Animations page has a separate ba31k engine with independent settings. Disabling it returns to the previously enabled engine. The shade motion uses launcher scope, and the transparent shade uses System UI scope. Firmware with an unrecognized native transition retains the stock behavior.
+The iOS Animations page lets you enable the transition engine for opening apps and returning home and adjust tilt and deformation. CPI uses the stock animation on firmware where the system transition is unsupported.
 
-Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases). Enable the module in LSPosed and select the system launcher. Some features have limited compatibility with Vector. Select **System UI** for system overlays and the lock screen. Enable the stock **Flux** icon style for icon styling. The main development device is the OnePlus 13 on ColorOS 17 with launcher 17.3.12. Feature availability depends on the firmware. [Full installation guide](INSTALL.md#english)
+Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases). Enable the module in LSPosed and select the system launcher. Some features have limited compatibility with Vector. Select **System UI** for system overlays and the lock screen. ColorOS calls its Flux icon style **Gradient**. Choosing a CPI Appearance style changes Classic and Gradient → Bright to **Gradient → Dark**. The main development device is the OnePlus 13 on ColorOS 17 with launcher 17.3.12. Feature availability depends on the firmware. [Full installation guide](INSTALL.md#english)
 
 To test smooth zoom, add stock Camera to the LSPosed scope and reopen it. In CPI, open **Camera → iOS Smooth Video Zoom**, turn it on, and select the controls to smooth. The graph updates with manual adjustments and scales its time axis to the trajectory. Compare saved recordings at 1080p and 4K, at 30 and 60 FPS, while zooming within one lens range and changing direction mid-zoom. Lens switches use the stock camera path.
 
 Soft-light glass has independent profiles for control center, notification shade, lock-screen notifications and expanded live activities, and Smart Sidebar. Select **System UI** in LSPosed for the first three, or **Smart Sidebar** (`com.coloros.smartsidebar`) for the sidebar. Restart the affected system app after enabling the effect for the first time. The Smart Sidebar settings have a restart button. Soft Light is the only card material for Control Center and Notification Center. In other glass sections, choose it under Glass type to adjust the refraction width.
 
 Open **About → Updates** to check releases, receive update notifications, and install a signed build from CPI. Android may ask for installation permission or confirmation.
+
+Starting with build 426, checks use a public release manifest and a fallback mirror, with the GitHub API as a backup. Release publication refreshes the manifest automatically. If an older build cannot discover updates because of the API quota, install the new APK manually once. Background checks run roughly every eight hours subject to Android scheduling; the check button requests fresh data immediately.
+
+On a compatible ColorOS 17 launcher, enter home screen edit mode and tap **Appearance**. Default restores the stock icon and widget appearance. Select **Use manual settings** in Icons or Widgets to reapply your saved CPI settings.
 
 ### Build and release
 

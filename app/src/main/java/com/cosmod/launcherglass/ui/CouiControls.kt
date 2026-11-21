@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.Role
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Card
+import io.github.suqi8.coui.kmp.basic.CardListPosition
 import io.github.suqi8.coui.kmp.basic.DropdownEntry
 import io.github.suqi8.coui.kmp.basic.DropdownItem
 import io.github.suqi8.coui.kmp.basic.Icon
@@ -61,6 +62,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.platform.ComposeView
+import androidx.navigationevent.NavigationEventDispatcherOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import androidx.navigationevent.findViewTreeNavigationEventDispatcherOwner
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -125,8 +129,12 @@ internal abstract class CouiControl(context: Context, dark: Boolean, accent: Int
                 CompositionLocalProvider(
                     LocalCOUIMaterialEffectEnabled provides effects,
                     LocalChromeNativeBlurEnabled provides effects,
-                    content = draw,
-                )
+                ) {
+                    val owner = (context as? NavigationEventDispatcherOwner)
+                        ?: composition.findViewTreeNavigationEventDispatcherOwner()
+                    if (owner == null) draw()
+                    else CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner, content = draw)
+                }
             }
         }
     }
@@ -444,58 +452,42 @@ internal class CouiPreviewActions(context: Context, dark: Boolean, accent: Int,
 }
 
 internal class CouiCardHost(
-    context: Context, color: Int, radius: Int, edge: Int, body: View,
+    context: Context, color: Int, radius: Int, body: View,
 ) : FrameLayout(context) {
     init {
         WinterEffects.mark(this, radius.toFloat())
         clipChildren = false
         clipToPadding = false
-        background = CouiCardFill(context, color, radius, edge)
+        background = CouiCardFill(context, color, radius)
         addView(body, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }
 }
 
-/** Paint the COUI Card outline for View rows without creating a composition for the fill. */
-private class CouiCardFill(context: Context, private val fillColor: Int, radius: Int, private val edge: Int) : Drawable() {
+/** Draw the COUI card shape for View-based preference groups. */
+private class CouiCardFill(context: Context, private val fillColor: Int, radius: Int) : Drawable() {
     private val density = Density(context.resources.displayMetrics.density)
     private val shape = SquircleShape(radius.dp, COUIRoundCorner.Normal.Weight)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fillColor }
-    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = edge
-        style = Paint.Style.STROKE
-        strokeWidth = with(density) { 1.dp.toPx() }
-    }
     private val path = android.graphics.Path()
-    private val strokePath = android.graphics.Path()
 
     override fun onBoundsChange(bounds: Rect) {
         path.rewind()
-        strokePath.rewind()
         if (!bounds.isEmpty) {
             val size = Size(bounds.width().toFloat(), bounds.height().toFloat())
             val outline = shape.createOutline(size, LayoutDirection.Ltr, density) as Outline.Generic
             path.addPath(outline.path.asAndroidPath(), bounds.left.toFloat(), bounds.top.toFloat())
-            val inset = stroke.strokeWidth / 2
-            if (edge != 0 && size.width > inset * 2 && size.height > inset * 2) {
-                val inner = shape.createOutline(Size(size.width - inset * 2, size.height - inset * 2),
-                    LayoutDirection.Ltr, density) as Outline.Generic
-                strokePath.addPath(inner.path.asAndroidPath(), bounds.left + inset, bounds.top + inset)
-            }
         }
     }
 
     override fun draw(canvas: Canvas) {
         canvas.drawPath(path, paint)
-        if (edge != 0) canvas.drawPath(strokePath, stroke)
     }
     override fun setAlpha(alpha: Int) {
         paint.alpha = (fillColor ushr 24) * alpha / 255
-        stroke.alpha = (edge ushr 24) * alpha / 255
         invalidateSelf()
     }
     override fun setColorFilter(colorFilter: ColorFilter?) {
         paint.colorFilter = colorFilter
-        stroke.colorFilter = colorFilter
         invalidateSelf()
     }
     @Suppress("OVERRIDE_DEPRECATION")
@@ -505,6 +497,7 @@ private class CouiCardFill(context: Context, private val fillColor: Int, radius:
 internal class CouiPreference(context: Context, dark: Boolean, accent: Int, title: String,
     summary: String?, icon: Int?, iconTint: Int, catalog:Boolean=false, onPreview:((View)->Unit)?=null,
     longPressLabel:Int=R.string.ui_feature_peek_title,
+    position: CardListPosition = CardListPosition.None,
     action: (View) -> Unit) : CouiControl(context, dark, accent) {
     private var liftingForDialog = false
     private val previewScale = OnextSpring(1f) { scaleX = it; scaleY = it }
@@ -545,9 +538,10 @@ internal class CouiPreference(context: Context, dark: Boolean, accent: Int, titl
                 },
             )
             ArrowPreference(
-                modifier=Modifier.clip(RoundedCornerShape(22.dp)).then(gesture),
+                modifier=(if (position == CardListPosition.None) Modifier.clip(RoundedCornerShape(22.dp)) else Modifier).then(gesture),
                 title = title,
                 summary = summary,
+                cardListPosition = position,
                 insideMargin = PaddingValues(horizontal = 16.dp, vertical = if(catalog)10.dp else 12.dp),
                 startAction = icon?.let { resource ->
                     { if(catalog)Box(Modifier.size(32.dp),contentAlignment=Alignment.Center){

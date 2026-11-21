@@ -290,6 +290,47 @@ internal object DockMaterial {
         }
         return null
     }
+    fun containingDock(icon: View): ViewGroup? {
+        var parent = icon.parent as? View
+        while (parent != null) {
+            if (parent is ViewGroup && isDock(parent)) return parent
+            parent = parent.parent as? View
+        }
+        return null
+    }
+
+    /** Bound the additional enlargement by the exact plate drawn behind the hotseat. */
+    fun limitIconScale(dock: ViewGroup, icon: View, local: Rect, desired: Float): Float {
+        if (desired <= 1f) return desired
+        val plate = Rect()
+        footprint(dock, plate)
+        if (plate.isEmpty) return 1f
+        val bounds = Rect(local)
+        dock.offsetDescendantRectToMyCoords(icon, bounds)
+        val x = bounds.exactCenterX()
+        val y = bounds.exactCenterY()
+        val padding = dock.resources.displayMetrics.density
+        val radius = (minOf(plate.width(), plate.height()) * PrefsHelper.dockCorner / 100f)
+            .coerceIn(0f, minOf(plate.width(), plate.height()) / 2f)
+        fun contains(scale: Float): Boolean {
+            val dx = bounds.width() * scale * .5f + padding
+            val dy = bounds.height() * scale * .5f + padding
+            if (x - dx < plate.left || x + dx > plate.right || y - dy < plate.top || y + dy > plate.bottom) return false
+            if (radius <= 0f) return true
+            val cornerX = maxOf(plate.left + radius - x + dx, x + dx - (plate.right - radius), 0f)
+            val cornerY = maxOf(plate.top + radius - y + dy, y + dy - (plate.bottom - radius), 0f)
+            return cornerX * cornerX + cornerY * cornerY <= radius * radius
+        }
+        if (contains(desired)) return desired
+        var lower = 1f
+        var upper = desired
+        repeat(6) {
+            val middle = (lower + upper) * .5f
+            if (contains(middle)) lower = middle else upper = middle
+        }
+        return lower
+    }
+
     private fun footprint(view:ViewGroup,union:Rect) {
         union.setEmpty()
         fun include(child:View){

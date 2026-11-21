@@ -34,6 +34,16 @@ class ProjectiveIconTransformTest {
     @Test fun refusesSingularNativeTransforms(){
         assertFalse(ProjectiveIconTransform().update(affine(0f,0f,0f),affine(1f,0f,0f),identity()))
     }
+    @Test fun perspectiveKeepsAnimatedIconOnItsNativePath() {
+        val warp = identity()
+        AppWindowDeformation(-.04f,.03f,.93f,1.05f,.47f,.52f).writeMatrix(warp,0f,0f,1080f,2400f)
+        val target = ProjectiveIconTransform()
+        assertTrue(target.update(affine(.2f,220f,380f),affine(.5f,80f,120f),warp))
+        assertTrue(ProjectiveIconTransform.center(target.matrix, 100f, 80f))
+        val (x, y) = point(target.matrix, 100f, 80f)
+        assertEquals(100f, x, .002f)
+        assertEquals(80f, y, .002f)
+    }
     @Test fun rejectsPlaneWhichWouldSendAnIconIntoAnotherCell(){
         val displaced=identity().apply {this[3]=200f}
         assertFalse(ProjectiveIconTransform.bounded(displaced,0f,0f,100f,100f))

@@ -72,6 +72,7 @@ class HookEntry : IXposedHookLoadPackage {
 
         if (packageName in launcherPackages) {
             GlassLogger.i("HookEntry", ">>> Hooking ColorOS Launcher: $packageName <<<")
+            LegacyWallpaperBlur.install(lpparam.classLoader)
 
             var initialized = false
             fun ensureInit(context: Context, source: String) {
@@ -84,7 +85,7 @@ class HookEntry : IXposedHookLoadPackage {
                 Oxygen16IconSupport.configure(appCtx)
                 PrefsHelper.init(appCtx)
                 com.cosmod.launcherglass.util.HostControl.install(appCtx,"launcher",{
-                    "enabled=${PrefsHelper.enabled}, photo height=${PrefsHelper.widgets.fadeHeight}, strength=${PrefsHelper.widgets.fade}, alpha=${PrefsHelper.widgets.opacity}\n"+AppGenieTransition.diagnostics()+"\n"+Ba31kAppTransitions.diagnostics()+"\n"+Ba31kShadeMotion.diagnostics()+"\n"+EdgeLight.diagnostics()
+                    "enabled=${PrefsHelper.enabled}, photo height=${PrefsHelper.widgets.fadeHeight}, strength=${PrefsHelper.widgets.fade}, alpha=${PrefsHelper.widgets.opacity}\n"+AppGenieTransition.diagnostics()+"\n"+Ba31kAppTransitions.diagnostics()+"\n"+EdgeLight.diagnostics()
                 })
                 try {
                     val filter = android.content.IntentFilter(android.content.Intent.ACTION_WALLPAPER_CHANGED).apply {
@@ -94,10 +95,10 @@ class HookEntry : IXposedHookLoadPackage {
                     }
                     appCtx.registerReceiver(object : android.content.BroadcastReceiver() {
                         override fun onReceive(c: Context?, i: android.content.Intent?) {
+                            if (i?.action == android.content.Intent.ACTION_USER_PRESENT) PrefsHelper.retryOnResume(appCtx)
                             if(!PrefsHelper.enabled)return
                             when(i?.action) {
                                 android.content.Intent.ACTION_SCREEN_OFF -> {
-                                    Ba31kShadeMotion.stop()
                                     DockMaterial.stopUnlockBlur()
                                     com.cosmod.launcherglass.util.LauncherWallpaperCapture.onScreenOff()
                                     com.cosmod.launcherglass.util.LiveBlurEngine.onActivityPaused()
@@ -194,7 +195,7 @@ class HookEntry : IXposedHookLoadPackage {
                             override fun afterHookedMethod(param: MethodHookParam) {
                                 if (!param.hasThrowable()) {
                                     (param.thisObject as? Activity)?.let { launcher ->
-                                        Ba31kShadeMotion.bind(launcher)
+                                        PrefsHelper.retryOnResume(launcher.applicationContext)
                                         Ba31kAppTransitions.launcherResumed(launcher.classLoader)
                                     }
                                 }
@@ -207,7 +208,6 @@ class HookEntry : IXposedHookLoadPackage {
                         "onPause",
                         object : XC_MethodHook() {
                             override fun afterHookedMethod(param: MethodHookParam) {
-                                (param.thisObject as? Activity)?.let(Ba31kShadeMotion::unbind)
                                 com.cosmod.launcherglass.util.LiveBlurEngine.onActivityPaused()
                             }
                         }
@@ -419,6 +419,7 @@ class HookEntry : IXposedHookLoadPackage {
             }
 
             IconGlassHook.init(lpparam)
+            DesktopAppearanceToolbar.install(lpparam.classLoader)
             try {
                 val config = XposedHelpers.findClassIfExists(
                     "com.android.launcher.theme.LauncherIconConfig", lpparam.classLoader)

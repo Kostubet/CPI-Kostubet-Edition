@@ -313,12 +313,15 @@ object WallpaperHelper {
 
     fun forCanvas(bitmap: Bitmap, canvas: Canvas?): Bitmap {
 
-        if (canvas == null || canvas.isHardwareAccelerated || bitmap.config != Bitmap.Config.HARDWARE) return bitmap
+        if (canvas == null || canvas.isHardwareAccelerated) return bitmap
+        return forSoftwareCanvas(bitmap) ?: bitmap
+    }
 
-        // Only native offscreen software snapshots need this compatibility copy.
-
+    internal fun forSoftwareCanvas(bitmap: Bitmap): Bitmap? {
+        if (bitmap.isRecycled) return null
+        if (bitmap.config != Bitmap.Config.HARDWARE) return bitmap
         synchronized(softwareSnapshots){softwareSnapshots[bitmap]?.takeUnless {it.isRecycled}?.let {return it}}
-        val copy=bitmap.copy(Bitmap.Config.ARGB_8888,false) ?: return bitmap
+        val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: return null
         synchronized(softwareSnapshots){softwareSnapshots[bitmap]=copy}
         return copy
 
@@ -599,6 +602,40 @@ object WallpaperHelper {
             (com.cosmod.launcherglass.xposed.PageIndicatorGlass.profile.mode==0 ||
                 NeutralBackdrop.indicatorImage?.isRecycled==false)
 
+
+    // The launcher uses its own wallpaper access. If Android rejects it, use the snapshot below.
+    @android.annotation.SuppressLint("MissingPermission")
+    internal fun getPickerWallpaper(context: Context): Bitmap? {
+        val maxSide = maxOf(context.resources.displayMetrics.widthPixels,
+            context.resources.displayMetrics.heightPixels).coerceIn(1920, 3072)
+        val manager = WallpaperManager.getInstance(context)
+        // ColorOS also sets its wallpaper-effect flag for static depth wallpapers.
+        // The editor's effect frame is often lower resolution than the static crop.
+        if (runCatching { manager.wallpaperInfo == null }.getOrDefault(false)) {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            runCatching {
+                manager.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)?.use {
+                    BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
+                    if (options.outWidth > 0 && options.outHeight > 0) {
+                        options.inSampleSize = Integer.highestOneBit(
+                            (maxOf(options.outWidth, options.outHeight) / maxSide).coerceAtLeast(1))
+                        options.inJustDecodeBounds = false
+                        BitmapFactory.decodeFileDescriptor(it.fileDescriptor, null, options)
+                    } else null
+                }
+            }.getOrNull()?.let(::forSoftwareCanvas)?.let { image ->
+                image.prepareToDraw()
+                GlassLogger.i("DesktopAppearance", "Eyedropper uses static wallpaper ${image.width}x${image.height}")
+                return image
+            }
+        }
+        val bitmap = readSystemSnapshot(context, fresh = true, maxSide = maxSide)
+            ?: loadRawWallpaper(context) ?: return null
+        return forSoftwareCanvas(bitmap)?.also {
+            it.prepareToDraw()
+            GlassLogger.i("DesktopAppearance", "Eyedropper uses wallpaper snapshot ${it.width}x${it.height}")
+        }
+    }
 
     fun getRawScaledWallpaper(context: Context): Bitmap? {
 

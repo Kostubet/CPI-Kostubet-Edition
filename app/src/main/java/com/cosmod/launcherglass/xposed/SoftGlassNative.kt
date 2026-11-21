@@ -26,6 +26,7 @@ import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.WeakHashMap
@@ -35,9 +36,15 @@ internal object SoftGlassNative {
     private var systemUi: Session? = null
     private var attemptedSystemUi = false
     private val liveActivityLoaders = WeakHashMap<ClassLoader, Boolean>()
+    private val main = Handler(Looper.getMainLooper())
 
     fun liveActivityLoader(loader: ClassLoader?) {
-        if (Build.VERSION.SDK_INT < 33 || loader == null || liveActivityLoaders.put(loader, true) != null) return
+        if (Build.VERSION.SDK_INT < 33 || loader == null) return
+        if (Looper.myLooper() != main.looper) {
+            main.post { liveActivityLoader(loader) }
+            return
+        }
+        if (liveActivityLoaders.put(loader, true) != null) return
         systemUi?.let { session ->
             runCatching { session.installMaterial(loader) }.onFailure { error ->
                 GlassLogger.limited("SoftGlass", "activities") { "Native activity adapter unavailable: ${error.javaClass.simpleName}" }
@@ -58,8 +65,7 @@ internal object SoftGlassNative {
             }
         }
         val session = systemUi ?: return
-        session.followControlForVolume = bundleAllowsVolume(prefs)
-        session.update(profiles)
+        session.update(profiles, bundleAllowsVolume(prefs))
     }
 
     private fun bundleAllowsVolume(prefs: Bundle) =
@@ -70,14 +76,19 @@ internal object SoftGlassNative {
         Surface.CONTROL in it.profiles && it.panelTargets.supportsVolume && it.followControlForVolume
     } == true
 
+    fun diagnostics(): String {
+        if (Build.VERSION.SDK_INT >= 33) systemUi?.let { return it.diagnostics() }
+        return "Soft Glass: inactive"
+    }
+
     fun replaces(surface: Surface): Boolean = Build.VERSION.SDK_INT >= 33 && systemUi?.profiles?.containsKey(surface) == true
     fun lockedActivityProfile(): Profile? = if (Build.VERSION.SDK_INT >= 33) systemUi?.let { session ->
-        if (session.locked()) session.profiles[Surface.LOCK] else null
+        session.profiles[Surface.LOCK]?.takeIf { session.locked() }
     } else null
 
     @RequiresApi(33)
-    fun activityUniforms(shader: RuntimeShader, view: View): Boolean =
-        systemUi?.activityUniforms(shader, view) == true
+    fun activityUniforms(plate: SoftGlassShader.Plate, view: View): Boolean =
+        systemUi?.activityUniforms(plate, view) == true
 
     fun installSidebar(loader: ClassLoader) {
         if (Build.VERSION.SDK_INT < 37) return
@@ -126,17 +137,20 @@ internal object SoftGlassNative {
         @Volatile var profiles: Map<Surface, Profile> = emptyMap()
             private set
         var followControlForVolume = true
+            private set
         private val lock = Any()
-        private val shaders = WeakHashMap<RuntimeShader, Applied?>()
+        private class ShaderState(var applied: Applied?)
+        private val shaders = WeakHashMap<RuntimeShader, ShaderState>()
         private val effects = WeakHashMap<RenderEffect, EffectState>()
         private val nodes = WeakHashMap<RenderNode, Binding>()
         private val drawables = WeakHashMap<Drawable, Surface>()
+        private val rebound = WeakHashMap<RuntimeShader, Pair<Applied?, WeakReference<RenderEffect>>>()
         private val sliderMaterial = if (sidebar) null else SoftGlassSliderMaterial(context)
         val panelTargets = SoftGlassPanelTargets({ Surface.CONTROL in profiles }) { canvas, drawable, target ->
+            if (Looper.myLooper() != Looper.getMainLooper()) return@SoftGlassPanelTargets
             val view = target.view.get() ?: host(drawable) ?: return@SoftGlassPanelTargets
-            val state = state(view, target)
-            val profile = state.profile ?: return@SoftGlassPanelTargets
-            sliderMaterial?.draw(canvas, drawable, view, profile, state.role, target.radius, state.dark, state.x, state.y)
+            val state = state(view, target) ?: return@SoftGlassPanelTargets
+            sliderMaterial?.draw(canvas, drawable, view, state.profile, state.role, target.radius, state.dark, state.x, state.y)
         }
         private val sources = LruCache<String, String>(16)
         private val materialBuilders = hashSetOf<Method>()
@@ -145,52 +159,66 @@ internal object SoftGlassNative {
         private val checking = ThreadLocal<Boolean>()
         private val rendered = mutableSetOf<Float>()
         private val main = Handler(Looper.getMainLooper())
-        private val legacyActivities = WeakHashMap<View, Applied>()
+        private val legacyActivities = WeakHashMap<View, Unit>()
+        private val ownerRoles = WeakHashMap<Class<*>, OwnerRole>()
+        private enum class OwnerRole { SKIP, ACTIVITY, LOCK_MEDIA, ROW, ROW_BACKGROUND, CONTROL, SHADE, PARENT }
         private var tiltX = 0f
         private var tiltY = 0f
         private val tilt = SoftGlassTilt(main, { context }, ::hasVisibleTilt) { x, y ->
             tiltX = x
             tiltY = y
-            drawables.keys.toList().filter { host(it)?.isShown == true }.forEach(Drawable::invalidateSelf)
-            legacyActivities.keys.toList().filter(View::isShown).forEach(View::postInvalidateOnAnimation)
+            for ((drawable, surface) in drawables) {
+                if (profiles[surface]?.let(::tracksTilt) == true && drawable.isVisible &&
+                    host(drawable)?.let { it.isShown && it.windowVisibility == View.VISIBLE } == true) drawable.invalidateSelf()
+            }
+            for (view in legacyActivities.keys) if (view.isShown && view.windowVisibility == View.VISIBLE) {
+                view.postInvalidateOnAnimation()
+            }
         }
 
         private data class EffectState(val shader: RuntimeShader, val state: Applied?)
         private data class Binding(val effect: EffectState, val setter: Method, val mode: Int?)
-        private data class Applied(val surface: Surface?, val profile: Profile?, val dark: Boolean,
-            val density: Float, val width: Int, val height: Int, val x: Float, val y: Float,
-            val role: Float = surface?.shaderRole ?: 0f)
+        private data class Applied(val surface: Surface, val profile: Profile, val dark: Boolean,
+            val density: Float, val width: Int, val height: Int, val x: Float, val y: Float, val role: Float)
 
-        fun update(values: Map<Surface, Profile>) {
-            if (profiles == values) return
+        fun update(values: Map<Surface, Profile>, followVolume: Boolean = followControlForVolume) {
+            val previous = profiles
+            val volumeChanged = followControlForVolume != followVolume
+            if (previous == values && !volumeChanged) return
             profiles = values
+            followControlForVolume = followVolume
             if (Surface.LOCK !in values) legacyActivities.clear()
-            if (Surface.CONTROL !in values) sliderMaterial?.clear()
+            if (Surface.CONTROL !in values || volumeChanged) sliderMaterial?.clear()
             if (values.values.none(::tracksTilt)) tilt.stop()
-            drawables.keys.toList().forEach(Drawable::invalidateSelf)
+            val redraw = drawables.entries.mapNotNull { (drawable, surface) ->
+                if (previous[surface] != values[surface] || (surface == Surface.CONTROL && volumeChanged)) drawable
+                else null
+            }
+            redraw.forEach(Drawable::invalidateSelf)
         }
+
+        fun diagnostics(): String =
+            "Soft Glass: profiles=${profiles.keys}, slider=${sliderMaterial?.diagnostics()}"
 
         private fun tracksTilt(profile: Profile) = profile.tilt && profile[P.RESPONSE] > 0f &&
             profile[P.SHINE] > 0f && profile[P.WIDTH] > 0f
 
-        fun activityUniforms(shader: RuntimeShader, view: View): Boolean {
+        fun activityUniforms(plate: SoftGlassShader.Plate, view: View): Boolean {
             val profile = profiles[Surface.LOCK] ?: return false
-            val metrics = view.resources.displayMetrics
             val dark = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
             val moves = tracksTilt(profile)
-            val state = Applied(Surface.LOCK, profile, dark, metrics.density, metrics.widthPixels, metrics.heightPixels,
+            plate.apply(profile, Surface.LOCK.shaderRole, dark, view.resources.displayMetrics,
                 if (moves) tiltX else 0f, if (moves) tiltY else 0f)
-            apply(shader, state, fullMix = true)
             if (moves) {
-                legacyActivities[view] = state
+                legacyActivities[view] = Unit
                 tilt.request()
             } else legacyActivities.remove(view)
             return true
         }
 
-        private fun hasVisibleTilt() = legacyActivities.any { (view, state) ->
-            state.profile?.let(::tracksTilt) == true && locked() && view.isShown && view.windowVisibility == View.VISIBLE
-        } || drawables.any { (drawable, surface) ->
+        private fun hasVisibleTilt() = (profiles[Surface.LOCK]?.let(::tracksTilt) == true &&
+            legacyActivities.isNotEmpty() && locked() &&
+            legacyActivities.keys.any { it.isShown && it.windowVisibility == View.VISIBLE }) || drawables.any { (drawable, surface) ->
             profiles[surface]?.let(::tracksTilt) == true && drawable.isVisible &&
                 host(drawable)?.let { it.isShown && it.windowVisibility == View.VISIBLE } == true
         }
@@ -204,7 +232,9 @@ internal object SoftGlassNative {
             return null
         }
 
-        private fun state(view: View?, target: SoftGlassPanelTargets.Owner?): Applied {
+        private fun state(view: View?, target: SoftGlassPanelTargets.Owner?): Applied? {
+            val current = profiles
+            if (current.isEmpty()) return null
             val role = target?.kind
             val surface = when {
                 role == SoftGlassPanelTargets.Kind.FILL -> null
@@ -215,14 +245,14 @@ internal object SoftGlassNative {
                 view != null -> owner(view)
                 else -> null
             }
-            val profile = surface?.let(profiles::get)
+            val profile = current[surface ?: return null] ?: return null
             val resources = view?.resources ?: context.resources
             val metrics = resources.displayMetrics
             val dark = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-            val moves = profile?.let(::tracksTilt) == true
+            val moves = tracksTilt(profile)
             if (moves) tilt.request()
             return Applied(surface, profile, dark, metrics.density, metrics.widthPixels, metrics.heightPixels,
-                if (moves) tiltX else 0f, if (moves) tiltY else 0f, role?.role ?: surface?.shaderRole ?: 0f)
+                if (moves) tiltX else 0f, if (moves) tiltY else 0f, role?.role ?: surface.shaderRole)
         }
 
         private fun owner(view: View): Surface? {
@@ -231,24 +261,37 @@ internal object SoftGlassNative {
             var current: View? = view
             repeat(12) {
                 val child = current ?: return null
-                val name = child.javaClass.name.lowercase(java.util.Locale.ROOT)
-                if ("headsuppinned" in name || ".volume." in name) return null
-                if ("seedling" in name) {
-                    if (".capsule." in name) return null
-                    if (".card." in name) return Surface.LOCK.takeIf { onLockscreen }
+                when (val role = ownerRoles.getOrPut(child.javaClass) { classifyOwner(child.javaClass) }) {
+                    OwnerRole.SKIP -> return null
+                    OwnerRole.ACTIVITY -> return Surface.LOCK.takeIf { onLockscreen }
+                    OwnerRole.LOCK_MEDIA -> if (onLockscreen) return Surface.LOCK
+                    OwnerRole.ROW, OwnerRole.ROW_BACKGROUND -> {
+                        val row = if (role == OwnerRole.ROW) child else child.parent
+                        if (row != null && NativeIconAccess.call(row, "isHeadsUp") == true) return null
+                        return if (onLockscreen) Surface.LOCK else Surface.SHADE
+                    }
+                    OwnerRole.CONTROL -> return Surface.CONTROL
+                    OwnerRole.SHADE -> if (!onLockscreen) return Surface.SHADE
+                    OwnerRole.PARENT -> Unit
                 }
-                if (onLockscreen && ("keyguardmedia" in name || "lockscreenmedia" in name)) return Surface.LOCK
-                if (name.endsWith("notificationbackgroundview") || name.endsWith("expandablenotificationrow")) {
-                    val row = if (name.endsWith("expandablenotificationrow")) child else child.parent
-                    if (row != null && NativeIconAccess.call(row, "isHeadsUp") == true) return null
-                    return if (onLockscreen) Surface.LOCK else Surface.SHADE
-                }
-                if (".qs." in name || "controlcenter" in name || "quicksettings" in name) return Surface.CONTROL
-                if (!onLockscreen && ("dismissview" in name || "notificationstackscrolllayout" in name))
-                    return Surface.SHADE
                 current = child.parent as? View
             }
             return null
+        }
+
+        private fun classifyOwner(type: Class<*>): OwnerRole {
+            val name = type.name.lowercase(java.util.Locale.ROOT)
+            return when {
+                "headsuppinned" in name || ".volume." in name ||
+                    ("seedling" in name && ".capsule." in name) -> OwnerRole.SKIP
+                "seedling" in name && ".card." in name -> OwnerRole.ACTIVITY
+                "keyguardmedia" in name || "lockscreenmedia" in name -> OwnerRole.LOCK_MEDIA
+                name.endsWith("expandablenotificationrow") -> OwnerRole.ROW
+                name.endsWith("notificationbackgroundview") -> OwnerRole.ROW_BACKGROUND
+                ".qs." in name || "controlcenter" in name || "quicksettings" in name -> OwnerRole.CONTROL
+                "dismissview" in name || "notificationstackscrolllayout" in name -> OwnerRole.SHADE
+                else -> OwnerRole.PARENT
+            }
         }
 
         private var sampledLock = false
@@ -321,23 +364,25 @@ internal object SoftGlassNative {
                     runCatching {
                         val native = shaderOwner.get(plate) ?: return
                         val shader = program.get(native) as? RuntimeShader ?: return
-                        if (!synchronized(lock) { shaders.containsKey(shader) }) return
-                        val target = panelTargets.owner(plate)
-                        val state = state(target?.view?.get() ?: host(plate), target)
-                        val surface = state.surface
-                        if (surface != null && state.profile != null) drawables[plate] = surface else drawables.remove(plate)
-                        val previous = synchronized(lock) { shaders[shader] }
-                        if (previous != state) {
+                        val tracked = synchronized(lock) { shaders[shader] } ?: return
+                        val target = if (sidebar || Surface.CONTROL !in profiles) null else panelTargets.owner(plate)
+                        val state = if (profiles.isEmpty()) null else state(target?.view?.get() ?: host(plate), target)
+                        if (tracked.applied != state) {
                             apply(shader, state)
-                            synchronized(lock) { shaders[shader] = state }
+                            synchronized(lock) { tracked.applied = state }
                         }
-                        nodeFields.mapNotNull { it.get(plate) as? RenderNode }.forEach { node ->
+                        for (field in nodeFields) {
+                            val node = field.get(plate) as? RenderNode ?: continue
                             val binding = synchronized(lock) { nodes[node] }
-                            if (binding?.effect?.shader === shader && binding.effect.state != state) rebind(node, binding)
+                            if (binding?.effect?.shader === shader && binding.effect.state != state) rebind(node, binding, state)
                         }
-                        if (surface != null && state.profile != null) panelTargets.nativeDrawn()
-                        if (surface != null && state.profile != null && rendered.add(state.role))
-                            GlassLogger.i("SoftGlass", "Native material applied: $surface role=${state.role}")
+                        if (state == null) drawables.remove(plate)
+                        else {
+                            drawables[plate] = state.surface
+                            target?.let(panelTargets::nativeDrawn)
+                            if (rendered.add(state.role))
+                                GlassLogger.i("SoftGlass", "Native material applied: ${state.surface} role=${state.role}")
+                        }
                     }.onFailure { error ->
                         GlassLogger.limited("SoftGlass", "draw") { "Native material retained: ${error.javaClass.simpleName}" }
                     }
@@ -365,9 +410,9 @@ internal object SoftGlassNative {
                 if (shaders.containsKey(value)) return
                 val target = panelTargets.current()
                 val applied = if (Looper.myLooper() == main.looper && (sidebar || target != null)) {
-                    state(target?.view?.get(), target).also { apply(value, it) }
+                    state(target?.view?.get(), target)?.also { apply(value, it) }
                 } else null
-                shaders[value] = applied
+                shaders[value] = ShaderState(applied)
             }
         }
 
@@ -379,7 +424,7 @@ internal object SoftGlassNative {
                     if (param.args[1] != SoftGlassShader.INPUT) return
                     val shader = param.args[0] as RuntimeShader
                     synchronized(lock) {
-                        if (shaders.containsKey(shader)) effects[effect] = EffectState(shader, shaders[shader])
+                        shaders[shader]?.let { effects[effect] = EffectState(shader, it.applied) }
                     }
                 }
             })
@@ -402,19 +447,23 @@ internal object SoftGlassNative {
             }
         }
 
-        private fun rebind(node: RenderNode, binding: Binding) {
-            val effect = RenderEffect.createRuntimeShaderEffect(binding.effect.shader, SoftGlassShader.INPUT)
+        private fun rebind(node: RenderNode, binding: Binding, state: Applied?) {
+            val shader = binding.effect.shader
+            val cached = rebound[shader]
+            val effect = cached?.takeIf { it.first == state }?.second?.get()
+                ?: RenderEffect.createRuntimeShaderEffect(shader, SoftGlassShader.INPUT).also {
+                    rebound[shader] = state to WeakReference(it)
+                }
             if (binding.mode == null) binding.setter.invoke(node, effect) else binding.setter.invoke(node, effect, binding.mode)
         }
 
-        private fun apply(shader: RuntimeShader, state: Applied, fullMix: Boolean = false) {
-            val profile = state.profile
-            if (profile == null) {
+        private fun apply(shader: RuntimeShader, state: Applied?) {
+            if (state == null) {
                 shader.setFloatUniform(SoftGlassShader.UNIFORM, 0f, 0f, 0f)
                 return
             }
-            SoftGlassShader.applyProfile(shader, profile, state.role, state.dark, state.density,
-                state.width.toFloat(), state.height.toFloat(), state.x, state.y, fullMix)
+            SoftGlassShader.applyProfile(shader, state.profile, state.role, state.dark, state.density,
+                state.width.toFloat(), state.height.toFloat(), state.x, state.y)
         }
     }
 }

@@ -19,6 +19,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.graphics.ColorUtils
 import com.cosmod.launcherglass.util.BackdropVibrancy
 import com.cosmod.launcherglass.util.VolumeRim
+import com.cosmod.launcherglass.util.WallpaperHelper
 import com.cosmod.launcherglass.util.PreviewIcons
 import com.cosmod.launcherglass.util.IconPalette
 import com.cosmod.launcherglass.util.FolderPreviewKind
@@ -27,7 +28,12 @@ import com.cosmod.launcherglass.xposed.GlassStyle
 import com.cosmod.launcherglass.xposed.LiquidGlassShader
 
 /** A small sample scene rendered with the same lens shader as the launcher. */
-internal class GlassPreview(context: Context, private val dark: Boolean, useDeviceWallpaperColor:Boolean=true) : View(context) {
+internal class GlassPreview(
+    context: Context,
+    private val dark: Boolean,
+    useDeviceWallpaperColor: Boolean = true,
+    private val showWallpaper: Boolean = true,
+) : View(context) {
     data class Material(val enabled: Boolean, val liquid: Boolean, val blur: Int, val opacity: Int,
         val width: Int, val distortion: Int, val dispersion: Int, val corner: Int,
         val saturation: Int = 100, val vibrancy: Int = 0, val brightness: Int = 50,
@@ -112,7 +118,7 @@ internal class GlassPreview(context: Context, private val dark: Boolean, useDevi
 
     fun setWallpaper(wallpaper: Bitmap?) {
         if (this.wallpaper === wallpaper) return
-        this.wallpaper = wallpaper
+        this.wallpaper = wallpaper?.let(WallpaperHelper::forSoftwareCanvas)
         rebuildBackdrop()
         invalidate()
     }
@@ -151,7 +157,7 @@ internal class GlassPreview(context: Context, private val dark: Boolean, useDevi
         val saved = canvas.save()
         canvas.clipPath(clip)
         paint.color = Color.WHITE
-        canvas.drawBitmap(base, null, target, paint)
+        if (showWallpaper) canvas.drawBitmap(base, null, target, paint)
         if (folderScenes.isNotEmpty()) {
             drawFolders(canvas, base, current)
             canvas.restoreToCount(saved)
@@ -159,12 +165,16 @@ internal class GlassPreview(context: Context, private val dark: Boolean, useDevi
         }
         val input = blurred(base, current)
         val filter = current.backgroundFilter
-        val iconScene=current.tiles>1 && icons.isNotEmpty()
-        val tiles=if(iconScene)minOf(3,icons.size)else current.tiles
+        val iconScene = icons.isNotEmpty()
+        val tiles = if (iconScene) minOf(current.tiles, 3, icons.size) else current.tiles
         val slotWidth=if(iconScene)(width-24*density)/tiles else width*.72f
         val gap=12*density
         val ratios=if(iconScene)List(tiles){i->icons.getOrNull(i)?.source?.let {it.width.toFloat()/it.height}?.coerceIn(.33f,3f) ?: 1f}else emptyList()
-        val baseHeight=if(ratios.isEmpty())0f else minOf(52*density,height*.68f,(width-24*density-gap*(tiles-1))/(ratios.sum()*1.3f))
+        val iconInset = if (showWallpaper) 24 * density else 12 * density
+        val baseHeight = if (ratios.isEmpty()) 0f else
+            minOf(52 * density, height * (if (showWallpaper) .68f else .90f),
+                (width - iconInset - gap * (tiles - 1)) / (ratios.sum() * 1.3f))
+                .coerceAtLeast(0f)
         val iconHeight=baseHeight*current.iconScale/100f
         var iconLeft=(width-iconHeight*ratios.sum()-gap*(tiles-1))*.5f
         for(index in 0 until tiles){

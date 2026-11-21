@@ -54,10 +54,14 @@ object PerformancePolicy {
     private fun refreshLimit()=if(displayHz>0f)kotlin.math.round(displayHz).toInt().coerceAtLeast(1) else 120
     fun fps(requested:Int)=minOf(requested,when {economy->30;balanced->45;else->120},refreshLimit()).coerceAtLeast(1)
     fun glassFps()=minOf(120,refreshLimit())
+    // Limit copied backdrop frames separately. Compositor-driven glass and
+    // position/shape animation still follow the display refresh rate.
     fun captureFps()=minOf(glassFps(),when {
-        thermal>=PowerManager.THERMAL_STATUS_SEVERE->30
-        saver || settings.profile==2->45
-        else->120
+        economy->30
+        thermal>=PowerManager.THERMAL_STATUS_MODERATE || balanced->45
+        settings.highRefreshPacing->120
+        quality->90
+        else->60
     })
     fun describe()="profile=${settings.profile}, economy=$economy, saver=$saver, thermal=$thermal, sourceHeight=$sourceHeight, alert=${alertWidth}px/$alertFps FPS, lightDrawer=$lightDrawer"
     fun update(context:Context,values:Bundle):Boolean {

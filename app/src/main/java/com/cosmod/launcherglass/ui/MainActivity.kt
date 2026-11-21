@@ -21,7 +21,6 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.doOnPreDraw
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,6 +33,9 @@ import androidx.compose.ui.res.painterResource
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
 import io.github.suqi8.coui.kmp.preference.WindowDropdownPreference
 import io.github.suqi8.coui.kmp.basic.BasicComponent
+import io.github.suqi8.coui.kmp.basic.CardListGroup
+import io.github.suqi8.coui.kmp.basic.SmallTitle
+import io.github.suqi8.coui.kmp.basic.cardListPositionOf
 
 
 import io.github.suqi8.coui.kmp.basic.SmallTitle
@@ -163,6 +165,7 @@ class MainActivity : AppCompatActivity() {
         MOTION(R.string.ui_ba31k_title, R.drawable.ic_catalog_motion, 0x55A4ED, R.string.ui_catalog_keywords_motion),
         CAMERA_ZOOM(R.string.camera_zoom_title, R.drawable.ic_cpi_camera, 0x6793F2, R.string.camera_zoom_keywords),
         PERFORMANCE(R.string.ui_performance, R.drawable.ic_catalog_speed, 0x31B881, R.string.ui_catalog_keywords_performance),
+        HAPTIC(R.string.ui_haptic_studio, R.drawable.ic_catalog_motion, 0x926DF5, R.string.ui_haptic_studio_keywords),
         TOOLS(R.string.ui_about_module, R.drawable.ic_cpi_module, 0, 0),
         SETTINGS(R.string.ui_cpi_settings, R.drawable.ic_settings, 0x969AA8, R.string.ui_catalog_keywords_tools),
         DEVICE(R.string.ui_device_details, R.drawable.ic_cpi_module, 0, 0),
@@ -173,7 +176,6 @@ class MainActivity : AppCompatActivity() {
     private var shadePreview:ShadeGlassPreview?=null
     private var rootNavigationAppearance: Triple<Boolean, Int, Boolean>? = null
     private val rootNavigationIndex=mutableIntStateOf(0)
-    private val floatingTitles=java.util.WeakHashMap<TextView,java.lang.ref.WeakReference<TextView>>()
     private var screen=Screen.OVERVIEW
     private var detailParent=Screen.HOME
     private val tabScroll=mutableMapOf<Screen,Int>()
@@ -259,12 +261,10 @@ class MainActivity : AppCompatActivity() {
         blurExpanded = savedInstanceState?.getBoolean("blurExpanded") ?: false
         designExpanded = savedInstanceState?.getBoolean("designExpanded") ?: false
         root = column().apply { clipChildren=false;clipToPadding=false;setBackgroundColor(this@MainActivity.background) }
-        setContentView(root)
+        setCouiPageContent(root, darkUi, primary)
         updateSystemBars()
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            // The scene fills the window; only controls and the scroll end avoid navigation.
-            view.setPadding(bars.left, 0, bars.right, 0)
+        observeCouiWindowInsets { bars ->
+            root.setPadding(bars.left, 0, bars.right, 0)
             if(topInset!=bars.top){
                 topInset=bars.top
                 applyHeaderInset?.invoke(topInset)
@@ -275,12 +275,12 @@ class MainActivity : AppCompatActivity() {
                 applyBottomInset?.invoke(bottomInset)
                 backBottomInset?.invoke(bottomInset)
             }
-            insets
         }
         page = FrameLayout(this).apply { isFocusableInTouchMode=true;clipChildren=false;clipToPadding=false }
         root.addView(page, LinearLayout.LayoutParams(-1, -1))
         showPageWithDestination()
-        currentScroll?.post { currentScroll?.scrollTo(0,savedInstanceState?.getInt("catalogScroll") ?: 0) }
+        val restoredScroll = savedInstanceState?.getInt("catalogScroll") ?: 0
+        currentScroll?.doOnLayout { it.scrollTo(0, restoredScroll) }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackProgressed(backEvent:androidx.activity.BackEventCompat){
                 if(screen in rootTabs || restartOverlay!=null || menuOverlay!=null || !canAnimate())return
@@ -432,10 +432,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun card(content:View,inner:Boolean=false):FrameLayout {
         val color=if(coloredFeatures)withAlpha(Color.WHITE,if(darkUi)27 else 154)else if(inner)raised else panel
-        val radius=if(inner)16 else 20
-        val edge=if(bool("coloros_ui_effects") && CouiAppearance.read(this)==CouiAppearance.MODERN)
-            withAlpha(onSurface,if(darkUi)33 else 23) else Color.TRANSPARENT
-        return CouiCardHost(this,color,radius,edge,content)
+        val radius=if(inner)16 else 24
+        return CouiCardHost(this,color,radius,content)
     }
 
     private fun chromeSurface() = when {
@@ -499,7 +497,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun save(key: String, value: Any, vararg flags: Pair<String, Boolean>) {
         if(updatingUi)return
+        val editingProfile = DesktopAppearance.affectsManualSettings(key) &&
+            number(DesktopAppearance.MODE) != DesktopAppearance.Mode.MANUAL.ordinal
         prefs.edit().apply {
+            if (editingProfile) {
+                val stored = settingsSnapshot()
+                val manual = manualAppearanceSnapshot(stored)
+                for (name in manual.keySet()) {
+                    if (!DesktopAppearance.affectsManualSettings(name) &&
+                        name != SettingsProvider.KEY_BLUR_VIBRANCY) continue
+                    when (val setting = manual.get(name)) {
+                        is Int -> if (setting != stored.get(name)) putInt(name, setting)
+                        is Boolean -> if (setting != stored.get(name)) putBoolean(name, setting)
+                    }
+                }
+                putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal)
+            }
             if(key==FolderSettingsKeys.OWN && value==true){
                 FolderSettingsKeys.integers.forEach {base -> val own=FolderSettingsKeys.key(base);if(!prefs.contains(own))putInt(own,number(base))}
                 FolderSettingsKeys.booleans.forEach {base -> val own=FolderSettingsKeys.key(base);if(!prefs.contains(own))putBoolean(own,bool(base))}
@@ -521,7 +534,7 @@ class MainActivity : AppCompatActivity() {
             previewSettingsEpoch++
             page.removeCallbacks(refreshPreview);page.postDelayed(refreshPreview,160L)
         }
-        if(key==FolderSettingsKeys.OWN || key==SettingsProvider.KEY_DEVELOPER_MODE ||
+        if(editingProfile || key==FolderSettingsKeys.OWN || key==SettingsProvider.KEY_DEVELOPER_MODE ||
             key==WidgetSettings.HUE || key==com.cosmod.launcherglass.util.IconPalette.FOLLOW_WALLPAPER ||
             key in setOf("banner_plate_hue","banner_plate_saturation","banner_plate_brightness"))refreshControls()
         if(key=="coloros_ui_effects" || key=="coloros_feature_background")refreshCatalogStyle()
@@ -532,7 +545,11 @@ class MainActivity : AppCompatActivity() {
         currentScroll?.let {scroll->scroll.post {scroll.scrollTo(0,y)}}
     }
     private fun applySavedSettings(keys:Set<String>,values:Map<String,Any>){
-        SettingsTransfer.write(prefs.edit(),values,keys).apply()
+        SettingsTransfer.write(prefs.edit(),values,keys).apply {
+            if (DesktopAppearance.MODE !in keys && keys.any(DesktopAppearance::affectsManualSettings)) {
+                putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal)
+            }
+        }.apply()
         contentResolver.notifyChange(SettingsProvider.CONTENT_URI,null)
         refreshCatalogStyle()
     }
@@ -817,6 +834,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openScreen(next:Screen){
+        if (next == Screen.HAPTIC) {
+            hideSearchKeyboard()
+            startActivity(Intent(this, com.cosmod.launcherglass.haptic.HapticStudioActivity::class.java))
+            return
+        }
         if(screen in rootTabs){
             saveTabScroll()
             detailParent=screen
@@ -942,26 +964,27 @@ class MainActivity : AppCompatActivity() {
         else heading.visibility=View.GONE
         heading.setTextColor(Color.TRANSPARENT)
         heading.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        val floatingHeading=text(getString(screen.title),32f,bold=true).apply {
+        val floatingHeading = if (pinnedToolbar == null) text(getString(screen.title),32f,bold=true).apply {
             gravity=heading.gravity
             setPadding(heading.paddingLeft,heading.paddingTop,heading.paddingRight,heading.paddingBottom)
             minHeight=heading.minHeight
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES
             ViewCompat.setAccessibilityHeading(this,true)
             translationZ=dp(4).toFloat()
-            alpha=0f
-        }
-        floatingTitles[heading]=java.lang.ref.WeakReference(floatingHeading)
-        heading.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_->
-            floatingHeading.layoutParams=FrameLayout.LayoutParams(heading.width,heading.height,Gravity.TOP).apply {leftMargin=heading.left}
-        }
+            translationY = topInset.toFloat()
+        } else null
         scroll.addView(body,ViewGroup.LayoutParams(-1,-2))
         shell.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         layer.addView(shell,FrameLayout.LayoutParams(-1,-1))
         val headerBlur=if(bool("coloros_ui_effects"))ColorOsAppBarBlurView(this,darkUi,background).apply {updateAppearance(darkUi,this@MainActivity.background,0f)}else null
         val blurHeight=dp(if(screen==Screen.HOME)105 else 62)
         headerBlur?.let {layer.addView(it,FrameLayout.LayoutParams(-1,topInset+blurHeight,Gravity.TOP))}
-        layer.addView(floatingHeading,FrameLayout.LayoutParams(-1,heading.minHeight,Gravity.TOP))
+        floatingHeading?.let { title ->
+            layer.addView(title,FrameLayout.LayoutParams(-1,-2,Gravity.TOP).apply {
+                leftMargin = body.paddingLeft
+                rightMargin = body.paddingRight
+            })
+        }
         val bottomFade=View(this).apply {
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
             background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -991,7 +1014,7 @@ class MainActivity : AppCompatActivity() {
         if(catalog)addRootRestart(layer)
         when(screen){
             Screen.OVERVIEW->buildOverview(body)
-            Screen.HOME->buildCatalog(body,scroll,heading,headerBlur,layer,navigation)
+            Screen.HOME->buildCatalog(body,scroll,heading,requireNotNull(floatingHeading),headerBlur,layer,navigation)
             Screen.TOOLS->buildModule(body)
             Screen.DEVICE->buildDeviceDetails(body)
             Screen.CONTRIBUTORS->buildContributors(body)
@@ -1004,11 +1027,12 @@ class MainActivity : AppCompatActivity() {
                 headerBlur?.updateAppearance(darkUi,background,(y/dp(30).toFloat()).coerceIn(0f,1f))
                 restartButtonBackdrop?.showScroll(y)
                 navigation?.second?.showScroll(y)
-                if(pinnedToolbar==null)fadeRootTitle(heading,y)
+                floatingHeading?.let { fadeRootTitle(heading, it, y) }
             }
             val headerInset=applyHeaderInset
             applyHeaderInset={inset->headerInset?.invoke(inset);layer.doOnPreDraw {updateHeader(scroll.scrollY)}}
             scroll.setOnScrollChangeListener(androidx.core.widget.NestedScrollView.OnScrollChangeListener {_,_,y,_,_->updateHeader(y)})
+            heading.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateHeader(scroll.scrollY) }
             layer.doOnPreDraw {updateHeader(scroll.scrollY)}
         }
         scroll.onPullChanged={
@@ -1062,15 +1086,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun fadeRootTitle(large:TextView,y:Int){
-        val floating=floatingTitles[large]?.get() ?: return
-        floating.visibility=large.visibility
-        if(large.visibility!=View.VISIBLE || large.height<=0)return
-        val travel=large.height.coerceAtLeast(dp(48)).toFloat()
+    private fun fadeRootTitle(large: TextView, floating: TextView, y: Int) {
+        floating.visibility = large.visibility
+        if (large.visibility != View.VISIBLE) return
+        val travel = maxOf(large.height, large.minHeight).coerceAtLeast(1).toFloat()
         val fade=(y/travel).coerceIn(0f,1f)
         floating.alpha=1f-fade*fade*(3f-2f*fade)
         floating.translationX=0f
-        floating.translationY=topInset+large.top-y.toFloat()
+        floating.translationY=(topInset+large.top-y.toFloat()).coerceAtLeast(topInset.toFloat())
         floating.scaleX=1f;floating.scaleY=1f
     }
 
@@ -1123,7 +1146,7 @@ class MainActivity : AppCompatActivity() {
         applyBottomInset={inset->preceding?.invoke(inset);place(inset)}
     }
 
-    private fun buildCatalog(body:LinearLayout,scroll:androidx.core.widget.NestedScrollView,heading:TextView,headerBlur:ColorOsAppBarBlurView?,layer:FrameLayout,navigation:Pair<View,ColorosHeaderBlur?>?){
+    private fun buildCatalog(body:LinearLayout,scroll:androidx.core.widget.NestedScrollView,heading:TextView,floatingHeading:TextView,headerBlur:ColorOsAppBarBlurView?,layer:FrameLayout,navigation:Pair<View,ColorosHeaderBlur?>?){
         space(body,51)
         val transfer=column()
         val configRows=settingsTransferRows()
@@ -1136,7 +1159,7 @@ class MainActivity : AppCompatActivity() {
                 Screen.MOTION),
             R.string.ui_catalog_systemui to listOf(Screen.LOCKSCREEN,Screen.SHADE,Screen.SIDEBAR,Screen.LIVE,Screen.BANNERS,Screen.VOLUME),
             R.string.camera_tab to listOf(Screen.CAMERA_ZOOM),
-            R.string.ui_catalog_general to listOf(Screen.GLASS,Screen.LIGHT,Screen.PERFORMANCE)
+            R.string.ui_catalog_general to listOf(Screen.GLASS,Screen.LIGHT,Screen.PERFORMANCE,Screen.HAPTIC)
         )
         val alternateLanguage=if(UiLanguage.tag(this)=="ru")"en" else "ru"
         val alternate=resources.configuration.let {current->
@@ -1182,16 +1205,14 @@ class MainActivity : AppCompatActivity() {
             val sections=if(query.isEmpty)groups.map {(heading,items)->heading to items.map {it to null}}
                 else if(ranked.isEmpty())emptyList() else listOf(0 to ranked)
             for((heading,matches) in sections){
-                if(heading!=0)add(entries,text(getString(heading),13f,true).apply {
-                    setPadding(dp(16),dp(10),dp(16),dp(8))
-                    ViewCompat.setAccessibilityHeading(this,true)
+                if (heading != 0) add(entries, CouiSlot(this, darkUi, primary) {
+                    SmallTitle(getString(heading))
                 })
                 val rows=column()
                 matches.forEachIndexed { index,(item,label) ->
-                    if(index!=0)divider(rows,56)
-                    add(rows,catalogRow(item,label?.let(::getString)))
+                    add(rows,catalogRow(item,label?.let(::getString),index,matches.size))
                 }
-                add(entries,card(rows),bottom=11)
+                add(entries,card(rows),bottom=16)
             }
             if(ranked.isEmpty() && transferMatches.isEmpty())add(entries,text(getString(R.string.ui_catalog_no_results),15f,true).apply {
                 gravity=Gravity.CENTER;setPadding(0,dp(36),0,0)
@@ -1208,11 +1229,6 @@ class MainActivity : AppCompatActivity() {
                 val match = rendered?.singleOrNull()?.first
                 val transfer = renderedTransfer?.singleOrNull()?.let(configRows::get)
                 when {
-                    searchQuery.trim().equals("kostuhaptic", ignoreCase = true) -> {
-                        searchInput?.setQuery("")
-                        hideSearchKeyboard()
-                        startActivity(Intent(this, com.cosmod.launcherglass.haptic.HapticStudioActivity::class.java))
-                    }
                     !renderedCatalog && match != null && renderedTransfer.isNullOrEmpty() -> openScreen(match)
                     !renderedCatalog && rendered.isNullOrEmpty() && transfer != null -> {
                         hideSearchKeyboard()
@@ -1238,7 +1254,7 @@ class MainActivity : AppCompatActivity() {
         fun placeSearch(){
             val expanded=maxOf(dp(64),heading.bottom).toFloat()
             val desired=topInset+CatalogSearchGeometry.top(searchProgress,expanded,resources.displayMetrics.density)
-            val y=if(restart==null)desired else {
+            val y=if(restart==null || restart.visibility != View.VISIBLE)desired else {
                 val horizontalGap=if(!restart.isLaidOut || !searchPanel.isLaidOut)0
                     else if(layer.layoutDirection==View.LAYOUT_DIRECTION_RTL)searchPanel.right-searchPanel.capsuleWidth-restart.right
                     else restart.left-searchPanel.left-searchPanel.capsuleWidth
@@ -1252,14 +1268,16 @@ class MainActivity : AppCompatActivity() {
         fun desiredSearchWidth(progress:Float):Int{
             val windowWidth=layer.width.takeIf {it>0} ?: page.width
             if(windowWidth<=0)return ViewGroup.LayoutParams.MATCH_PARENT
-            val reserved=(CatalogSearchGeometry.reservedWidth(progress)*resources.displayMetrics.density).roundToInt()
+            val editing = searchPanel.isInputFocused() || searchQuery.isNotEmpty()
+            val reserved = if (editing) 0 else
+                (CatalogSearchGeometry.reservedWidth(progress)*resources.displayMetrics.density).roundToInt()
             return (windowWidth-dp(16)*2-reserved).coerceAtLeast(1)
         }
         fun layoutSearch(progress:Float){
             searchPanel.resizeCapsule(desiredSearchWidth(progress))
             placeSearch()
             val titleTravel=maxOf(dp(64),heading.bottom)*progress
-            fadeRootTitle(heading,maxOf(scroll.scrollY,titleTravel.roundToInt()))
+            fadeRootTitle(heading,floatingHeading,maxOf(scroll.scrollY,titleTravel.roundToInt()))
         }
         val searchMotion=androidx.dynamicanimation.animation.SpringAnimation(androidx.dynamicanimation.animation.FloatValueHolder(0f)).apply {
             spring=androidx.dynamicanimation.animation.SpringForce(0f).setStiffness(165f).setDampingRatio(.52f)
@@ -1291,17 +1309,30 @@ class MainActivity : AppCompatActivity() {
             }
             layoutSearch(searchProgress)
         }
+        var catalogScrollY: Int? = null
         val updateSearchMode={
             val searching=searchPanel.isInputFocused() || searchQuery.isNotEmpty()
             heading.visibility=if(searching)View.GONE else View.VISIBLE
-            if(pageLayer===layer)navigation?.first?.visibility=if(searchPanel.isInputFocused())View.INVISIBLE else View.VISIBLE
-            if(searching && searchPositionReady && pageLayer===layer && searchPanel.isInputFocused())scroll.scrollTo(0,0)
+            if (pageLayer === layer) {
+                navigation?.first?.visibility = if (searching) View.INVISIBLE else View.VISIBLE
+                restart?.visibility = if (searching) View.INVISIBLE else View.VISIBLE
+                if (searching && catalogScrollY == null) {
+                    catalogScrollY = scroll.scrollY
+                    scroll.scrollTo(0, 0)
+                } else if (!searching) {
+                    catalogScrollY?.let { previous -> scroll.post { scroll.scrollTo(0, previous) } }
+                    catalogScrollY = null
+                }
+            }
             positionSearch(scroll.scrollY)
         }
         syncSearchMode=updateSearchMode
         val updateInset=applyHeaderInset
         applyHeaderInset={inset->updateInset?.invoke(inset);positionSearch(scroll.scrollY)}
         heading.addOnLayoutChangeListener { _,_,_,_,_,_,_,_,_ ->positionSearch(scroll.scrollY)}
+        layer.addOnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ ->
+            if (r - l != oldR - oldL) positionSearch(scroll.scrollY)
+        }
         scroll.setOnScrollChangeListener(androidx.core.widget.NestedScrollView.OnScrollChangeListener { _,_,y,_,_ ->
             headerBlur?.updateAppearance(darkUi,background,(y/dp(30).toFloat()).coerceIn(0f,1f))
             restartButtonBackdrop?.showScroll(y)
@@ -1330,9 +1361,10 @@ class MainActivity : AppCompatActivity() {
         updateSearchMode()
     }
 
-    private fun catalogRow(item:Screen,matchedSetting:String?=null):View =
+    private fun catalogRow(item:Screen,matchedSetting:String?,index:Int,count:Int):View =
         CouiPreference(this,darkUi,primary,getString(item.title),matchedSetting,item.icon,Color.BLACK or item.tint,
-            catalog=true,onPreview={showFeaturePreview(item,it)}){haptic(it);openScreen(item)}
+            catalog=true,onPreview=if(item==Screen.HAPTIC)null else { {showFeaturePreview(item,it)} },
+            position=cardListPositionOf(index,count)){haptic(it);openScreen(item)}
 
     private fun buildCameraZoom(body: LinearLayout) {
         val zoom = com.cosmod.launcherglass.camera.CameraZoomSettings
@@ -1460,6 +1492,7 @@ class MainActivity : AppCompatActivity() {
         if(section.name in FeatureSections.sections){
             add(common,card(switchRow(getString(R.string.ui_section_enabled),FeatureSections.key(section.name))),bottom=8)
         }
+        if (section == Screen.ICONS || section == Screen.PHOTO) addDesktopAppearance(common)
         val savedPosition=common.childCount
         when(section){
             Screen.GLASS->globalGlassSection(body,general,colors)
@@ -1485,6 +1518,42 @@ class MainActivity : AppCompatActivity() {
         if(separated){
             for(tab in listOf(general,colors,body))add(pageBody,tab)
         }
+    }
+
+    private fun addDesktopAppearance(parent: LinearLayout) {
+        val controls = column()
+        val summary = TextView(this).apply {
+            textSize = 14f
+            setTextColor(if (darkUi) 0xffc7c7cb.toInt() else 0xff515159.toInt())
+            setPadding(dp(16), dp(12), dp(16), 0)
+        }
+        add(controls, summary)
+        add(controls, preferenceLink(getString(R.string.desktop_appearance_restore_manual)) {
+            save(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal)
+            refreshCatalogStyle()
+        })
+        val appearanceCard = card(controls)
+        fun refresh() {
+            val mode = DesktopAppearance.Mode.entries.getOrElse(prefs.getInt(DesktopAppearance.MODE, 0)) {
+                DesktopAppearance.Mode.MANUAL
+            }
+            appearanceCard.visibility = if (mode == DesktopAppearance.Mode.MANUAL) View.GONE else View.VISIBLE
+            summary.text = getString(R.string.desktop_appearance_active, getString(mode.label))
+        }
+        val observer = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == DesktopAppearance.MODE) refresh()
+        }
+        appearanceCard.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                prefs.registerOnSharedPreferenceChangeListener(observer)
+                refresh()
+            }
+            override fun onViewDetachedFromWindow(view: View) {
+                prefs.unregisterOnSharedPreferenceChangeListener(observer)
+            }
+        })
+        refresh()
+        add(parent, appearanceCard, bottom = 8)
     }
 
     private fun accordionCard(parent:LinearLayout,title:Int,children:LinearLayout){
@@ -1697,7 +1766,6 @@ class MainActivity : AppCompatActivity() {
         status.minimumHeight=dp(90)
         add(body,status,bottom=12)
 
-        val info=column()
         val details=listOf(
             R.string.ui_device_region to OnextDeviceInfo.region(this),
             R.string.ui_device_android to getString(R.string.ui_device_android_value,Build.VERSION.RELEASE,Build.VERSION.SDK_INT),
@@ -1707,11 +1775,7 @@ class MainActivity : AppCompatActivity() {
             R.string.ui_device_fingerprint to Build.FINGERPRINT,
             R.string.ui_device_kernel to OnextDeviceInfo.kernelVersion
         )
-        for((index,entry) in details.withIndex()){
-            if(index!=0)divider(info)
-            add(info,informationRow(entry.first,entry.second))
-        }
-        add(body,card(info),bottom=10)
+        addDeviceInformation(body, details)
         add(body,card(preferenceLink(getString(R.string.ui_device_details),getString(R.string.ui_device_details_hint)){
             openScreen(Screen.DEVICE)
         }))
@@ -1720,6 +1784,23 @@ class MainActivity : AppCompatActivity() {
     private fun informationRow(label: Int, value: String): View =
         CouiInformation(this, darkUi, primary, getString(label),
             value.ifBlank { getString(R.string.ui_device_unknown) })
+
+    private fun addDeviceInformation(body: LinearLayout, entries: List<Pair<Int, String>>) {
+        val group = CouiSlot(this, darkUi, primary) {
+            CouiGroup {
+                CardListGroup {
+                    for ((label, value) in entries) item {
+                        BasicComponent(title = getString(label),
+                            summary = value.ifBlank { getString(R.string.ui_device_unknown) })
+                    }
+                }
+            }
+        }
+        body.addView(group, LinearLayout.LayoutParams(-1, -2).apply {
+            marginStart = -dp(16)
+            marginEnd = -dp(16)
+        })
+    }
 
     private fun preferenceLink(title:String,summary:String?=null,icon:Int?=null,
         iconTint:Int=onSurface,action:(View)->Unit):View =
@@ -1742,12 +1823,7 @@ class MainActivity : AppCompatActivity() {
             R.string.ui_device_display to (mode?.let {"${it.physicalWidth} × ${it.physicalHeight} · ${it.refreshRate.roundToInt()} Hz"} ?: ""),
             R.string.ui_device_patch to Build.VERSION.SECURITY_PATCH
         )
-        val content=column()
-        for((index,entry) in entries.withIndex()){
-            if(index!=0)divider(content)
-            add(content,informationRow(entry.first,entry.second))
-        }
-        add(body,card(content))
+        addDeviceInformation(body, entries)
     }
 
     private fun buildModule(body:LinearLayout){
@@ -1766,11 +1842,11 @@ class MainActivity : AppCompatActivity() {
         val people = CouiSlot(this, darkUi, primary) {
             androidx.compose.foundation.layout.Column {
                 CouiGroup {
-                    BasicComponent(title = getString(R.string.ui_cpi_edition), summary = "Kostubet Topics")
-                    HorizontalDivider()
-                    BasicComponent(title = getString(R.string.ui_contributor_help), summary = "@anime_killer2009")
-                    HorizontalDivider()
-                    BasicComponent(title = getString(R.string.ui_contributor_sources), summary = "Mahmud0808 · MiToverG422")
+                    CardListGroup {
+                        item { BasicComponent(title = getString(R.string.ui_cpi_edition), summary = "Kostubet Topics") }
+                        item { BasicComponent(title = getString(R.string.ui_contributor_help), summary = "@anime_killer2009") }
+                        item { BasicComponent(title = getString(R.string.ui_contributor_sources), summary = "Mahmud0808 · MiToverG422") }
+                    }
                 }
                 CouiGroup {
                     BasicComponent(title=getString(R.string.ui_contributor_beta),summary=testers.joinToString(", "))
@@ -3410,11 +3486,25 @@ class MainActivity : AppCompatActivity() {
         if(preview.isAttachedToWindow)preview.postDelayed(capture,1500L)
     }
 
+    private fun settingsSnapshot() = Bundle().apply {
+        for ((key, value) in prefs.all) when (value) {
+            is Boolean -> putBoolean(key, value)
+            is Int -> putInt(key, value)
+        }
+    }
+
+    private fun manualAppearanceSnapshot(stored: Bundle): Bundle {
+        val systemDark = IconPalette.isSystemDark(applicationContext)
+        return DesktopAppearance.copyForManualEdit(stored, DesktopAppearance.read(stored, systemDark), systemDark, darkIcons())
+            .apply { putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal) }
+    }
+
     private fun updateGlassPreview(){
         val preview=glassPreview ?: return
         val screen=glassPreviewScreen ?: return
-        val bundle=Bundle()
-        for((key,value) in prefs.all)when(value){is Boolean->bundle.putBoolean(key,value);is Int->bundle.putInt(key,value)}
+        val stored = settingsSnapshot()
+        val bundle = if (number(DesktopAppearance.MODE) != DesktopAppearance.Mode.MANUAL.ordinal &&
+            previewDraft.keys.any(DesktopAppearance::affectsManualSettings)) manualAppearanceSnapshot(stored) else stored
         previewDraft.forEach {key,value->bundle.putInt(key,value)}
         val bannerDark=renderGlassPreview(preview,screen,bundle)
         if(bannerDark!=null && previewBannerDark!=bannerDark){
@@ -3427,7 +3517,11 @@ class MainActivity : AppCompatActivity() {
         GlobalGlassSettings.apply(bundle)
         FeatureSections.apply(bundle)
         val wallpaperTone by lazy {IconPalette.wallpaperTone(this)}
-        val iconDark=darkIcons()
+        val systemDark = IconPalette.isSystemDark(applicationContext)
+        val appearance = DesktopAppearance.read(bundle, systemDark)
+        if (screen == Screen.ICONS || screen == Screen.PHOTO) DesktopAppearance.apply(bundle, appearance, systemDark)
+        val iconDark = if (screen == Screen.ICONS && appearance.mode !in setOf(DesktopAppearance.Mode.MANUAL, DesktopAppearance.Mode.STOCK))
+            appearance.iconDark(systemDark) else darkIcons()
         fun read(key:String):Int {
             if(bundle.containsKey(key))return bundle.getInt(key)
             val base=key.removePrefix("folder_")
@@ -3720,7 +3814,6 @@ class MainActivity : AppCompatActivity() {
             add(this,control)
         }
         val appMotion = { active() && (bool(settings.OPEN) || bool(settings.CLOSE)) }
-        val shade = { active() && bool(settings.SHADE) }
         val masterSwitch=switchRow(getString(R.string.ui_ba31k_title),settings.ENABLED,
             getString(R.string.ui_ba31k_summary))
         gate(masterSwitch,::master)
@@ -3746,11 +3839,6 @@ class MainActivity : AppCompatActivity() {
             amount(R.string.ui_ba31k_damping,settings.DAMPING,appMotion)
             amount(R.string.ui_ba31k_velocity,settings.INITIAL_VELOCITY,appMotion)
             amount(R.string.ui_ba31k_duration,settings.DURATION,appMotion)
-        }
-        group(R.string.ui_ba31k_shade) {
-            toggle(R.string.ui_ba31k_fly,settings.SHADE)
-            amount(R.string.ui_ba31k_spread,settings.SPREAD,shade)
-            toggle(R.string.ui_ba31k_clear_shade,settings.CLEAR_SHADE)
         }
         add(body,card(preferenceLink(getString(R.string.ui_reset_section)){anchor->
             choicePopup(anchor,listOf(0 to R.string.ui_cancel,1 to R.string.ui_reset_section_confirm),-1){

@@ -22,12 +22,26 @@ internal class GenieIconProjection {
 
     fun share(nativeIcon: Matrix, window: GenieTransitionLayers.SharedProjection, crop: Rect): Boolean {
         if (crop.isEmpty) return false
+        val perspective = window.perspective ?: return false
+        val appMatrix = window.nativeMatrix ?: return false
         nativeIcon.getValues(iconMatrix)
-        if (!iconTransform.update(iconMatrix, window.nativeMatrix, window.perspective) ||
-            !ProjectiveIconTransform.bounded(iconTransform.matrix, crop.left.toFloat(), crop.top.toFloat(),
-                crop.width().toFloat(), crop.height().toFloat())) return false
-        iconTransform.matrix.copyInto(matrix)
-        return true
+        if (iconTransform.update(iconMatrix, appMatrix, perspective) &&
+            ProjectiveIconTransform.center(iconTransform.matrix, crop.exactCenterX(), crop.exactCenterY()) &&
+            ProjectiveIconTransform.bounded(iconTransform.matrix, crop.left.toFloat(), crop.top.toFloat(),
+                crop.width().toFloat(), crop.height().toFloat())) {
+            iconTransform.matrix.copyInto(matrix)
+            return true
+        }
+
+        // When the window and icon are on different native paths, preserve the icon's
+        // center and express the same deformation in the icon's own crop.
+        val deformation = window.deformation ?: return false
+        val weight = window.weight
+        return center(AppWindowDeformation(
+            deformation.topOffset * weight, deformation.bottomOffset * weight,
+            1f + (deformation.topWidth - 1f) * weight, 1f + (deformation.bottomWidth - 1f) * weight,
+            deformation.topCenter * weight, deformation.bottomCenter * weight,
+        ), crop)
     }
 
     fun asMatrix() = Matrix().apply {

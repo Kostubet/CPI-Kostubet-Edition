@@ -1,11 +1,14 @@
 package com.cosmod.launcherglass.ui
 import android.content.Context
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalView
@@ -15,7 +18,10 @@ import com.cosmod.launcherglass.ui.onextbox.ColorOsDropdownPopup
 import io.github.suqi8.coui.kmp.basic.DropdownDefaults
 import io.github.suqi8.coui.kmp.basic.DropdownEntry
 import io.github.suqi8.coui.kmp.basic.DropdownItem
-import io.github.suqi8.coui.kmp.popup.WindowDropdownPopup
+import io.github.suqi8.coui.kmp.basic.DropdownImpl
+import io.github.suqi8.coui.kmp.basic.ListPopupColumn
+import io.github.suqi8.coui.kmp.basic.PopupPositionProvider
+import io.github.suqi8.coui.kmp.window.WindowListPopup
 import io.github.suqi8.coui.kmp.effect.LocalPopupMaterialBlur
 import io.github.suqi8.coui.kmp.effect.MaterialBlurProvider
 import io.github.suqi8.coui.kmp.theme.COUIRoundCorner
@@ -49,6 +55,10 @@ internal class CouiPopup(context: Context, dark: Boolean, accent: Int, surface: 
                     })
             } else {
                 val color = Color(surface)
+                val settle = remember { Animatable(-6f) }
+                LaunchedEffect(showing) {
+                    if (showing) settle.animateTo(0f, spring(dampingRatio = .58f, stiffness = 320f))
+                }
                 val material = remember(color) {
                     MaterialBlurProvider { spec, _ ->
                         Modifier.composed {
@@ -73,8 +83,24 @@ internal class CouiPopup(context: Context, dark: Boolean, accent: Int, surface: 
                 }
                 CompositionLocalProvider(LocalPopupMaterialBlur provides material) {
                     // Applying a choice can rebuild the page that hosts this popup.
-                    WindowDropdownPopup(entry, showing, onDismiss = ::close, onDismissFinished = { finish(onPick) },
-                        maxHeight = 440.dp, dropdownColors = DropdownDefaults.dropdownColors(), backgroundColor = color)
+                    WindowListPopup(
+                        show = showing,
+                        popupModifier = Modifier.graphicsLayer { translationY = settle.value.dp.toPx() },
+                        alignment = PopupPositionProvider.Align.End,
+                        onDismissRequest = ::close,
+                        onDismissFinished = { finish(onPick) },
+                        maxHeight = 440.dp,
+                        backgroundColor = color,
+                    ) {
+                        val colors = DropdownDefaults.dropdownColors()
+                        ListPopupColumn {
+                            entry.items.forEachIndexed { index, item ->
+                                DropdownImpl(item, entry.items.size, item.selected, index, dropdownColors = colors) {
+                                    item.onClick?.invoke()
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

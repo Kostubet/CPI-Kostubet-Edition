@@ -6,6 +6,7 @@ import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.cosmod.launcherglass.BuildConfig
@@ -53,14 +54,18 @@ internal object PreviewIcons {
         val preferred=packages.mapNotNull(lookup::get)
         val ordered=(preferred+activities).distinctBy {it.activityInfo.packageName}
         fun load(info:ResolveInfo):Icon?=runCatching {
-            val size=144
-            val source=Bitmap.createBitmap(size,size,Bitmap.Config.ARGB_8888)
-            val drawable=info.loadIcon(manager).mutate()
-            drawable.setBounds(0,0,size,size)
-            drawable.draw(Canvas(source))
-            IconBitmapProcessor.previewLayers(source,100)?.let {Icon(source,it)}
+            fromDrawable(info.loadIcon(manager))
         }.getOrNull()
         return ordered.asSequence().mapNotNull(::load).take(limit).toList()
+    }
+
+    fun fromDrawable(icon: Drawable): Icon? {
+        val size = 144
+        val source = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val drawable = icon.constantState?.newDrawable()?.mutate() ?: icon.mutate()
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(Canvas(source))
+        return IconBitmapProcessor.previewLayers(source, 100)?.let { Icon(source, it) }
     }
 
     fun write(context: Context, uri: Uri, icons: List<Icon>): Boolean = runCatching {

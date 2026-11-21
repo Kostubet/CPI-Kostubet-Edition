@@ -10,10 +10,10 @@ import androidx.dynamicanimation.animation.FloatValueHolder
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
 
-internal class ColorOsTopBarMotion(density: Float) {
-    private val drag = ColorOsDialogButtonMotion(density)
-    private val press = TopBarSpring(1f)
-    private val mask = TopBarSpring(0f)
+internal class ColorOsTopBarMotion(density: Float, onFrame: () -> Unit = {}) {
+    private val drag = ColorOsDialogButtonMotion(density, onFrame = onFrame)
+    private val press = TopBarSpring(1f, onFrame)
+    private val mask = TopBarSpring(0f, onFrame)
 
     val scaleX get() = press.value * drag.scaleX
     val scaleY get() = press.value * drag.scaleY
@@ -62,13 +62,16 @@ internal fun colorOsTopBarLocalPosition(
     )
 }
 
-private class TopBarSpring(initial: Float) {
+private class TopBarSpring(initial: Float, onFrame: () -> Unit) {
     var value by mutableFloatStateOf(initial)
         private set
     private val animation = SpringAnimation(FloatValueHolder(initial)).apply {
         minimumVisibleChange = .0001f
         spring = SpringForce(initial)
-        addUpdateListener { _, position, _ -> value = position }
+        addUpdateListener { _, position, _ ->
+            value = position
+            onFrame()
+        }
     }
 
     fun to(target: Float, stiffness: Float, damping: Float, resetVelocity: Boolean = false) {

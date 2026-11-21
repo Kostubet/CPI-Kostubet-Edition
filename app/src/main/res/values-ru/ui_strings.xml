@@ -506,11 +506,6 @@
     <string name="ui_ba31k_genie">Эффект джина</string>
     <string name="ui_ba31k_droplet_strength">Сила эффекта капли</string>
     <string name="ui_ba31k_speed">Общая скорость этого движка</string>
-    <string name="ui_ba31k_shade">Шторка уведомлений</string>
-    <string name="ui_ba31k_fly">Анимация иконок при закрытии шторки</string>
-    <string name="ui_ba31k_spread">Интенсивность разлёта иконок</string>
-    <string name="ui_ba31k_fly_blur">Размытие иконок при движении</string>
-    <string name="ui_ba31k_clear_shade">Прозрачный фон шторки</string>
     <string name="ui_ba31k_app_blur">Размытие рабочего стола при переходах</string>
     <string name="ui_ba31k_spring">Физика пружины</string>
     <string name="ui_ba31k_stiffness">Жёсткость пружины наклона</string>
@@ -523,4 +518,6 @@
     <string name="ui_ios_deformation_strength">Сила деформации</string>
     <string name="ui_ios_tilt_strength">Сила наклона</string>
     <string name="ui_folder_icons_blur">Стекло иконок внутри папок</string>
+    <string name="ui_haptic_studio">Haptic Studio</string>
+    <string name="ui_haptic_studio_keywords">вибрация тактильный отклик паттерн рингтон</string>
 </resources>

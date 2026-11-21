@@ -1,6 +1,13 @@
 package com.cosmod.launcherglass.xposed
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import kotlin.math.abs
 import com.cosmod.launcherglass.util.GlassLogger
 import java.util.WeakHashMap
 import kotlin.math.max
@@ -9,39 +16,49 @@ import kotlin.math.sqrt
 data class ProcessedIcon(
     val glyphBitmap: Bitmap,
     val plateMaskBitmap: Bitmap,
-    val bgColor: Int
+    val bgColor: Int,
+    val artwork: Boolean = false,
 )
+
+internal fun shadedIconGlyph(color: Int, depth: Float): ColorMatrixColorFilter {
+    val luma = floatArrayOf(.2126f, .7152f, .0722f)
+    val matrix = FloatArray(20)
+    for ((row, channel) in intArrayOf(Color.red(color), Color.green(color), Color.blue(color)).withIndex()) {
+        for (column in luma.indices) matrix[row * 5 + column] = luma[column] * (channel / 255f) * depth
+        matrix[row * 5 + 4] = channel * (1f - depth)
+    }
+    matrix[18] = 1f
+    return ColorMatrixColorFilter(matrix)
+}
 
 object IconBitmapProcessor {
 
-    private data class CachedIcon(val generation: Int, val icon: ProcessedIcon?,
+    private data class CachedIcon(val generation: Int, val classic: Boolean, val icon: ProcessedIcon?,
         var palette: com.cosmod.launcherglass.util.IconPalette? = null, var colored: ProcessedIcon? = null)
     private val cache = WeakHashMap<Bitmap, CachedIcon>()
     private val layeredSources=WeakHashMap<Bitmap,Boolean>()
     @Synchronized fun markLayeredSource(bitmap:Bitmap){
         if(layeredSources.put(bitmap,true)!=true)cache.remove(bitmap)
     }
-    @Synchronized fun clearTintCache() { cache.values.forEach { it.palette = null; it.colored = null } }
     private fun applyPalette(cached: CachedIcon): ProcessedIcon? {
         val icon = cached.icon ?: return null
         val palette = PrefsHelper.iconPalette
         if (!palette.custom && !palette.whiteGlyph) return icon
         if (cached.palette == palette) return cached.colored
         val glyph = Bitmap.createBitmap(icon.glyphBitmap.width, icon.glyphBitmap.height, Bitmap.Config.ARGB_8888)
-        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { colorFilter = palette.filter }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = if (icon.artwork) shadedIconGlyph(palette.foreground, .32f) else palette.filter
+        }
         android.graphics.Canvas(glyph).drawBitmap(icon.glyphBitmap, 0f, 0f, paint)
-        return ProcessedIcon(glyph, icon.plateMaskBitmap, if(palette.custom)palette.background else icon.bgColor).also {
+        return icon.copy(glyphBitmap = glyph, bgColor = if (palette.custom) palette.background else icon.bgColor).also {
             cached.palette = palette; cached.colored = it
         }
     }
-    private var cachedOpacity: Int = -1
     private var processLogCount = 0
 
     @Synchronized
     fun clearCache() {
         cache.clear()
-        clearTintCache()
-        cachedOpacity = -1
     }
 
     @Synchronized
@@ -56,23 +73,39 @@ object IconBitmapProcessor {
     @Synchronized
     fun getOrProcess(src: Bitmap, bgOpacity: Int): ProcessedIcon? {
         if (src.isRecycled) return null
-        if (cachedOpacity != bgOpacity) {
-            cache.clear()
-            cachedOpacity = bgOpacity
-        }
-
+        val classic = PrefsHelper.nativeClassicIcons && layeredSources[src] != true
         val cached = cache[src]
-        if (cached != null && cached.generation == src.generationId) {
+        if (cached != null && cached.generation == src.generationId && cached.classic == classic) {
             return applyPalette(cached)
         }
 
-        val processed = processIcon(src, bgOpacity)
-        val entry = CachedIcon(src.generationId, processed)
+        val processed = processIcon(src, bgOpacity, classic)
+        val entry = CachedIcon(src.generationId, classic, processed)
         cache[src] = entry
         return applyPalette(entry)
     }
 
-    private fun processIcon(src: Bitmap, bgOpacity: Int): ProcessedIcon? {
+    /** Classic app art may have a gradient backing or a transparent, standalone logo. */
+    private fun classicLayers(pixels: IntArray, width: Int, height: Int): ProcessedIcon? {
+        val bounds = ClassicIconMatte.bounds(pixels, width) ?: return null
+        val tile = bounds.coversTile(pixels.size)
+        val extracted = if (tile) ClassicIconMatte.extract(pixels, width, bounds) else pixels
+        val glyph = extracted ?: pixels
+        val mask = if (tile) IntArray(pixels.size) { i -> (pixels[i] and -0x1000000) or 0xffffff } else null
+        val plate = if (mask != null) Bitmap.createBitmap(mask, width, height, Bitmap.Config.ARGB_8888)
+            else Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
+                val path = Path()
+                val context = IconGlassHook.appContext
+                if (context != null) NativeIconAppearance.iconOutline(context, path, rect)
+                else path.addRoundRect(rect, width * .23f, height * .23f, Path.Direction.CW)
+                Canvas(bitmap).drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+            }
+        return ProcessedIcon(Bitmap.createBitmap(glyph, width, height, Bitmap.Config.ARGB_8888), plate,
+            Color.rgb(46, 46, 49), artwork = extracted == null)
+    }
+
+    private fun processIcon(src: Bitmap, bgOpacity: Int, classic: Boolean = false): ProcessedIcon? {
         if (src.isRecycled) return null
         val width = src.width
         val height = src.height
@@ -106,6 +139,8 @@ object IconBitmapProcessor {
         } finally {
             if (readable !== src && !readable.isRecycled) readable.recycle()
         }
+
+        if (classic) classicLayers(pixels, width, height)?.let { return it }
 
         // 1. Find dominant opaque color (the background squircle plate)
         val buckets = IntArray(32768)

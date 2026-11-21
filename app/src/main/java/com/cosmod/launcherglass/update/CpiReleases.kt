@@ -5,8 +5,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import com.cosmod.launcherglass.BuildConfig
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.security.MessageDigest
@@ -14,6 +16,8 @@ import java.security.MessageDigest
 internal object CpiReleases {
     private const val REPO = "Kostubet/CPI-Kostubet-Edition"
     private const val API = "https://api.github.com/repos/$REPO/releases?per_page=30"
+    internal const val FEED = "https://raw.githubusercontent.com/$REPO/main/updates/latest.json"
+    internal const val MIRROR = "https://cdn.jsdelivr.net/gh/$REPO@main/updates/latest.json"
     private const val MAX_APK = 128L * 1024 * 1024
     private val tagPattern = Regex("""v(\d+\.\d+\.\d+)(?:-build(\d+))?""")
     private val filePattern = Regex("""CPI-Kostubet-Edition-(\d+\.\d+\.\d+)-build(\d+)\.apk""")
@@ -22,7 +26,39 @@ internal object CpiReleases {
     data class Release(val version: String, val build: Int, val size: Long, val url: String,
         val digest: String?, val checksumUrl: String?)
 
-    fun latest(): Release? = select(JSONArray(bytes(API, 2 * 1024 * 1024).toString(Charsets.UTF_8)))
+    class HttpFailure(val status: Int) : IOException("Update server HTTP $status")
+
+    fun latest(fresh: Boolean = false): Release? = discover { url, limit ->
+        val requested = if (fresh) url + (if ('?' in url) "&" else "?") + "cpi_check=" + System.currentTimeMillis() else url
+        bytes(requested, limit, fresh)
+    }
+
+    /** Public manifests do not consume GitHub's shared anonymous API quota. */
+    internal fun discover(read: (String, Int) -> ByteArray): Release? {
+        for (url in listOf(FEED, MIRROR)) {
+            val result = runCatching { manifest(JSONObject(read(url, 64 * 1024).toString(Charsets.UTF_8))) }
+            result.getOrNull()?.let { return it }
+        }
+        // Keep support for repositories where the publishing job has not written a feed yet.
+        return select(JSONArray(read(API, 2 * 1024 * 1024).toString(Charsets.UTF_8)))
+    }
+
+    internal fun manifest(entry: JSONObject): Release? {
+        if (entry.optInt("format") != 1) return null
+        val tag = entry.optString("tag")
+        val (version, taggedBuild) = tagPattern.matchEntire(tag)?.destructured ?: return null
+        val apk = entry.optJSONObject("apk") ?: return null
+        val name = apk.optString("name")
+        val (fileVersion, fileBuild) = filePattern.matchEntire(name)?.destructured ?: return null
+        val build = fileBuild.toIntOrNull()?.takeIf { it > 0 } ?: return null
+        val url = "https://github.com/$REPO/releases/download/$tag/$name"
+        val size = apk.optLong("size").takeIf { it in 1..MAX_APK } ?: return null
+        val digest = apk.optString("sha256").takeIf(digestPattern::matches) ?: return null
+        if (fileVersion != version || (taggedBuild.isNotEmpty() && taggedBuild != fileBuild) ||
+            entry.optString("version") != version || entry.optLong("build") != build.toLong() ||
+            apk.optString("url") != url) return null
+        return Release(version, build, size, url, digest.lowercase(), null)
+    }
 
     fun select(releases: JSONArray): Release? {
         var best: Release? = null
@@ -104,7 +140,7 @@ internal object CpiReleases {
         }
     }
 
-    private fun bytes(url: String, limit: Int): ByteArray = request(url) { response ->
+    private fun bytes(url: String, limit: Int, fresh: Boolean = false): ByteArray = request(url, fresh) { response ->
         response.inputStream.use { input ->
             val result = ByteArrayOutputStream()
             val chunk = ByteArray(8192)
@@ -118,22 +154,25 @@ internal object CpiReleases {
         }
     }
 
-    private fun <T> request(url: String, read: (HttpURLConnection) -> T): T {
+    private fun <T> request(url: String, fresh: Boolean = false, read: (HttpURLConnection) -> T): T {
         var target = URI(url)
         repeat(5) {
             require(target.scheme == "https" && target.userInfo == null && target.port in setOf(-1, 443) &&
-                target.host in setOf("api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"))
+                target.host in setOf("api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
+                    "raw.githubusercontent.com", "cdn.jsdelivr.net"))
             val connection = target.toURL().openConnection() as HttpURLConnection
+            connection.useCaches = !fresh
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 10_000
             connection.readTimeout = 20_000
             connection.setRequestProperty("User-Agent", "CPI-Kostubet-Edition/${BuildConfig.VERSION_NAME}")
+            if (fresh) connection.setRequestProperty("Cache-Control", "no-cache")
             if (target.host == "api.github.com") connection.setRequestProperty("Accept", "application/vnd.github+json")
             try {
                 val status = connection.responseCode
                 if (status in 300..399) target = target.resolve(requireNotNull(connection.getHeaderField("Location")))
                 else {
-                    check(status == HttpURLConnection.HTTP_OK) { "GitHub HTTP $status" }
+                    if (status != HttpURLConnection.HTTP_OK) throw HttpFailure(status)
                     return read(connection)
                 }
             } finally { connection.disconnect() }

@@ -17,7 +17,11 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sign
 
-internal class ColorOsDialogButtonMotion(private val density: Float) {
+internal class ColorOsDialogButtonMotion(
+    private val density: Float,
+    private val dragRatio: Float = .05f,
+    private val onFrame: () -> Unit = {},
+) {
     var translationX by mutableFloatStateOf(0f)
         private set
     var translationY by mutableFloatStateOf(0f)
@@ -41,7 +45,10 @@ internal class ColorOsDialogButtonMotion(private val density: Float) {
         SpringAnimation(FloatValueHolder(initial)).apply {
             spring = SpringForce(initial)
             minimumVisibleChange = threshold
-            addUpdateListener { _, value, _ -> update(value) }
+            addUpdateListener { _, value, _ ->
+                update(value)
+                onFrame()
+            }
         }
 
     private fun configure(animation: SpringAnimation, response: Float, bounce: Float) {
@@ -60,20 +67,18 @@ internal class ColorOsDialogButtonMotion(private val density: Float) {
     }
 
     fun drag(delta: Offset, size: IntSize) {
-        if (!dragging || (abs(delta.x) < 5f && abs(delta.y) < 5f)) return
+        if (!dragging) return
         val x = delta.x + baseDelta.x
         val y = delta.y + baseDelta.y
-        xSpring.animateToFinalPosition(rubber(x, .05f, maxStretch))
-        ySpring.animateToFinalPosition(rubber(y, .05f, maxStretch))
+        xSpring.animateToFinalPosition(rubber(x, dragRatio, maxStretch))
+        ySpring.animateToFinalPosition(rubber(y, dragRatio, maxStretch))
         val maxScale = maximumScale(size)
         val xScale = 1f + abs(rubber(x, .55f, maxDeform)) / maxDeform * (maxScale - 1f)
         val yScale = 1f + abs(rubber(y, .55f, maxDeform)) / maxDeform * (maxScale - 1f)
         val total = abs(x) + abs(y)
-        if (total > 0f) {
-            val stretch = ln(xScale) * abs(x) / total - ln(yScale) * abs(y) / total
-            scaleXSpring.animateToFinalPosition(exp(stretch))
-            scaleYSpring.animateToFinalPosition(exp(-stretch))
-        }
+        val stretch = if (total > 0f) ln(xScale) * abs(x) / total - ln(yScale) * abs(y) / total else 0f
+        scaleXSpring.animateToFinalPosition(exp(stretch))
+        scaleYSpring.animateToFinalPosition(exp(-stretch))
     }
 
     fun release(size: IntSize, velocity: Offset = Offset.Zero) {
@@ -126,7 +131,7 @@ internal class ColorOsDialogButtonMotion(private val density: Float) {
 
     private fun inverseRubber(value: Float): Float {
         val distance = abs(value).coerceAtMost(maxStretch - .001f)
-        return sign(value) * distance * maxStretch / (.05f * (maxStretch - distance))
+        return sign(value) * distance * maxStretch / (dragRatio * (maxStretch - distance))
     }
 
     private companion object {

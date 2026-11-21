@@ -46,11 +46,13 @@ object IconGlassHook {
             NativeIconAccess.field(drawable,name)?.let {bindPreviewItem(it,owner,depth+1)}
         }
     }
-    private data class FloatingMaterial(val source:Drawable,val native:Drawable,val palette:IconPalette,val revision:Long,val material:Drawable)
+    private data class FloatingMaterial(val source:Drawable,val native:Drawable,val palette:IconPalette,
+        val revision:Long,val material:Drawable,var foreground: FloatingForeground? = null)
     private val floatingMaterials=WeakHashMap<View,FloatingMaterial>()
     private val hosts=WeakHashMap<Drawable,WeakReference<View>>()
     private val liveViews=WeakHashMap<View,Boolean>()
     private val pendingIconBackdrops=WeakHashMap<View,Boolean>()
+    private var drawerBakeDeadline = 0L
     private var liveSnapshot=emptyList<WeakReference<View>>()
     private var liveSnapshotDirty=true
     internal fun registeredViews():List<WeakReference<View>> {
@@ -91,6 +93,7 @@ object IconGlassHook {
         val listener=ViewTreeObserver.OnPreDrawListener {
             val current=weak.get()
             var recovered=0
+            drawerBakeDeadline = 0L
             if(current!=null && PrefsHelper.enabled && PrefsHelper.wallpaperEffectsEnabled) {
                 val deferSampling=LiveBlurEngine.deferWorkspaceSampling
                 val liveSampling=!deferSampling && (!PrefsHelper.ltpoIdle || LiveBlurEngine.hasRecentMotion) &&
@@ -239,6 +242,8 @@ object IconGlassHook {
         if(view==null)return
         fun restore(){
             if(!view.isAttachedToWindow)return
+            LauncherIconSize.onNativeIconReturned(view)
+            if (!PrefsHelper.iconsFeatureEnabled) return
             repaintStamps.remove(view)
             IconMaterialRenderer.restoreDiscardedSamples(view)
             view.invalidate()
@@ -290,12 +295,14 @@ object IconGlassHook {
                 continue
             }
             if(onlyChangedDrawerSamples && !forceEdge && IconMaterialRenderer.hasBindings(view)){
-                if(IconMaterialRenderer.updateSamplers(view,wallpaper,world)){
-                    if(beforeDraw==null)roots.add(view.rootView)
-                    continue
+                when (IconMaterialRenderer.updateSamplers(view, wallpaper, world)) {
+                    IconMaterialRenderer.SampleUpdate.CHANGED -> if (beforeDraw == null) roots.add(view.rootView)
+                    IconMaterialRenderer.SampleUpdate.RECORD -> {
+                        if (beforeDraw != null && !LiveBlurEngine.isMoving) idleInvalidations++
+                        view.invalidate()
+                    }
+                    IconMaterialRenderer.SampleUpdate.UNCHANGED -> Unit
                 }
-                if(beforeDraw!=null && !LiveBlurEngine.isMoving)idleInvalidations++
-                view.invalidate()
                 continue
             }
             if(!view.getGlobalVisibleRect(visible)){
@@ -416,7 +423,7 @@ object IconGlassHook {
                 }else IconBitmapProcessor.previewLayers(source,100) ?: continue
                 try {
                     output.add(PreviewIcons.Icon(copy(source),
-                        ProcessedIcon(copy(parts.glyphBitmap), copy(parts.plateMaskBitmap), parts.bgColor)))
+                        parts.copy(glyphBitmap = copy(parts.glyphBitmap), plateMaskBitmap = copy(parts.plateMaskBitmap))))
                     packageOf(view)?.let(found::add)
                 }finally {parts.glyphBitmap.recycle();parts.plateMaskBitmap.recycle()}
             }finally {source.recycle()}
@@ -523,8 +530,12 @@ object IconGlassHook {
         // stay the size of the original icon, not the offscreen surface.
         val footprint=Rect(0,0,parts.plateMaskBitmap.width,parts.plateMaskBitmap.height)
         val source=compatible?.let {sourceRect(it,a,footprint)}
-        val plateColor=if(PrefsHelper.blurEnabled)PrefsHelper.iconPlateColor(parts.bgColor) else parts.bgColor
-        val plateOpacity=PrefsHelper.bgOpacity
+        val plateColor = when {
+            PrefsHelper.desktopLightIconGlass -> Color.WHITE
+            PrefsHelper.blurEnabled -> PrefsHelper.iconPlateColor(parts.bgColor)
+            else -> parts.bgColor
+        }
+        val plateOpacity = PrefsHelper.bgOpacity
         val folderBackdrop=PrefsHelper.folderIconsBlurEnabled &&
             (binding?.view?.let(FolderMaterialHook::ownsBackdrop)==true || a?.openFolder==true)
         val style=GlassStyle.icons().copy(folderBackdrop=folderBackdrop)
@@ -537,7 +548,7 @@ object IconGlassHook {
                 val save=target.saveLayer(RectF(local),null)
                 val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (plateColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
                 target.drawBitmap(WallpaperHelper.forCanvas(plateMask,target),null,local,paint)
-                if(PrefsHelper.gradientOpacity>0){
+                if (!PrefsHelper.desktopLightIconGlass && PrefsHelper.gradientOpacity > 0) {
                     paint.colorFilter=null;paint.shader=GlassVolume.shader(local.height().toFloat(),PrefsHelper.gradientOpacity)
                     paint.xfermode=PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
                     target.drawRect(local,paint)
@@ -547,9 +558,16 @@ object IconGlassHook {
             if(PrefsHelper.iconStroke && PrefsHelper.strokeOpacity>0){
                 target.drawBitmap(GlassGeometry.rim(plateMask),null,local,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
             }
-            GlyphMaterialRenderer.draw(target,local,parts.glyphBitmap,Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            drawIconGlyph(target, local, parts)
         }
     }
+    private fun drawIconGlyph(canvas: Canvas, bounds: Rect, parts: ProcessedIcon) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val glyph = WallpaperHelper.forCanvas(parts.glyphBitmap, canvas)
+        if (parts.artwork) canvas.drawBitmap(glyph, null, bounds, paint)
+        else GlyphMaterialRenderer.draw(canvas, bounds, glyph, paint)
+    }
+
     private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled &&
         (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) &&
         (a?.drawer!=true || PrefsHelper.drawerBlurEnabled) && a?.openFolder!=true
@@ -600,6 +618,21 @@ object IconGlassHook {
             override fun getIntrinsicHeight()=bounds.height()
         }.apply {setBounds(bounds)}.also {nativeDrawables[it]=true}
     }
+    /** Retain the native adaptive layer's motion while applying the same logo color as the workspace. */
+    private class FloatingForeground(drawable: Drawable, val color: Int) : Drawable() {
+        private val reference = WeakReference(drawable)
+        val inner get() = reference.get()
+        private val paint = Paint().apply { colorFilter = PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN) }
+        override fun draw(canvas: Canvas) {
+            val drawable = inner ?: return
+            val layer = canvas.saveLayer(RectF(drawable.bounds), paint)
+            try { drawable.draw(canvas) } finally { canvas.restoreToCount(layer) }
+        }
+        override fun setAlpha(alpha: Int) { inner?.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { inner?.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Java") override fun getOpacity() = PixelFormat.TRANSLUCENT
+    }
+
     private class FloatingBackground(val inner:Drawable,val material:Drawable,val view:View):Drawable(){
         override fun draw(canvas:Canvas){
             val clip=try {XposedHelpers.getObjectField(view,"mClipPath") as? Path}catch(_:Throwable){null}
@@ -645,6 +678,17 @@ object IconGlassHook {
                 // Only the recording canvas may reject its own local content.
                 val sourceIcon=surfaceSource?.let {try {XposedHelpers.callMethod(it,"getIcon") as? Drawable}catch(_:Throwable){null}} ?: identity
                 if(SpecialIconSupport.isContainer(sourceIcon))return false
+                val drawer = owner != null && surfaceSource == null && isDrawerIcon(owner)
+                // Spread first-time icon processing over frames while RecyclerView binds a page.
+                if (drawer && owner != null && owner.isAttachedToWindow && canvas.isHardwareAccelerated &&
+                    layerCache[sourceIcon]?.revision != revision) {
+                    val now = System.nanoTime()
+                    if (drawerBakeDeadline == 0L) drawerBakeDeadline = now + 2_000_000L
+                    else if (now >= drawerBakeDeadline) {
+                        owner.postInvalidateOnAnimation()
+                        return false
+                    }
+                }
                 val nativeParts=cachedLayers(sourceIcon) ?: return false
                 // Native drag preview Picture: leave this plate's footprint
                 // empty and draw the same live material inside the DragView.
@@ -672,7 +716,7 @@ object IconGlassHook {
                 if(a!=null && bitmap!=null && !capture && !inTransition)anchors[bitmap]=a
                 if(LiveBlurEngine.isWorkspaceScrolling && scrollDrawLogs++<24)
                     GlassLogger.i("MaterialEngine","Scroll sample: host=${owner?.javaClass?.simpleName}, anchor=$a")
-                if(surfaceSource==null && a!=null)NativeSurfaceLive.prewarm(parts.plateMaskBitmap.width,a.screenW)
+                if(surfaceSource==null && a!=null && !drawer)NativeSurfaceLive.prewarm(parts.plateMaskBitmap.width,a.screenW)
                 val materialAlpha=drawable.alpha
                 if(NativeSurfaceLive.recordingMaterial){
                     val materialBounds=Rect(bounds)
@@ -804,8 +848,11 @@ object IconGlassHook {
             val original=floating.declaredFields.firstOrNull {it.name=="mOriginalIcon"}?.apply {isAccessible=true}
             if(original!=null)for(method in listOf("onAnimationEnd","fastFinish")){
                 ModuleHooks.hookAllMethods(floating,method,object:XC_MethodHook(){
-                    override fun beforeHookedMethod(param:MethodHookParam){
-                        if(PrefsHelper.iconsFeatureEnabled)onNativeIconReturned(original.get(param.thisObject) as? View)
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        param.setObjectExtra("cpiReturningIcon", original.get(param.thisObject) as? View)
+                    }
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!param.hasThrowable()) onNativeIconReturned(param.getObjectExtra("cpiReturningIcon") as? View)
                     }
                 })
             }
@@ -831,17 +878,29 @@ object IconGlassHook {
                     val owner=source ?: return
                     val original=try {XposedHelpers.callMethod(owner,"getIcon") as? Drawable}catch(_:Throwable){null} ?: return
                     val previous=floatingMaterials[view]
-                    val material=if(previous!=null && previous.source===original && previous.native===background &&
-                        previous.palette==PrefsHelper.iconPalette && previous.revision==revision)previous.material
-                    else (snapshot(original,true,owner) ?: return).also {
-                        floatingMaterials[view]=FloatingMaterial(original,background,PrefsHelper.iconPalette,revision,it)
-                    }
+                    val entry = if (previous != null && previous.source === original && previous.native === background &&
+                        previous.palette == PrefsHelper.iconPalette && previous.revision == revision) previous
+                    else FloatingMaterial(original, background, PrefsHelper.iconPalette, revision,
+                        snapshot(original, true, owner) ?: return).also { floatingMaterials[view] = it }
                     param.setObjectExtra("nativeBackground",background)
-                    XposedHelpers.setObjectField(view,"mBackground",FloatingBackground(background,material,view))
+                    XposedHelpers.setObjectField(view,"mBackground",FloatingBackground(background,entry.material,view))
+                    val palette = PrefsHelper.iconPalette
+                    if (PrefsHelper.nativeClassicIcons && (palette.custom || palette.whiteGlyph)) {
+                        val foreground = NativeIconAccess.field(view, "mForeground") as? Drawable
+                        if (foreground != null && foreground !is FloatingForeground) {
+                            param.setObjectExtra("nativeForeground", foreground)
+                            val tinted = entry.foreground?.takeIf { it.inner === foreground && it.color == palette.foreground }
+                                ?: FloatingForeground(foreground, palette.foreground).also { entry.foreground = it }
+                            XposedHelpers.setObjectField(view, "mForeground", tinted)
+                        }
+                    }
                 }
                 override fun afterHookedMethod(param:MethodHookParam){
                     val background=param.getObjectExtra("nativeBackground") as? Drawable ?: return
                     XposedHelpers.setObjectField(param.thisObject,"mBackground",background)
+                    param.getObjectExtra("nativeForeground")?.let {
+                        XposedHelpers.setObjectField(param.thisObject, "mForeground", it)
+                    }
                 }
             })
         }

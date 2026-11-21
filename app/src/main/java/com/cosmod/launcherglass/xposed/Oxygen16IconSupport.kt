@@ -8,7 +8,7 @@ import de.robv.android.xposed.*
 import java.util.WeakHashMap
 import kotlin.math.abs
 
-/** OxygenOS Launcher 16.6.8: Flux's plate and logo are two independently animated bitmaps. */
+/** ColorOS 16 Flux can draw its plate and logo as independently animated bitmaps. */
 internal object Oxygen16IconSupport {
     private var configured=false
     private var type:Class<*>?=null
@@ -20,9 +20,7 @@ internal object Oxygen16IconSupport {
     fun configure(context:Context){
         if(configured)return
         configured=true
-        val version=try {context.packageManager.getPackageInfo(context.packageName,0).versionName}catch(_:Throwable){null}
-        // Deliberately keep all previously supported launcher versions on their existing path.
-        if(version!="16.6.8")return
+        if (android.os.Build.VERSION.SDK_INT != 36) return
         val native=XposedHelpers.findClassIfExists("com.android.launcher3.icons.FastBitmapDrawable",context.classLoader) ?: return
         val method=try {
             if(native.getDeclaredField("mSubLayerBitmap").type!=Bitmap::class.java ||
@@ -32,7 +30,7 @@ internal object Oxygen16IconSupport {
         type=native
         ModuleHooks.hookMethod(method,object:XC_MethodHook(){
             override fun beforeHookedMethod(param:MethodHookParam){
-                if(!PrefsHelper.enabled || IconGlassHook.isRecordingNative())return
+                if(!PrefsHelper.enabled || !PrefsHelper.iconsFeatureEnabled || IconGlassHook.isRecordingNative())return
                 val drawable=param.thisObject as? Drawable ?: return
                 val canvas=param.args.getOrNull(0) as? Canvas ?: return
                 val bounds=param.args.getOrNull(1) as? Rect ?: return
@@ -54,7 +52,7 @@ internal object Oxygen16IconSupport {
                 }
             }
         })
-        GlassLogger.i("Oxygen16","Launcher 16.6.8 split Flux bitmap path selected")
+        GlassLogger.i("Oxygen16", "Verified split Flux drawable contract selected for ColorOS 16")
     }
     private fun subLayer(drawable:Drawable):Bitmap? {
         val native=type ?: return null

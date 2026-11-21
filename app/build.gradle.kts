@@ -11,8 +11,8 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 425
-        versionName = "0.3.1"
+        versionCode = 450
+        versionName = "0.3.2"
     }
 
     signingConfigs {
@@ -59,6 +59,7 @@ dependencies {
     val couiVersion = "2.0.0"
     implementation(platform(libs.androidx.compose.bom))
     implementation("androidx.activity:activity:1.13.0")
+    implementation(libs.coui.navigation.event)
     implementation("io.github.suqi8.coui.kmp:coui-ui-android:$couiVersion")
     implementation("io.github.suqi8.coui.kmp:coui-preference-android:$couiVersion")
     implementation("io.github.suqi8.coui.kmp:coui-icons-android:$couiVersion")
@@ -71,6 +72,7 @@ dependencies {
         implementation("androidx.drawerlayout:drawerlayout:1.1.1")
     }
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
 
 val featureSearchOutput=layout.buildDirectory.dir("generated/featureSearch/java")

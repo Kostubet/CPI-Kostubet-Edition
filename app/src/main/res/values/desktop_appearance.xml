@@ -1,0 +1,24 @@
+<resources>
+    <string name="desktop_appearance_title">Appearance</string>
+    <string name="desktop_appearance_manual">Manual CPI settings</string>
+    <string name="desktop_appearance_stock">Default</string>
+    <string name="desktop_appearance_dark">Dark</string>
+    <string name="desktop_appearance_clear">Clear</string>
+    <string name="desktop_appearance_tinted">Tinted</string>
+    <string name="desktop_appearance_hue">Color</string>
+    <string name="desktop_appearance_monochrome">Monochrome icons and widgets</string>
+    <string name="desktop_appearance_wallpaper_colors">Use wallpaper colors</string>
+    <string name="desktop_appearance_saturation">Saturation</string>
+    <string name="desktop_appearance_dark_logo_color">Icon logo color</string>
+    <string name="desktop_appearance_tint_transparency">Color transparency</string>
+    <string name="desktop_appearance_variant">Appearance variant</string>
+    <string name="desktop_appearance_light">Light</string>
+    <string name="desktop_appearance_auto">Auto</string>
+    <string name="desktop_appearance_active">Desktop appearance · %1$s</string>
+    <string name="desktop_appearance_restore_manual">Use manual settings</string>
+    <string name="desktop_appearance_dim_wallpaper">Darken wallpaper</string>
+    <string name="desktop_appearance_icon_size_toggle">Large icons</string>
+    <string name="desktop_appearance_pick_color">Pick a color from wallpaper</string>
+    <string name="desktop_appearance_wallpaper_unavailable">The wallpaper image is unavailable</string>
+    <string name="desktop_appearance_dark_always">Always</string>
+</resources>
