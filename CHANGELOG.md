@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 443
+
+- Кнопка «Оформление» берёт высоту и размер текста у штатных кнопок редактора ColorOS.
+- Стекло виджетов на ColorOS 16 использует границы карточки и системное сглаживание углов.
+- Анимация возврата домой обрабатывает кадры без обрезки окна. Если настройки не загрузились при запуске, лаунчер повторяет чтение при возвращении на экран.
+
 ### Сборка 442
 
 - На ColorOS 16 с лаунчером 16.6.20 восстановлено подключение кнопки «Оформление» и движка анимаций iOS к системному лаунчеру.
@@ -247,6 +253,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 443
+
+- The Appearance button inherits the height and text size of the native ColorOS edit controls.
+- Widget glass on ColorOS 16 uses the card bounds and native corner smoothing.
+- Home transitions handle frames without a window crop. The launcher retries reading settings on resume if they were unavailable at startup.
 
 ### Build 442
 

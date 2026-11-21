@@ -72,10 +72,11 @@ internal object Ba31kColorOs16 {
                             ((opening && config.opening) || (close && config.closing)) &&
                             taskView.invoke(input) == false
                         val full = bounds.get(owner) as Rect
-                        val clip = crop.get(owner) as Rect
+                        // ColorOS's lightweight home gesture does not always submit a crop.
+                        val clip = (crop.get(owner) as Rect).takeUnless(Rect::isEmpty) ?: full
                         val prop = if (shouldAnimate || surface in warped) shell.invoke(transaction, surface) else return
                         if (!perspective.declaringClass.isInstance(prop)) return
-                        if (!shouldAnimate || full.isEmpty || clip.isEmpty || rect.isEmpty || full.width() >= full.height()) {
+                        if (!shouldAnimate || full.isEmpty || rect.isEmpty || full.width() >= full.height()) {
                             if (warped.remove(surface)) perspective.invoke(prop, identity)
                             return
                         }

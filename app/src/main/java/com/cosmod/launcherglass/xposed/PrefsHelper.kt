@@ -152,6 +152,10 @@ object PrefsHelper {
         }
     }
 
+    fun retryOnResume(context: Context) {
+        if (!loaded) loadPrefs(context)
+    }
+
     fun loadPrefs(context: Context, systemDark: Boolean? = null,wallpaperOverride:IconPalette.WallpaperTone?=null) {
         try {
             val stored = context.contentResolver.call(

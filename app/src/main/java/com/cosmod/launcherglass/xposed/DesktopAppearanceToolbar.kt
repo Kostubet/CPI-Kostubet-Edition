@@ -10,8 +10,8 @@ import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
-import android.widget.TextView
 import android.widget.FrameLayout
+import android.widget.TextView
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.util.GlassLogger
@@ -22,7 +22,7 @@ import org.xmlpull.v1.XmlPullParser
 import java.util.WeakHashMap
 import java.lang.ref.WeakReference
 
-/** Contract verified against OplusLauncher 17.3.12 on the OnePlus 13 IN. */
+/** Adds an action using the launcher's own edit toolbar and button style. */
 internal object DesktopAppearanceToolbar {
     private const val TOOLBAR = "com.android.launcher.togglebar.views.ToggleStateToolbar"
     private const val BUTTON = "com.android.launcher.views.PressFeedbackButton"
@@ -98,8 +98,11 @@ internal object DesktopAppearanceToolbar {
             }
             null
         } ?: return
-        val params = done.layoutParams.javaClass.getConstructor(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
-            .newInstance(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT) as ViewGroup.MarginLayoutParams
+        val doneLayout = done.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        val params = doneLayout.javaClass.getConstructor(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .newInstance(ViewGroup.LayoutParams.WRAP_CONTENT, doneLayout.height) as ViewGroup.MarginLayoutParams
+        params.topMargin = doneLayout.topMargin
+        params.bottomMargin = doneLayout.bottomMargin
         XposedHelpers.setIntField(params, "startToEnd", group.id)
         XposedHelpers.setIntField(params, "endToStart", done.id)
         XposedHelpers.setIntField(params, "topToTop", 0)
@@ -111,14 +114,15 @@ internal object DesktopAppearanceToolbar {
         copy.apply {
             id = View.generateViewId()
             text = title
-            textSize = 14f
+            contentDescription = title
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, done.textSize)
             typeface = done.typeface
             gravity = done.gravity
             includeFontPadding = done.includeFontPadding
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPaddingRelative(dp(context, 12), done.paddingTop, dp(context, 12), done.paddingBottom)
-            minimumHeight = done.minHeight
+            minHeight = done.minHeight
             visibility = View.INVISIBLE
         }
         var dialog: Dialog? = null

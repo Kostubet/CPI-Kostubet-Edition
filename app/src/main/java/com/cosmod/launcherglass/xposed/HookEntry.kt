@@ -194,6 +194,7 @@ class HookEntry : IXposedHookLoadPackage {
                             override fun afterHookedMethod(param: MethodHookParam) {
                                 if (!param.hasThrowable()) {
                                     (param.thisObject as? Activity)?.let { launcher ->
+                                        PrefsHelper.retryOnResume(launcher.applicationContext)
                                         Ba31kShadeMotion.bind(launcher)
                                         Ba31kAppTransitions.launcherResumed(launcher.classLoader)
                                     }

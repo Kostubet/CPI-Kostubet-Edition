@@ -255,6 +255,49 @@ internal object PhotoWidgetMaterial {
             }
         }catch(_:Throwable){}
     }
+    private data class CardOutline(val bounds: Rect, val radius: Float, val smoothing: Float, val path: Path)
+    private val cardOutlines = WeakHashMap<View, CardOutline>()
+
+    private fun colorOs16Outline(host: View, child: View, bounds: Rect, childRadius: Float,
+        loader: ClassLoader): CardOutline {
+        val info = NativeIconAccess.call(host, "getItemInfo")
+        val square = info != null && NativeIconAccess.field(info, "mIsUseRightAngleCard") == true
+        val small = NativeIconAccess.call(host, "is1x2Card") == true
+        val systemRadius = if (small) {
+            val grid = NativeIconAccess.call(host, "getCellLayoutParent")
+            val columns = (grid?.let { NativeIconAccess.call(it, "getCountX") } as? Number)?.toInt() ?: 0
+            val rows = (grid?.let { NativeIconAccess.call(it, "getCountY") } as? Number)?.toInt() ?: 0
+            runCatching { XposedHelpers.callMethod(host, "getOnePlusTwoCardRadius", columns, rows) }.getOrNull()
+        } else {
+            runCatching {
+                XposedHelpers.callMethod(host, "getSmartCardClipRadiusCustom", arrayOf(View::class.java), null)
+            }.getOrNull()
+        } as? Number
+        val fallback = (NativeIconAccess.call(host, "getRadius") as? Number)?.toFloat() ?: childRadius
+        val radius = if (square) 0f else maxOf(
+            systemRadius?.toFloat() ?: fallback,
+            if (child.clipToOutline) childRadius else 0f,
+        ).coerceIn(0f, minOf(bounds.width(), bounds.height()) * .5f)
+        val iconUtils = if (small) XposedHelpers.findClassIfExists("com.android.common.util.IconUtils", loader) else null
+        val round = iconUtils != null && runCatching {
+            XposedHelpers.callStaticMethod(iconUtils, "isIconRadiusRound") == true ||
+                XposedHelpers.callStaticMethod(iconUtils, "isOOSDefaultRoundRadius") == true
+        }.getOrDefault(false)
+        val smoothing = if (round || radius == 0f) 0f else if (small) .99f else 1.1f
+        cardOutlines[host]?.takeIf { it.bounds == bounds && it.radius == radius && it.smoothing == smoothing }
+            ?.let { return it }
+
+        val path = Path()
+        val smooth = smoothing > 0f && runCatching {
+            val native = XposedHelpers.newInstance(XposedHelpers.findClass("com.oplus.graphics.OplusPath", loader), path)
+            XposedHelpers.callMethod(native, "addSmoothRoundRect", bounds.left.toFloat(), bounds.top.toFloat(),
+                bounds.right.toFloat(), bounds.bottom.toFloat(), radius, radius, smoothing, Path.Direction.CCW)
+            !path.isEmpty
+        }.getOrDefault(false)
+        if (!smooth) path.addRoundRect(RectF(bounds), radius, radius, Path.Direction.CCW)
+        return CardOutline(Rect(bounds), radius, smoothing, path).also { cardOutlines[host] = it }
+    }
+
     private fun watch(view:View){
         IconGlassHook.registerMaterialView(view)
         if(view is AppWidgetHostView)return
@@ -483,7 +526,14 @@ internal object PhotoWidgetMaterial {
                 param.setObjectExtra("photoActive",true)
                 watch(view)
                 val search = type.search
-                val bounds=if(search)GoogleSearchWidget.bounds(child) ?: Rect(0,0,child.width,child.height)
+                val customFrame = settings.customFrame
+                val nativeCard = view !is AppWidgetHostView && !customFrame && !search
+                val legacyCard = nativeCard && android.os.Build.VERSION.SDK_INT == 36
+                val cardBounds = if (legacyCard) runCatching { NativeIconAccess.call(view, "getCardBounds") as? Rect }
+                    .getOrNull()?.takeUnless(Rect::isEmpty) else null
+                val bounds=if(cardBounds!=null) {
+                    if(child===view)Rect(cardBounds) else Rect(0,0,cardBounds.width(),cardBounds.height())
+                }else if(search)GoogleSearchWidget.bounds(child) ?: Rect(0,0,child.width,child.height)
                     else if(child!==view)Rect(0,0,child.width,child.height) else {
                     val native=NativeIconAccess.call(view,"getCardContentBounds") as? Rect
                     native?.takeIf {!it.isEmpty && it.left>=0 && it.top>=0 && it.right<=view.width && it.bottom<=view.height}
@@ -492,16 +542,12 @@ internal object PhotoWidgetMaterial {
                 var radius=minOf(bounds.width(),bounds.height())*.08f
                 val outline=Outline()
                 try {child.outlineProvider?.getOutline(child,outline);if(outline.radius>0f)radius=outline.radius}catch(_:Throwable){}
-                // Use the exact radius AND weight used by createClipSmoothRoundBitmap,
-                // rather than the differently shaped drag-preview outline.
-                val customFrame = settings.customFrame
-                val nativeCard = view !is AppWidgetHostView && !customFrame && !search
-                val legacyCard = nativeCard && android.os.Build.VERSION.SDK_INT == 36
-                if (legacyCard) {
-                    radius = runCatching { (NativeIconAccess.call(view, "getRadius") as? Number)?.toFloat() }
-                        .getOrNull()?.takeIf { it > 0f } ?: radius
-                }
-                var nativePath = if (!nativeCard || legacyCard) null else try {
+                // TitleCardView on ColorOS 16 uses OplusPath and two smoothing weights.
+                val cardOutline = if (legacyCard && !bounds.isEmpty) runCatching {
+                    colorOs16Outline(view, child, bounds, outline.radius.coerceAtLeast(0f), loader)
+                }.getOrNull() else null
+                if (cardOutline != null) radius = cardOutline.radius
+                var nativePath = if (legacyCard) cardOutline?.path else if (!nativeCard) null else try {
                     val info=XposedHelpers.callMethod(view,"getItemInfo")
                     val rightAngle=try {info!=null && XposedHelpers.getBooleanField(info,"mIsUseRightAngleCard")}catch(_:Throwable){false}
                     if(rightAngle)Path().apply {addRect(RectF(bounds),Path.Direction.CCW)} else {
@@ -562,8 +608,8 @@ internal object PhotoWidgetMaterial {
                     if(search){
                         val rounded=Path(nativePath!!).apply {transform(matrix)}
                         canvas.clipPath(rounded)
-                    }else if(customFrame){
-                        // Cut only the photo's corners; keep OEM titles outside its footprint.
+                    }else if(customFrame || cardOutline != null){
+                        // The glass and widget share one contour. Keep the launcher caption outside the footprint.
                         val footprint=Path().apply {addRect(RectF(bounds),Path.Direction.CW);transform(matrix)}
                         val rounded=Path(nativePath!!).apply {transform(matrix)}
                         val clip=Path().apply {
