@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 449
+
+- «Оформление» выбирает обработчик ползунка COUI по его сигнатуре. Исправлено исчезновение кнопки на ColorOS 17 с двумя вариантами обработчика.
+
 ### Сборка 448
 
 - Кнопка «Оформление» подключается при появлении штатной панели редактирования рабочего стола и учитывает состояние лаунчера ColorOS.
@@ -275,6 +279,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 449
+
+- Appearance resolves the COUI slider listener by signature, restoring the button on ColorOS 17 builds with two listener overloads.
 
 ### Build 448
 

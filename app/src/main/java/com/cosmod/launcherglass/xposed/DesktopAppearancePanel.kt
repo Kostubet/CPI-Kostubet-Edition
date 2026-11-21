@@ -79,15 +79,24 @@ internal object DesktopAppearancePanel {
         val progress = seekType.getMethod("setProgress", Int::class.javaPrimitiveType)
         val start = runCatching { seekType.getMethod("getProgressStart") }.getOrNull()
         val length = runCatching { seekType.getMethod("getSeekBarLength") }.getOrNull()
-        val listener = seekType.methods.single {
-            it.name == "setOnSeekBarChangeListener" && it.parameterTypes.size == 1 && it.parameterTypes[0].isInterface
+        // ColorOS 17 exposes the COUI adapter setter alongside the inherited core setter.
+        // Select the listener that receives changes from COUISeekBar itself.
+        private val changeListener = seekType.methods.mapNotNull { setter ->
+            if (setter.name != "setOnSeekBarChangeListener" || setter.returnType != Void.TYPE) return@mapNotNull null
+            val type = setter.parameterTypes.singleOrNull()?.takeIf { it.isInterface } ?: return@mapNotNull null
+            val progress = type.methods.singleOrNull {
+                val args = it.parameterTypes
+                it.returnType == Void.TYPE && args.getOrNull(0) == seekType &&
+                    args.getOrNull(1) == Int::class.javaPrimitiveType &&
+                    (args.size == 2 || args.size == 3 && args[2] == Boolean::class.javaPrimitiveType)
+            } ?: return@mapNotNull null
+            setter to progress
+        }.let { matches ->
+            matches.singleOrNull { it.first.declaringClass == seekType } ?: matches.single()
         }
+        val listener = changeListener.first
         val listenerType: Class<*> = listener.parameterTypes[0]
-        val progressCallback = listenerType.methods.single {
-            val args = it.parameterTypes
-            it.returnType == Void.TYPE && args.getOrNull(0) == seekType && args.getOrNull(1) == Int::class.javaPrimitiveType &&
-                (args.size == 2 || args.size == 3 && args[2] == Boolean::class.javaPrimitiveType)
-        }
+        val progressCallback = changeListener.second
         val segments = runCatching { AppearanceSegmentContract(loader) }.getOrNull()
     }
 
