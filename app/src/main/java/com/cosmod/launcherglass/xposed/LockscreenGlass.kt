@@ -648,9 +648,16 @@ internal object LockscreenGlass {
         XposedHelpers.findClassIfExists(OPLUS_SHORTCUT,loader)?.let(::hookShortcut)
         XposedHelpers.findClassIfExists(NUMERIC_KEYBOARD,loader)?.let {type->
             val int=Int::class.javaPrimitiveType!!
-            hook(type,"drawCell",arrayOf(Canvas::class.java,int,int),object:XC_MethodHook(){
-                override fun beforeHookedMethod(p:MethodHookParam){drawNumericKey(p)}
-            })
+            runCatching {
+                val centerX=type.getDeclaredMethod("getCenterXForColumn",int).apply {isAccessible=true}
+                val centerY=type.getDeclaredMethod("getCenterYForRow",int).apply {isAccessible=true}
+                check(centerX.returnType==Float::class.javaPrimitiveType && centerY.returnType==Float::class.javaPrimitiveType)
+                hook(type,"drawCell",arrayOf(Canvas::class.java,int,int),object:XC_MethodHook(){
+                    override fun beforeHookedMethod(p:MethodHookParam){drawNumericKey(p,centerX,centerY)}
+                })
+            }.onFailure {
+                GlassLogger.limited("LockscreenGlass","pin-geometry") {"Numeric keyboard geometry unavailable: "+it.javaClass.simpleName}
+            }
         }
         XposedHelpers.findClassIfExists(NOTIFICATION,loader)?.let {type->
             hook(type,"onDraw",arrayOf(Canvas::class.java),object:XC_MethodHook(){
@@ -739,7 +746,7 @@ internal object LockscreenGlass {
         return false
     }
 
-    private fun drawNumericKey(p:XC_MethodHook.MethodHookParam){
+    private fun drawNumericKey(p:XC_MethodHook.MethodHookParam,centerX:Method,centerY:Method){
         if(!visible || surfaceAmount<=0f)return
         val profile=profiles[Surface.PIN] ?: return
         val view=p.thisObject as View
@@ -763,8 +770,8 @@ internal object LockscreenGlass {
             val radius=size*scale
             if(radius<=0f)return
             fun offset(name:String)=NativeIconAccess.field(cell,name) as? Int ?: 0
-            val x=(XposedHelpers.callMethod(view,"getCenterXForColumn",column) as Float)+offset("cellNumberTranslateX")
-            val y=(XposedHelpers.callMethod(view,"getCenterYForRow",row) as Float)+offset("cellNumberTranslateY")
+            val x=(centerX.invoke(view,column) as Float)+offset("cellNumberTranslateX")
+            val y=(centerY.invoke(view,row) as Float)+offset("cellNumberTranslateY")
             pinBounds.set(x-radius,y-radius,x+radius,y+radius)
             val keys=target.pinKeys ?: arrayOfNulls<LockscreenMaterial>(12).also {target.pinKeys=it}
             val index=row*3+column

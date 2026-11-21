@@ -48,7 +48,10 @@ internal object Ba31kColorOs16 {
         val matrix = helper.getDeclaredField("mTmpMatrix").apply { isAccessible = true }
         check(matrix.type == Matrix::class.java && bounds.type == Rect::class.java && crop.type == Rect::class.java)
         val radiusValue = params.getMethod("getRadius")
-        val taskView = params.getMethod("getIsTaskView")
+        val taskView = params.getMethod(
+            if (params.methods.any { it.name == "isTaskView" && it.parameterCount == 0 }) "isTaskView" else "getIsTaskView",
+        )
+        check(taskView.returnType == Boolean::class.javaPrimitiveType)
         val hooks = ArrayList<XC_MethodHook.Unhook>()
         try {
             hooks += XposedBridge.hookMethod(callback, object : XC_MethodHook() {

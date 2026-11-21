@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 442
+
+- На ColorOS 16 с лаунчером 16.6.20 восстановлено подключение кнопки «Оформление» и движка анимаций iOS к системному лаунчеру.
+- Стекло клавиатуры PIN использует расположение кнопок штатной клавиатуры ColorOS.
+- Панель громкости на ColorOS 16 использует геометрию штатного ползунка COUI и поддерживает настройку системного размытия.
+
 ### Сборка 441
 
 - В «Оформление → Однотонные» добавлен ползунок «Прозрачность цвета» для иконок и виджетов.
@@ -241,6 +247,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 442
+
+- Restored the Appearance entry and iOS animation engine on ColorOS 16 with System Launcher 16.6.20.
+- PIN glass follows the stock ColorOS keyboard button positions.
+- Volume panel glass uses the stock COUI slider geometry and supports adjusting native blur on ColorOS 16.
 
 ### Build 441
 

@@ -15,12 +15,14 @@ import com.cosmod.launcherglass.util.VolumeRim
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
+import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.util.WeakHashMap
 
 /** Reuse the volume window compositor blur and add an optical finish to the inactive track. */
 internal object VolumeGlass {
     private const val TYPE="com.oplus.systemui.volume.OplusVolumeSeekBar"
+    private const val LEGACY_TRACK="com.coui.appcompat.seekbar.COUIVerticalSeekBar"
     private val targets=WeakHashMap<View,Plate>()
     fun snapshotPreview(): com.cosmod.launcherglass.ui.NativePreviewScenes.Scene? {
         val candidates = targets.strongSnapshot().filter { (view, plate) ->
@@ -33,8 +35,7 @@ internal object VolumeGlass {
             setRotate(view.rotation, track.centerX(), track.centerY())
         }
         val bounds = RectF(track).apply { transform.mapRect(this) }
-        val radius = (NativeIconAccess.call(view, "getCurBackgroundRadius") as? Number)?.toFloat()
-            ?.coerceIn(0f, minOf(track.width(), track.height()) / 2f) ?: return null
+        val radius = entry.value.corner.coerceIn(0f, minOf(track.width(), track.height()) / 2f)
         val shape = Path().apply {
             addRoundRect(track, radius, radius, Path.Direction.CW)
             transform(transform)
@@ -56,11 +57,58 @@ internal object VolumeGlass {
         val bounds=RectF()
         val tint=Paint(Paint.ANTI_ALIAS_FLAG)
         val rim=VolumeRim()
+        var corner=0f
         var nativeBlur:Int?=null
         var appliedBlur:Int?=null
+        var blurDrawable:WeakReference<Any>?=null
     }
-    private val hooks=ArrayList<XC_MethodHook.Unhook>(2)
+
+    private class LegacyTrack(type:Class<*>) {
+        private val owner=generateSequence(type.superclass as Class<*>?) {it.superclass}
+            .first {it.name==LEGACY_TRACK}
+        val onDraw:Method=owner.getDeclaredMethod("onDraw",Canvas::class.java)
+        private val background=owner.getDeclaredField("mBackgroundRect").apply {isAccessible=true}
+        private val progress=owner.getDeclaredField("mProgressRect").apply {isAccessible=true}
+        private val corner=owner.getDeclaredField("mCurBackgroundRadius").apply {isAccessible=true}
+        val blur=runCatching {LegacyBlur(type)}.getOrNull()
+
+        fun read(view:View,plate:Plate) {
+            plate.track.set(background.get(view) as Rect)
+            plate.progress.set(progress.get(view) as Rect)
+            plate.corner=corner.getFloat(view)
+        }
+    }
+
+    private class LegacyBlur(type:Class<*>) {
+        private val drawable=type.getDeclaredMethod("getBackgroundBlurDrawable").apply {isAccessible=true}
+        private val radius=drawable.returnType.getDeclaredField("mBlurRadius").apply {isAccessible=true}
+        private val setter=drawable.returnType.getMethod("setBlurRadius",Int::class.javaPrimitiveType)
+
+        fun update(view:View,plate:Plate) {
+            val target=drawable.invoke(view) ?: return
+            if(plate.blurDrawable?.get()!==target){
+                restore(plate)
+                plate.blurDrawable=WeakReference(target)
+                plate.nativeBlur=null
+                plate.appliedBlur=null
+            }
+            val current=radius.getInt(target)
+            if(plate.nativeBlur==null || current!=plate.appliedBlur)plate.nativeBlur=current
+            val desired=scaledRadius(view,plate.nativeBlur ?: return)
+            if(current!=desired)setter.invoke(target,desired)
+            plate.appliedBlur=desired
+        }
+
+        fun restore(plate:Plate) {
+            val target=plate.blurDrawable?.get() ?: return
+            val native=plate.nativeBlur ?: return
+            if(plate.appliedBlur!=native && radius.getInt(target)==plate.appliedBlur)setter.invoke(target,native)
+        }
+    }
+
+    private val hooks=ArrayList<XC_MethodHook.Unhook>(5)
     private var setBlur:Method?=null
+    private var legacyBlur:LegacyBlur?=null
     private var radiusDp=14
     private var liquid=true
     private var opacity=18
@@ -95,14 +143,18 @@ internal object VolumeGlass {
             hooks.clear()
             targets.strongSnapshot().forEach { (view,plate)->
                 AlertBackdrop.forgetVolume(view)
-                if(view.isAttachedToWindow)runCatching {
-                    val radius=plate.nativeBlur
-                    if(radius!=null && plate.appliedBlur!=radius)setBlur?.invoke(view,radius)
-                    view.invalidate()
+                runCatching {
+                    legacyBlur?.restore(plate)
+                    if(view.isAttachedToWindow){
+                        val radius=plate.nativeBlur
+                        if(radius!=null && plate.appliedBlur!=radius)setBlur?.invoke(view,radius)
+                        view.invalidate()
+                    }
                 }
             }
             targets.clear()
             setBlur=null
+            legacyBlur=null
             failed=false
             return
         }
@@ -112,6 +164,16 @@ internal object VolumeGlass {
         }
         runCatching {
             val type=XposedHelpers.findClass(TYPE,loader)
+            val modernDraw=runCatching {type.getDeclaredMethod("onDraw",Canvas::class.java)}.getOrNull()
+            val legacy=if(modernDraw==null)LegacyTrack(type) else null
+            val onDraw=modernDraw ?: checkNotNull(legacy).onDraw
+            val track=modernDraw?.let {type.getDeclaredMethod("copyBackgroundRect",Rect::class.java).apply {isAccessible=true}}
+            val progress=modernDraw?.let {type.getDeclaredMethod("copyProgressRect",Rect::class.java).apply {isAccessible=true}}
+            val apply=modernDraw?.let {
+                type.getDeclaredMethod("applyBarBlurRadiusPx",Int::class.javaPrimitiveType).apply {isAccessible=true}
+            }
+            setBlur=apply
+            legacyBlur=legacy?.blur
             // The OEM derives the full portrait container and touch geometry from
             // this resource. Scale the layout input, never just stretch the paint.
             heightIds.clear()
@@ -136,12 +198,7 @@ internal object VolumeGlass {
                     }
                 })
             }
-            val onDraw=type.getDeclaredMethod("onDraw",Canvas::class.java)
-            val track=type.getDeclaredMethod("copyBackgroundRect",Rect::class.java).apply {isAccessible=true}
-            val progress=type.getDeclaredMethod("copyProgressRect",Rect::class.java).apply {isAccessible=true}
-            val apply=type.getDeclaredMethod("applyBarBlurRadiusPx",Int::class.javaPrimitiveType).apply {isAccessible=true}
-            setBlur=apply
-            hooks+=XposedBridge.hookMethod(apply,object:XC_MethodHook(){
+            if(apply!=null)hooks+=XposedBridge.hookMethod(apply,object:XC_MethodHook(){
                 override fun beforeHookedMethod(param:MethodHookParam){
                     val view=param.thisObject as View
                     val plate=targets.getOrPut(view){Plate()}
@@ -155,31 +212,45 @@ internal object VolumeGlass {
             hooks+=XposedBridge.hookMethod(onDraw,object:XC_MethodHook(){
                 override fun afterHookedMethod(param:MethodHookParam){
                     val view=param.thisObject as View
+                    if(legacy!=null && !type.isInstance(view))return
                     val canvas=param.args[0] as Canvas
                     if (NativeMaterialPreview.active(com.cosmod.launcherglass.util.SurfacePreviewKind.VOLUME)) return
                     if(param.hasThrowable() || !view.isShown || !canvas.isHardwareAccelerated)return
                     runCatching {
                         val plate=targets.getOrPut(view){Plate()}
-                        track.invoke(view,plate.track)
-                        if(plate.track.isEmpty)return
-                        plate.nativeBlur?.let { native->
-                            val desired=scaledRadius(view,native)
-                            if(plate.appliedBlur!=desired){
-                                XposedBridge.invokeOriginalMethod(apply,view,arrayOf(desired))
-                                plate.appliedBlur=desired
+                        if(legacy!=null){
+                            legacy.read(view,plate)
+                            if(plate.track.isEmpty)return
+                            legacy.blur?.update(view,plate)
+                        }else{
+                            track?.invoke(view,plate.track)
+                            if(plate.track.isEmpty)return
+                            progress?.invoke(view,plate.progress)
+                            plate.corner=(NativeIconAccess.call(view,"getCurBackgroundRadius") as? Float)
+                                ?: minOf(plate.track.width(),plate.track.height())*.5f
+                            val native=plate.nativeBlur
+                            if(apply!=null && native!=null){
+                                val desired=scaledRadius(view,native)
+                                if(plate.appliedBlur!=desired){
+                                    XposedBridge.invokeOriginalMethod(apply,view,arrayOf(desired))
+                                    plate.appliedBlur=desired
+                                }
                             }
                         }
-                        progress.invoke(view,plate.progress)
                         drawFinish(canvas,view,plate)
                     }.onFailure {GlassLogger.limited("VolumeGlass","draw") {"Native volume retained: "+it.javaClass.simpleName}}
                 }
             })
+            GlassLogger.limited("VolumeGlass","binding") {
+                if(legacy!=null)"Using COUI volume track (compositor blur: ${legacy.blur!=null})" else "Using Oplus volume track"
+            }
         }.onFailure {
             hooks.forEach {it.unhook()}
             hooks.clear()
             setBlur=null
+            legacyBlur=null
             failed=true
-            GlassLogger.limited("VolumeGlass","hook") {"Volume slider unavailable: "+it.javaClass.simpleName}
+            GlassLogger.limited("VolumeGlass","hook") {"Volume slider unavailable: "+it.javaClass.simpleName+" "+it.message}
         }
     }
 
@@ -194,8 +265,7 @@ internal object VolumeGlass {
         rect.set(plate.track)
         val density=view.resources.displayMetrics.density
         val stroke=(density*.55f).coerceAtLeast(1f)
-        val nativeRadius=(NativeIconAccess.call(view,"getCurBackgroundRadius") as? Float ?: rect.width()*.5f)
-            .coerceIn(0f,minOf(rect.width(),rect.height())*.5f)
+        val nativeRadius=plate.corner.coerceIn(0f,minOf(rect.width(),rect.height())*.5f)
         if(nativeRadius<=stroke || rect.width()<stroke*2)return
         val saved=canvas.save()
         try {

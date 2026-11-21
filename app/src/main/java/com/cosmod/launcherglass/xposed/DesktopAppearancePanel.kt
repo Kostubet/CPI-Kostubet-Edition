@@ -79,12 +79,15 @@ internal object DesktopAppearancePanel {
         val progress = seekType.getMethod("setProgress", Int::class.javaPrimitiveType)
         val start = runCatching { seekType.getMethod("getProgressStart") }.getOrNull()
         val length = runCatching { seekType.getMethod("getSeekBarLength") }.getOrNull()
-        val listenerType: Class<*> = seekType.declaredClasses.single {
-            it.isInterface && it.declaredMethods.any { method ->
-                method.parameterTypes.contentEquals(arrayOf(seekType, Int::class.javaPrimitiveType))
-            }
+        val listener = seekType.methods.single {
+            it.name == "setOnSeekBarChangeListener" && it.parameterTypes.size == 1 && it.parameterTypes[0].isInterface
         }
-        val listener = seekType.getMethod("setOnSeekBarChangeListener", listenerType)
+        val listenerType: Class<*> = listener.parameterTypes[0]
+        val progressCallback = listenerType.methods.single {
+            val args = it.parameterTypes
+            it.returnType == Void.TYPE && args.getOrNull(0) == seekType && args.getOrNull(1) == Int::class.javaPrimitiveType &&
+                (args.size == 2 || args.size == 3 && args[2] == Boolean::class.javaPrimitiveType)
+        }
         val segments = runCatching { AppearanceSegmentContract(loader) }.getOrNull()
     }
 
@@ -540,8 +543,8 @@ internal object DesktopAppearancePanel {
                     method.name == "hashCode" -> System.identityHashCode(proxy)
                     method.name == "equals" -> proxy === args?.getOrNull(0)
                     method.name == "toString" -> "CPI appearance slider listener"
-                    args?.size == 2 && args[1] is Int -> {
-                        val next = (args[1] as Int).coerceIn(0, range)
+                    method == native.progressCallback && args?.getOrNull(2) != false -> {
+                        val next = (args?.get(1) as Int).coerceIn(0, range)
                         if (next != track.position) {
                             if (manualColor && profile.colorSource != ColorSource.MANUAL) {
                                 profile = profile.copy(colorSource = ColorSource.MANUAL)
