@@ -36,7 +36,7 @@ internal class WidgetTextLayer {
     fun record(host:View,preserveImages:Boolean=false,includeText:Boolean=true,
                imagePredicate:((ImageView)->Boolean)?=null,contentRoot:View=host,
                clipBounds:RectF?=null,outside:Boolean=false,contentMatrix:Matrix?=null,
-               excludedRoot:View?=null):Boolean {
+               excludedRoot:View?=null,preserveUnidentifiedMedia:Boolean=false):Boolean {
         hasText=false;software=null
         if(host.width<=0 || host.height<=0)return false
         world.reset();toGlobal.invoke(if(contentMatrix!=null)contentRoot else host,world)
@@ -66,7 +66,8 @@ internal class WidgetTextLayer {
                     (imagePredicate?.invoke(view) ?: WidgetTintPolicy.logo(view.width,view.height,contentRoot.width,contentRoot.height,
                         names[view]?.takeIf {it.first==view.id}?.second ?: runCatching {
                             view.resources.getResourceEntryName(view.id)
-                        }.getOrDefault("").also {names[view]=view.id to it}))){
+                        }.getOrDefault("").also {names[view]=view.id to it},
+                        preserveUnidentifiedMedia && view.drawable is android.graphics.drawable.BitmapDrawable))){
                     val save=canvas.save()
                     try {
                         coordinates()

@@ -235,21 +235,22 @@ internal object PhotoWidgetMaterial {
     private val roots=WeakHashMap<View,android.view.ViewTreeObserver.OnPreDrawListener>()
     private val stamps=WeakHashMap<View,Int>()
     private fun content(view:View):View {
-        val child=if(view is AppWidgetHostView)(view as? ViewGroup)?.getChildAt(0)
-            else try {XposedHelpers.callMethod(view,"getSmartView") as? View}catch(_:Throwable){null}
+        val child=if(view is AppWidgetHostView)view.getChildAt(0)
+            else runCatching { NativeIconAccess.call(view, "getSmartView") as? View }.getOrNull()
         // Global Gallery can draw mSnapshot before its smart subtree is laid out.
         return child?.takeIf {it.width>0 && it.height>0} ?: view
     }
-    private fun transform(host:View,child:View)=Matrix().apply {
+    private fun transform(host: View, child: View, matrix: Matrix = Matrix()) = matrix.apply {
+        reset()
         if(child!==host){setTranslate((child.left-host.scrollX).toFloat(),(child.top-host.scrollY).toFloat());preConcat(child.matrix)}
         if(host !is AppWidgetHostView)try {
             // Match clipSmoothRoundCorner's mask transform, including the OEM
             // press/hover spring, which is not necessarily a View scale property.
-            val bounds=XposedHelpers.callMethod(host,"getCardBounds") as Rect
+            val bounds = NativeIconAccess.call(host, "getCardBounds") as? Rect ?: return@apply
             reset()
             if(child!==host)setTranslate(bounds.left.toFloat(),bounds.top.toFloat())
-            if(XposedHelpers.callMethod(host,"hasHoverFlag")==true && child!==host){
-                val manager=XposedHelpers.callMethod(host,"getFocusFrameAnimManager")
+            if(NativeIconAccess.call(host,"hasHoverFlag")==true && child!==host){
+                val manager=NativeIconAccess.call(host,"getFocusFrameAnimManager")
                 if(manager!=null)postConcat(XposedHelpers.callMethod(manager,"getHoverBitmapMatrix",RectF(bounds)) as Matrix)
             }
         }catch(_:Throwable){}
@@ -260,12 +261,14 @@ internal object PhotoWidgetMaterial {
         val root=view.rootView
         if(roots.containsKey(root))return
         val weak=java.lang.ref.WeakReference(root)
+        val matrix = Matrix()
+        val values = FloatArray(9)
         val listener=android.view.ViewTreeObserver.OnPreDrawListener {
             val current=weak.get()
             if(current!=null && PrefsHelper.enabled && PrefsHelper.widgetGlassEnabled)for(host in hosts.keys.weakSnapshot()){
                 if(hosts[host]!=true || host is AppWidgetHostView || host.rootView!==current || !host.isShown)continue
                 val child=content(host)
-                val values=FloatArray(9);transform(host,child).getValues(values)
+                transform(host, child, matrix).getValues(values)
                 val stamp=31*(31*values.contentHashCode()+child.width)+child.height
                 if(stamps.put(host,stamp)!=stamp)host.invalidate()
             }
@@ -290,7 +293,7 @@ internal object PhotoWidgetMaterial {
         val provider=try {resolved?.let {XposedHelpers.getObjectField(it,"mProviderName")} as? android.content.ComponentName}catch(_:Throwable){null}
             ?: try {resolved?.let {XposedHelpers.callMethod(it,"getTargetComponent")} as? android.content.ComponentName}catch(_:Throwable){null}
             ?: try {resolved?.let {XposedHelpers.getObjectField(it,"providerName")} as? android.content.ComponentName}catch(_:Throwable){null}
-        val cardType=try {XposedHelpers.callMethod(view,"getCardType") as? Int}catch(_:Throwable){null}
+        val cardType = runCatching { NativeIconAccess.call(view, "getCardType") as? Int }.getOrNull()
         val type=WidgetType(PhotoProviders.supports(provider?.packageName,provider?.className,cardType,true),
             PhotoProviders.isClock(provider?.packageName,provider?.className) ||
                 content(view).javaClass.simpleName.contains("clock",ignoreCase=true))
@@ -300,9 +303,11 @@ internal object PhotoWidgetMaterial {
 
     private fun styled(view:View,settings:WidgetMaterialSettings):Boolean {
         if(!PrefsHelper.enabled || !settings.enabled || (view !is AppWidgetHostView && !isCard(view)))return false
-        val type=widgetType(view)
-        return !type.clock && (settings.allWidgets || type.photo)
+        return styled(widgetType(view), settings)
     }
+
+    private fun styled(type: WidgetType, settings: WidgetMaterialSettings): Boolean =
+        !type.clock && (settings.allWidgets || type.photo)
 
     private fun installTransitionDraws(loader:ClassLoader){
         val namespace="com.android.launcher3.dragndrop"
@@ -384,7 +389,29 @@ internal object PhotoWidgetMaterial {
 
     fun isStyledHost(view:View)=hosts[view]==true
 
+    private fun guardLegacyCardTracking(loader: ClassLoader) {
+        if (android.os.Build.VERSION.SDK_INT != android.os.Build.VERSION_CODES.BAKLAVA) return
+        val tracker = XposedHelpers.findClassIfExists("com.nearme.instant.xcard.track.DcsTracker", loader) ?: return
+        val init = runCatching {
+            tracker.getDeclaredMethod("initForApp", android.content.Context::class.java, Long::class.javaPrimitiveType,
+                Map::class.java)
+        }.getOrNull()?.takeIf { it.returnType == Boolean::class.javaPrimitiveType } ?: return
+        ModuleHooks.hookMethod(init, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val error = param.throwable as? NoSuchMethodError ?: return
+                val description = error.message.orEmpty()
+                if (!description.contains("getInstance(Ljava/lang/String;)Lcom/oplus/statistics/OplusTrack;")) return
+                // This caller propagates a Boolean indicating whether tracking initialized.
+                param.result = false
+                GlassLogger.limited("PhotoWidget", "legacyCardTracking") {
+                    "Skipped incompatible ColorOS 16 card tracking initialization"
+                }
+            }
+        })
+    }
+
     fun install(loader:ClassLoader){
+        guardLegacyCardTracking(loader)
         val transition="com.android.launcher3.anim.OplusLauncherAppTransitionHelper"
         for(name in listOf(transition,"${transition}V2")){
             val type=XposedHelpers.findClassIfExists(name,loader) ?: continue
@@ -438,12 +465,12 @@ internal object PhotoWidgetMaterial {
                 if(!PrefsHelper.enabled)return
                 if(view !is AppWidgetHostView && !isCard(view))return
                 val settings=PrefsHelper.widgets
-                val enabled=styled(view,settings)
+                val type = if (settings.enabled) widgetType(view) else null
+                val enabled = type != null && styled(type, settings)
                 hosts[view]=enabled
                 if(!enabled)return
                 val canvas=param.args.firstOrNull() as? Canvas ?: return
                 if(canvas.quickReject(0f,0f,view.width.toFloat(),view.height.toFloat()))return
-                watch(view)
                 val child=content(view)
                 if(child.width<=0 || child.height<=0)return
                 if(logged.add("host:"+view.javaClass.name))GlassLogger.i("PhotoWidget","Registered host: "+view.javaClass.name)
@@ -454,7 +481,8 @@ internal object PhotoWidgetMaterial {
                 while(ancestor!=null){if(ancestor in active)return;ancestor=ancestor.parent as? View}
                 if(!active.add(view))return
                 param.setObjectExtra("photoActive",true)
-                val search=widgetType(view).search
+                watch(view)
+                val search = type.search
                 val bounds=if(search)GoogleSearchWidget.bounds(child) ?: Rect(0,0,child.width,child.height)
                     else if(child!==view)Rect(0,0,child.width,child.height) else {
                     val native=NativeIconAccess.call(view,"getCardContentBounds") as? Rect
@@ -466,7 +494,14 @@ internal object PhotoWidgetMaterial {
                 try {child.outlineProvider?.getOutline(child,outline);if(outline.radius>0f)radius=outline.radius}catch(_:Throwable){}
                 // Use the exact radius AND weight used by createClipSmoothRoundBitmap,
                 // rather than the differently shaped drag-preview outline.
-                var nativePath=if(view is AppWidgetHostView)null else try {
+                val customFrame = settings.customFrame
+                val nativeCard = view !is AppWidgetHostView && !customFrame && !search
+                val legacyCard = nativeCard && android.os.Build.VERSION.SDK_INT == 36
+                if (legacyCard) {
+                    radius = runCatching { (NativeIconAccess.call(view, "getRadius") as? Number)?.toFloat() }
+                        .getOrNull()?.takeIf { it > 0f } ?: radius
+                }
+                var nativePath = if (!nativeCard || legacyCard) null else try {
                     val info=XposedHelpers.callMethod(view,"getItemInfo")
                     val rightAngle=try {info!=null && XposedHelpers.getBooleanField(info,"mIsUseRightAngleCard")}catch(_:Throwable){false}
                     if(rightAngle)Path().apply {addRect(RectF(bounds),Path.Direction.CCW)} else {
@@ -479,15 +514,14 @@ internal object PhotoWidgetMaterial {
                     }
                     }
                 }catch(_:Throwable){null}
-                var nativeMask=if(view is AppWidgetHostView)null else try {
+                var nativeMask = if (!nativeCard || legacyCard) null else try {
                     val info=XposedHelpers.callMethod(view,"getItemInfo")
                     val rightAngle=try {info!=null && XposedHelpers.getBooleanField(info,"mIsUseRightAngleCard")}catch(_:Throwable){false}
                     if(rightAngle)null else {
                         val stored=XposedHelpers.getObjectField(view,"mBitmap") as? Bitmap
                         val cardBounds=XposedHelpers.callMethod(view,"getCardBounds") as Rect
-                        (stored?.takeIf {!it.isRecycled && it.width==cardBounds.width()+2 && it.height==cardBounds.height()+2}
-                            ?: (XposedHelpers.callMethod(view,"createClipSmoothRoundBitmap") as? Bitmap)?.also {XposedHelpers.setObjectField(view,"mBitmap",it)})
-                            ?.takeIf {!it.isRecycled && it.width>2 && it.height>2}
+                        stored?.takeIf { !it.isRecycled && it.width == cardBounds.width() + 2 &&
+                            it.height == cardBounds.height() + 2 && it.width > 2 && it.height > 2 }
                     }
                 }catch(_:Throwable){null}
                 if(search){
@@ -496,7 +530,6 @@ internal object PhotoWidgetMaterial {
                     radius=minOf(bounds.width(),bounds.height())*.5f
                     nativePath=Path().apply {addRoundRect(RectF(bounds),radius,radius,Path.Direction.CW)}
                 }
-                val customFrame=settings.customFrame
                 if(customFrame){
                     radius=minOf(bounds.width(),bounds.height())*settings.corner/100f
                     nativePath=Path().apply {addRoundRect(RectF(bounds),radius,radius,Path.Direction.CW)}
@@ -556,7 +589,9 @@ internal object PhotoWidgetMaterial {
                         if(!WidgetElementColors.followsBackground){
                             val elements=elementLayers.getOrPut(view){com.cosmod.launcherglass.util.WidgetTextLayer()}
                             if(runCatching {elements.record(view,preserveImages=true,contentRoot=child,clipBounds=footprint,
-                                    contentMatrix=matrix,imagePredicate=if(search)({GoogleSearchWidget.control(it,child)})else null)}.getOrDefault(false))
+                                    contentMatrix=matrix,
+                                    preserveUnidentifiedMedia=android.os.Build.VERSION.SDK_INT == 36,
+                                    imagePredicate=if(search)({GoogleSearchWidget.control(it,child)})else null)}.getOrDefault(false))
                                 param.setObjectExtra("widgetElementLayer",elements)
                         }
                         // The launcher's caption is outside the widget and keeps its native appearance.

@@ -288,7 +288,7 @@ internal object DesktopAppearancePanel {
         header.addView(label(labels.getString(R.string.desktop_appearance_title), 16f).apply {
             typeface = Typeface.DEFAULT_BOLD
             isAccessibilityHeading = true
-        }, FrameLayout.LayoutParams(-1, -1).apply { marginStart = dp(90); marginEnd = dp(90) })
+        }, FrameLayout.LayoutParams(-1, -1).apply { marginStart = dp(52); marginEnd = dp(52) })
         lateinit var shadeButton: View
         shadeButton = appearanceButton(labels.getDrawable(R.drawable.ic_nav_light), R.string.desktop_appearance_dim_wallpaper, filled = true) {
             darken = !darken
@@ -311,7 +311,7 @@ internal object DesktopAppearancePanel {
         val colorControls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
         val colorReveal = FrameLayout(host)
         val themeControls = FrameLayout(host).also(horizontalControls::add)
-        val colorHeight = dp(36) * 2 + dp(54) + dp(5)
+        val colorHeight = dp(36) * 3 + dp(18) + dp(54) + dp(5)
         val themeHeight = dp(41) + dp(4)
         lateinit var fullTheme: AppearanceSegment
         lateinit var darkTheme: AppearanceSegment
@@ -325,6 +325,8 @@ internal object DesktopAppearancePanel {
         }
         var displayHue = profile.hue.toFloat()
         var displaySaturation = profile.saturation / 100f
+        val initialTransparency = profile.tintTransparency.takeIf { it >= 0 } ?: 48
+        var displayTransparency = initialTransparency
         var updateSourceButtons: () -> Unit = {}
         fun updateSamples(only: Mode? = null) {
             for ((mode, choice) in samples) {
@@ -338,7 +340,7 @@ internal object DesktopAppearancePanel {
                 val plate = when (mode) {
                     Mode.DARK -> 0xff17181b.toInt()
                     Mode.CLEAR -> if (dark) 0x80322e2c.toInt() else 0x28ffffff
-                    Mode.TINTED -> Color.HSVToColor(if (dark) 230 else 200,
+                    Mode.TINTED -> Color.HSVToColor((if (dark) 230 else 200) * (100 - displayTransparency) / 100,
                         floatArrayOf(displayHue, displaySaturation * if (dark) .35f else .5f,
                             if (dark) .18f else .72f))
                     else -> Color.TRANSPARENT
@@ -513,7 +515,8 @@ internal object DesktopAppearancePanel {
             themeControls.addView(segment.view, FrameLayout.LayoutParams(-1, dp(41)).apply { topMargin = dp(4) })
         }
 
-        fun slider(title: Int, range: Int, value: Int, key: String, change: (Int) -> Unit): ColorSlider {
+        fun slider(title: Int, range: Int, value: Int, key: String, manualColor: Boolean = true,
+            change: (Int) -> Unit): ColorSlider {
             val input = native.seek.newInstance(host) as View
             input.contentDescription = labels.getString(title)
             input.alpha = .01f
@@ -540,7 +543,7 @@ internal object DesktopAppearancePanel {
                     args?.size == 2 && args[1] is Int -> {
                         val next = (args[1] as Int).coerceIn(0, range)
                         if (next != track.position) {
-                            if (profile.colorSource != ColorSource.MANUAL) {
+                            if (manualColor && profile.colorSource != ColorSource.MANUAL) {
                                 profile = profile.copy(colorSource = ColorSource.MANUAL)
                                 save(DesktopAppearance.COLOR_SOURCE to ColorSource.MANUAL.ordinal)
                                 updateSourceButtons()
@@ -589,10 +592,14 @@ internal object DesktopAppearancePanel {
             return ColorSlider(input, track)
         }
         lateinit var saturation: ColorSlider
+        lateinit var transparency: ColorSlider
         fun saturationColor(strength: Float) = Color.HSVToColor(floatArrayOf(displayHue, strength, 1f))
         fun updateTracks() {
             saturation.track.setHandle(saturationColor(displaySaturation))
             saturation.track.setColors(intArrayOf(Color.WHITE, saturationColor(1f)))
+            val tint = saturationColor(displaySaturation)
+            transparency.track.setColors(intArrayOf(tint, ColorUtils.setAlphaComponent(tint, 0)))
+            transparency.track.setHandle(ColorUtils.setAlphaComponent(tint, 255 * (100 - displayTransparency) / 100))
         }
         var tintUpdatePending = false
         fun updateTintOnFrame() {
@@ -617,6 +624,14 @@ internal object DesktopAppearancePanel {
         }
         saturation.track.onPositionDrawn = {
             displaySaturation = saturation.track.displayedPosition / 100f
+            updateTintOnFrame()
+        }
+        colorControls.addView(label(labels.getString(R.string.desktop_appearance_tint_transparency), 11f),
+            LinearLayout.LayoutParams(-1, dp(18)))
+        transparency = slider(R.string.desktop_appearance_tint_transparency, 100, initialTransparency,
+            DesktopAppearance.TINT_TRANSPARENCY, manualColor = false) { profile = profile.copy(tintTransparency = it) }
+        transparency.track.onPositionDrawn = {
+            displayTransparency = transparency.track.displayedPosition.roundToInt().coerceIn(0, 100)
             updateTintOnFrame()
         }
         updateTracks()

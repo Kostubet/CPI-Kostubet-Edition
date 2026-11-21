@@ -9,6 +9,7 @@
     <string name="desktop_appearance_monochrome">Monochrome icons and widgets</string>
     <string name="desktop_appearance_wallpaper_colors">Use wallpaper colors</string>
     <string name="desktop_appearance_saturation">Saturation</string>
+    <string name="desktop_appearance_tint_transparency">Color transparency</string>
     <string name="desktop_appearance_variant">Appearance variant</string>
     <string name="desktop_appearance_light">Light</string>
     <string name="desktop_appearance_auto">Auto</string>

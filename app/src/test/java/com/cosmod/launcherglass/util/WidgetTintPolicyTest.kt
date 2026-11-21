@@ -9,8 +9,13 @@ class WidgetTintPolicyTest {
         assertFalse(WidgetTintPolicy.logo(400,40,400,200))
         assertFalse(WidgetTintPolicy.logo(40,200,400,200))
     }
+    @Test fun preservesUnidentifiedAvatarBitmapsWhenRequested() {
+        assertFalse(WidgetTintPolicy.logo(80,80,400,200,preserveUnidentifiedMedia = true))
+        assertTrue(WidgetTintPolicy.logo(48,48,400,200,preserveUnidentifiedMedia = true))
+        assertTrue(WidgetTintPolicy.logo(80,80,400,200,"weather_icon",preserveUnidentifiedMedia = true))
+    }
     @Test fun excludesNamedBackgroundsEvenWhenSmall(){
-        for(name in listOf("weather_background","small_bg","photo_thumbnail","widget_cover"))
+        for(name in listOf("weather_background", "small_bg", "photo_thumbnail", "widget_cover", "player_avatar", "opponent_headshot"))
             assertFalse(name,WidgetTintPolicy.logo(48,48,400,200,name))
         assertTrue(WidgetTintPolicy.logo(48,48,400,200,"weather_icon"))
     }

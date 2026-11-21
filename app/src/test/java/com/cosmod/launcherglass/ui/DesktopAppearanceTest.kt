@@ -45,6 +45,18 @@ class DesktopAppearanceTest {
     }
 
     @Test
+    fun colorTransparencyControlsOnlyTheTintAndPreservesLegacyDefaults() {
+        val tinted = clear.selectMode(Mode.TINTED)
+        assertEquals(40, tinted.tintOpacity(40))
+        assertEquals(48, tinted.widgetTintTransparency(false))
+        val transparent = tinted.copy(tintTransparency = 100)
+        assertEquals(0, transparent.tintOpacity(40))
+        assertEquals(100, transparent.widgetTintTransparency(true))
+        assertEquals(100, transparent.selectMode(Mode.DARK).selectMode(Mode.TINTED).tintTransparency)
+        assertEquals(0, transparent.selectMode(Mode.CLEAR).widgetTintTransparency(false))
+    }
+
+    @Test
     fun switchingStylesKeepsTheSelectedColor() {
         val stock = clear.selectMode(Mode.STOCK)
         assertTrue(stock.themeChoices.isEmpty())

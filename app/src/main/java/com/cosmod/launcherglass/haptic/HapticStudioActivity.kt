@@ -31,7 +31,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
+import com.cosmod.launcherglass.ui.observeCouiWindowInsets
 import androidx.core.widget.NestedScrollView
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.ColorosScrollView
@@ -201,20 +201,18 @@ class HapticStudioActivity : AppCompatActivity() {
             playback?.update(ms, player.playing)
         }, { message(t("Cannot play this selection", "Не удалось воспроизвести фрагмент")) })
         root = FrameLayout(this).apply { clipChildren = false; clipToPadding = false }
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setCouiPageContent(root, dark, accent)
         root.setBackgroundColor(canvasColor)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowCompat.getInsetsController(window, root).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
         }
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(safe.left, 0, safe.right, 0)
+        observeCouiWindowInsets { safe ->
+            root.setPadding(safe.left, 0, safe.right, 0)
             topInset = safe.top
             bottomInset = safe.bottom
             applyInsets()
-            insets
         }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {

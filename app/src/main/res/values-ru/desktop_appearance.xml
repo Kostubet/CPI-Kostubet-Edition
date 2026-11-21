@@ -9,6 +9,7 @@
     <string name="desktop_appearance_monochrome">Монохромные иконки и виджеты</string>
     <string name="desktop_appearance_wallpaper_colors">Цвета обоев</string>
     <string name="desktop_appearance_saturation">Насыщенность</string>
+    <string name="desktop_appearance_tint_transparency">Прозрачность цвета</string>
     <string name="desktop_appearance_variant">Вариант оформления</string>
     <string name="desktop_appearance_light">Светлые</string>
     <string name="desktop_appearance_auto">Авто</string>

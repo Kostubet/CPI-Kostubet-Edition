@@ -11,12 +11,13 @@ internal object DesktopAppearance {
     const val THEME = "desktop_appearance_theme"
     const val HUE = "desktop_appearance_hue"
     const val SATURATION = "desktop_appearance_saturation"
+    const val TINT_TRANSPARENCY = "desktop_appearance_tint_transparency"
     const val COLOR_SOURCE = "desktop_appearance_color_source"
     const val LARGE_ICONS = "desktop_appearance_large_icons"
     const val DIM_WALLPAPER = "desktop_appearance_dim_wallpaper"
     const val LARGE_ICON_PERCENT = 118
-    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1, COLOR_SOURCE to 0, LARGE_ICONS to 0, DIM_WALLPAPER to 0)
-    val ranges = mapOf(MODE to 0..4, THEME to 0..2, HUE to -1..360, SATURATION to -1..100, COLOR_SOURCE to 0..2,
+    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1, TINT_TRANSPARENCY to -1, COLOR_SOURCE to 0, LARGE_ICONS to 0, DIM_WALLPAPER to 0)
+    val ranges = mapOf(MODE to 0..4, THEME to 0..2, HUE to -1..360, SATURATION to -1..100, TINT_TRANSPARENCY to -1..100, COLOR_SOURCE to 0..2,
         LARGE_ICONS to 0..1, DIM_WALLPAPER to 0..1)
 
     enum class Mode(val label: Int) {
@@ -38,8 +39,14 @@ internal object DesktopAppearance {
     data class Profile(
         val mode: Mode, val theme: Theme, val hue: Int, val saturation: Int,
         val colorSource: ColorSource = ColorSource.MANUAL,
+        val tintTransparency: Int = -1,
     ) {
         val hasTintControls get() = mode == Mode.TINTED
+
+        fun tintOpacity(previous: Int) = if (tintTransparency < 0) previous else 100 - tintTransparency
+
+        fun widgetTintTransparency(monochrome: Boolean) = if (mode != Mode.TINTED) 0
+            else if (tintTransparency >= 0) tintTransparency else if (monochrome) 0 else 48
 
         val themeChoices: List<Theme> get() = when (mode) {
             Mode.DARK -> listOf(Theme.DARK, Theme.AUTO)
@@ -88,7 +95,8 @@ internal object DesktopAppearance {
             val value = settings.getInt(custom, -1)
             return (if (value >= 0) value else settings.getInt(manual, SettingsDefaults.integer(manual))).coerceIn(0, max)
         }
-        return profile.copy(hue = color(HUE, keys[0], 360), saturation = color(SATURATION, keys[1], 100))
+        return profile.copy(hue = color(HUE, keys[0], 360), saturation = color(SATURATION, keys[1], 100),
+            tintTransparency = settings.getInt(TINT_TRANSPARENCY, -1).coerceIn(-1, 100))
     }
 
     fun apply(settings: Bundle, profile: Profile, systemDark: Boolean) {
@@ -152,7 +160,7 @@ internal object DesktopAppearance {
                     if (tinted) settings.putInt(Keys.KEY_BLUR_SATURATION, 100)
                     val opacity = settings.getInt(Keys.KEY_BG_OPACITY, SettingsDefaults.integer(Keys.KEY_BG_OPACITY))
                     settings.putInt(Keys.KEY_BG_OPACITY, if (transparent) profile.clearOpacity(opacity, systemDark)
-                        else opacity.coerceIn(16, if (dark) 62 else 45))
+                        else profile.tintOpacity(opacity.coerceIn(16, if (dark) 62 else 45)))
                 }
                 else -> Unit
             }
@@ -167,7 +175,7 @@ internal object DesktopAppearance {
             settings.putInt(WidgetSettings.TINT_SATURATION, saturation)
             settings.putInt(WidgetSettings.LIGHTNESS, 0)
             settings.putInt("photo_widget_tint_brightness", if (profile.mode == Mode.DARK) 12 + brightness else brightness)
-            settings.putInt(WidgetSettings.TINT_TRANSPARENCY, if (tinted && !monochrome) 48 else 0)
+            settings.putInt(WidgetSettings.TINT_TRANSPARENCY, profile.widgetTintTransparency(monochrome))
             if (transparent) {
                 val shade = settings.getInt(Keys.KEY_PHOTO_WIDGET_SHADE, SettingsDefaults.integer(Keys.KEY_PHOTO_WIDGET_SHADE))
                 settings.putInt(Keys.KEY_PHOTO_WIDGET_SHADE, if (dark) shade.coerceIn(12, 35) else 0)

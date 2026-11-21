@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 441
+
+- В «Оформление → Однотонные» добавлен ползунок «Прозрачность цвета» для иконок и виджетов.
+- Заголовки вкладок и панель Haptic Studio учитывают реальные границы окна и высоту системных панелей.
+- На ColorOS 16 стекло использует штатный радиус скругления карточек. Перекраска сохраняет детали аватаров, а отрисовка запоминает доступные методы и переиспользует матрицу между кадрами. Лаунчер пропускает несовместимую инициализацию трекера карточек при известной ошибке `OplusTrack.getInstance`.
+- Раздельная обработка фона и логотипа Flux выбирается по возможностям лаунчера. Поддержка распространяется на проверенный интерфейс Launcher 16.6.20.
+
 ### Сборка 440
 
 - Стекло «Мягкий свет» переиспользует входные текстуры и параметры шейдера для ползунков и живых оповещений на экране блокировки. Вложенные обёртки больше не запускают резервную отрисовку поверх нативной.
@@ -234,6 +241,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 441
+
+- Added a color transparency slider for icons and widgets in Appearance → Tinted.
+- Tab headings and the Haptic Studio toolbar use the current window and system bar insets.
+- ColorOS 16 glass uses the stock widget corner radius. Tinting preserves avatar detail, and rendering caches supported methods and reuses the frame matrix. The launcher skips incompatible card tracking initialization when it encounters the known `OplusTrack.getInstance` error.
+- Flux separates the icon backdrop and glyph according to launcher capabilities, including the verified Launcher 16.6.20 contract.
 
 ### Build 440
 

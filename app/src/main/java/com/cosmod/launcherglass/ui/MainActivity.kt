@@ -21,7 +21,6 @@ import androidx.appcompat.widget.AppCompatImageView
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.doOnPreDraw
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -177,7 +176,6 @@ class MainActivity : AppCompatActivity() {
     private var shadePreview:ShadeGlassPreview?=null
     private var rootNavigationAppearance: Triple<Boolean, Int, Boolean>? = null
     private val rootNavigationIndex=mutableIntStateOf(0)
-    private val floatingTitles=java.util.WeakHashMap<TextView,java.lang.ref.WeakReference<TextView>>()
     private var screen=Screen.OVERVIEW
     private var detailParent=Screen.HOME
     private val tabScroll=mutableMapOf<Screen,Int>()
@@ -265,11 +263,7 @@ class MainActivity : AppCompatActivity() {
         root = column().apply { clipChildren=false;clipToPadding=false;setBackgroundColor(this@MainActivity.background) }
         setCouiPageContent(root, darkUi, primary)
         updateSystemBars()
-        fun updatePageInsets(insets: WindowInsetsCompat) {
-            val types = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
-            val bars = insets.getInsetsIgnoringVisibility(types)
-            // Keep the edge-to-edge backdrop while measuring the controls against
-            // the real window insets, before Compose or the AndroidView consumes them.
+        observeCouiWindowInsets { bars ->
             root.setPadding(bars.left, 0, bars.right, 0)
             if(topInset!=bars.top){
                 topInset=bars.top
@@ -282,17 +276,11 @@ class MainActivity : AppCompatActivity() {
                 backBottomInset?.invoke(bottomInset)
             }
         }
-        val decor = window.decorView
-        updatePageInsets(WindowInsetsCompat.toWindowInsetsCompat(windowManager.currentWindowMetrics.windowInsets, decor))
-        ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
-            updatePageInsets(insets)
-            ViewCompat.onApplyWindowInsets(view, insets)
-        }
-        ViewCompat.requestApplyInsets(decor)
         page = FrameLayout(this).apply { isFocusableInTouchMode=true;clipChildren=false;clipToPadding=false }
         root.addView(page, LinearLayout.LayoutParams(-1, -1))
         showPageWithDestination()
-        currentScroll?.post { currentScroll?.scrollTo(0,savedInstanceState?.getInt("catalogScroll") ?: 0) }
+        val restoredScroll = savedInstanceState?.getInt("catalogScroll") ?: 0
+        currentScroll?.doOnLayout { it.scrollTo(0, restoredScroll) }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackProgressed(backEvent:androidx.activity.BackEventCompat){
                 if(screen in rootTabs || restartOverlay!=null || menuOverlay!=null || !canAnimate())return
@@ -976,26 +964,27 @@ class MainActivity : AppCompatActivity() {
         else heading.visibility=View.GONE
         heading.setTextColor(Color.TRANSPARENT)
         heading.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        val floatingHeading=text(getString(screen.title),32f,bold=true).apply {
+        val floatingHeading = if (pinnedToolbar == null) text(getString(screen.title),32f,bold=true).apply {
             gravity=heading.gravity
             setPadding(heading.paddingLeft,heading.paddingTop,heading.paddingRight,heading.paddingBottom)
             minHeight=heading.minHeight
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES
             ViewCompat.setAccessibilityHeading(this,true)
             translationZ=dp(4).toFloat()
-            alpha=0f
-        }
-        floatingTitles[heading]=java.lang.ref.WeakReference(floatingHeading)
-        heading.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_->
-            floatingHeading.layoutParams=FrameLayout.LayoutParams(heading.width,heading.height,Gravity.TOP).apply {leftMargin=heading.left}
-        }
+            translationY = topInset.toFloat()
+        } else null
         scroll.addView(body,ViewGroup.LayoutParams(-1,-2))
         shell.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         layer.addView(shell,FrameLayout.LayoutParams(-1,-1))
         val headerBlur=if(bool("coloros_ui_effects"))ColorOsAppBarBlurView(this,darkUi,background).apply {updateAppearance(darkUi,this@MainActivity.background,0f)}else null
         val blurHeight=dp(if(screen==Screen.HOME)105 else 62)
         headerBlur?.let {layer.addView(it,FrameLayout.LayoutParams(-1,topInset+blurHeight,Gravity.TOP))}
-        layer.addView(floatingHeading,FrameLayout.LayoutParams(-1,heading.minHeight,Gravity.TOP))
+        floatingHeading?.let { title ->
+            layer.addView(title,FrameLayout.LayoutParams(-1,-2,Gravity.TOP).apply {
+                leftMargin = body.paddingLeft
+                rightMargin = body.paddingRight
+            })
+        }
         val bottomFade=View(this).apply {
             importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO
             background=GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -1025,7 +1014,7 @@ class MainActivity : AppCompatActivity() {
         if(catalog)addRootRestart(layer)
         when(screen){
             Screen.OVERVIEW->buildOverview(body)
-            Screen.HOME->buildCatalog(body,scroll,heading,headerBlur,layer,navigation)
+            Screen.HOME->buildCatalog(body,scroll,heading,requireNotNull(floatingHeading),headerBlur,layer,navigation)
             Screen.TOOLS->buildModule(body)
             Screen.DEVICE->buildDeviceDetails(body)
             Screen.CONTRIBUTORS->buildContributors(body)
@@ -1038,11 +1027,12 @@ class MainActivity : AppCompatActivity() {
                 headerBlur?.updateAppearance(darkUi,background,(y/dp(30).toFloat()).coerceIn(0f,1f))
                 restartButtonBackdrop?.showScroll(y)
                 navigation?.second?.showScroll(y)
-                if(pinnedToolbar==null)fadeRootTitle(heading,y)
+                floatingHeading?.let { fadeRootTitle(heading, it, y) }
             }
             val headerInset=applyHeaderInset
             applyHeaderInset={inset->headerInset?.invoke(inset);layer.doOnPreDraw {updateHeader(scroll.scrollY)}}
             scroll.setOnScrollChangeListener(androidx.core.widget.NestedScrollView.OnScrollChangeListener {_,_,y,_,_->updateHeader(y)})
+            heading.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateHeader(scroll.scrollY) }
             layer.doOnPreDraw {updateHeader(scroll.scrollY)}
         }
         scroll.onPullChanged={
@@ -1096,11 +1086,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun fadeRootTitle(large:TextView,y:Int){
-        val floating=floatingTitles[large]?.get() ?: return
-        floating.visibility=large.visibility
-        if(large.visibility!=View.VISIBLE || large.height<=0)return
-        val travel=large.height.coerceAtLeast(dp(48)).toFloat()
+    private fun fadeRootTitle(large: TextView, floating: TextView, y: Int) {
+        floating.visibility = large.visibility
+        if (large.visibility != View.VISIBLE) return
+        val travel = maxOf(large.height, large.minHeight).coerceAtLeast(1).toFloat()
         val fade=(y/travel).coerceIn(0f,1f)
         floating.alpha=1f-fade*fade*(3f-2f*fade)
         floating.translationX=0f
@@ -1157,7 +1146,7 @@ class MainActivity : AppCompatActivity() {
         applyBottomInset={inset->preceding?.invoke(inset);place(inset)}
     }
 
-    private fun buildCatalog(body:LinearLayout,scroll:androidx.core.widget.NestedScrollView,heading:TextView,headerBlur:ColorOsAppBarBlurView?,layer:FrameLayout,navigation:Pair<View,ColorosHeaderBlur?>?){
+    private fun buildCatalog(body:LinearLayout,scroll:androidx.core.widget.NestedScrollView,heading:TextView,floatingHeading:TextView,headerBlur:ColorOsAppBarBlurView?,layer:FrameLayout,navigation:Pair<View,ColorosHeaderBlur?>?){
         space(body,51)
         val transfer=column()
         val configRows=settingsTransferRows()
@@ -1288,7 +1277,7 @@ class MainActivity : AppCompatActivity() {
             searchPanel.resizeCapsule(desiredSearchWidth(progress))
             placeSearch()
             val titleTravel=maxOf(dp(64),heading.bottom)*progress
-            fadeRootTitle(heading,maxOf(scroll.scrollY,titleTravel.roundToInt()))
+            fadeRootTitle(heading,floatingHeading,maxOf(scroll.scrollY,titleTravel.roundToInt()))
         }
         val searchMotion=androidx.dynamicanimation.animation.SpringAnimation(androidx.dynamicanimation.animation.FloatValueHolder(0f)).apply {
             spring=androidx.dynamicanimation.animation.SpringForce(0f).setStiffness(165f).setDampingRatio(.52f)
@@ -1341,6 +1330,9 @@ class MainActivity : AppCompatActivity() {
         val updateInset=applyHeaderInset
         applyHeaderInset={inset->updateInset?.invoke(inset);positionSearch(scroll.scrollY)}
         heading.addOnLayoutChangeListener { _,_,_,_,_,_,_,_,_ ->positionSearch(scroll.scrollY)}
+        layer.addOnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ ->
+            if (r - l != oldR - oldL) positionSearch(scroll.scrollY)
+        }
         scroll.setOnScrollChangeListener(androidx.core.widget.NestedScrollView.OnScrollChangeListener { _,_,y,_,_ ->
             headerBlur?.updateAppearance(darkUi,background,(y/dp(30).toFloat()).coerceIn(0f,1f))
             restartButtonBackdrop?.showScroll(y)
