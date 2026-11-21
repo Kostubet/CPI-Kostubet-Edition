@@ -112,16 +112,23 @@ internal object DesktopAppearancePanel {
         val handler = Handler(Looper.getMainLooper())
         val pending = Bundle()
         val app = host.applicationContext
-        val flush = Runnable {
-            if (pending.isEmpty) return@Runnable
+        var capturing = false
+        lateinit var flush: Runnable
+        flush = Runnable {
+            if (pending.isEmpty || capturing) return@Runnable
             val change = Bundle(pending)
             pending.clear()
-            writes.execute {
-                runCatching {
-                    app.contentResolver.call(Keys.CONTENT_URI, Keys.METHOD_SET_DESKTOP_APPEARANCE, null, change)
-                }.onFailure {
-                    GlassLogger.limited("DesktopAppearance", "save") { "Could not save appearance: ${it.message}" }
+            capturing = true
+            DesktopAppearanceTransition.beforeChange(host, change) {
+                writes.execute {
+                    runCatching {
+                        app.contentResolver.call(Keys.CONTENT_URI, Keys.METHOD_SET_DESKTOP_APPEARANCE, null, change)
+                    }.onFailure {
+                        GlassLogger.limited("DesktopAppearance", "save") { "Could not save appearance: ${it.message}" }
+                    }
                 }
+                capturing = false
+                if (!pending.isEmpty && !handler.hasCallbacks(flush)) handler.post(flush)
             }
         }
         fun save(vararg values: Pair<String, Int>, delay: Long = 72L) {
@@ -313,6 +320,9 @@ internal object DesktopAppearancePanel {
         val samples = linkedMapOf<Mode, Choice>()
         val colorControls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
         val colorReveal = FrameLayout(host)
+        val darkLogoControls = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; clipChildren = false }
+        val darkLogoReveal = FrameLayout(host)
+        val darkLogoHeight = dp(18) + dp(36) * 2 + dp(5)
         val themeControls = FrameLayout(host).also(horizontalControls::add)
         val colorHeight = dp(36) * 3 + dp(18) + dp(54) + dp(5)
         val themeHeight = dp(41) + dp(4)
@@ -328,6 +338,8 @@ internal object DesktopAppearancePanel {
         }
         var displayHue = profile.hue.toFloat()
         var displaySaturation = profile.saturation / 100f
+        var displayDarkLogoHue = profile.darkLogoHue.toFloat()
+        var displayDarkLogoSaturation = profile.darkLogoSaturation / 100f
         val initialTransparency = profile.tintTransparency.takeIf { it >= 0 } ?: 48
         var displayTransparency = initialTransparency
         var updateSourceButtons: () -> Unit = {}
@@ -348,8 +360,13 @@ internal object DesktopAppearancePanel {
                             if (dark) .18f else .72f))
                     else -> Color.TRANSPARENT
                 }
-                val glyph = if (mode == Mode.TINTED) Color.HSVToColor(floatArrayOf(displayHue,
-                    displaySaturation * .42f, if (dark) .86f else 1f)) else 0xfff7f6f4.toInt()
+                val glyph = when (mode) {
+                    Mode.DARK -> Color.HSVToColor(floatArrayOf(displayDarkLogoHue, displayDarkLogoSaturation,
+                        if (sample.iconDark(systemDark)) .92f else 1f))
+                    Mode.TINTED -> Color.HSVToColor(floatArrayOf(displayHue,
+                        displaySaturation * .42f, if (dark) .86f else 1f))
+                    else -> 0xfff7f6f4.toInt()
+                }
                 choice.sample.setPlate(plate, glyph, selected)
             }
         }
@@ -403,8 +420,10 @@ internal object DesktopAppearancePanel {
             val choices = profile.themeChoices
             updateTheme(choices)
             val oldColor = colorReveal.layoutParams.height
+            val oldDarkLogo = darkLogoReveal.layoutParams.height
             val oldTheme = themeControls.layoutParams.height
             val targetColor = if (profile.hasTintControls) colorHeight else 0
+            val targetDarkLogo = if (profile.mode == Mode.DARK) darkLogoHeight else 0
             val targetTheme = if (choices.isNotEmpty()) themeHeight else 0
             fun reveal(view: View, height: Int, fullHeight: Int) {
                 val params = view.layoutParams
@@ -417,8 +436,9 @@ internal object DesktopAppearancePanel {
                 if (view.visibility != visibility) view.visibility = visibility
             }
             if (!card.isLaidOut || !ValueAnimator.areAnimatorsEnabled() ||
-                (oldColor == targetColor && oldTheme == targetTheme)) {
+                (oldColor == targetColor && oldDarkLogo == targetDarkLogo && oldTheme == targetTheme)) {
                 reveal(colorReveal, targetColor, colorHeight)
+                reveal(darkLogoReveal, targetDarkLogo, darkLogoHeight)
                 reveal(themeControls, targetTheme, themeHeight)
                 return
             }
@@ -428,6 +448,7 @@ internal object DesktopAppearancePanel {
                 addUpdateListener {
                     val fraction = it.animatedValue as Float
                     reveal(colorReveal, (oldColor + (targetColor - oldColor) * fraction).roundToInt(), colorHeight)
+                    reveal(darkLogoReveal, (oldDarkLogo + (targetDarkLogo - oldDarkLogo) * fraction).roundToInt(), darkLogoHeight)
                     reveal(themeControls, (oldTheme + (targetTheme - oldTheme) * fraction).roundToInt(), themeHeight)
                 }
                 start()
@@ -455,7 +476,7 @@ internal object DesktopAppearancePanel {
                         profile = profile.selectMode(mode)
                         updateLayout()
                         updateSamples()
-                        save(DesktopAppearance.MODE to mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal, delay = MODE_TRANSITION_MS)
+                        save(DesktopAppearance.MODE to mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal)
                     } else {
                         NativeFluxIconStyle.request(app)
                     }
@@ -474,7 +495,7 @@ internal object DesktopAppearancePanel {
                 if (choices.size == profile.themeChoices.size && theme != profile.theme) {
                     profile = profile.copy(theme = theme)
                     updateSamples()
-                    save(DesktopAppearance.THEME to theme.ordinal, delay = 160L)
+                    save(DesktopAppearance.THEME to theme.ordinal)
                 }
             }
             runCatching { native.segments?.create(host, titles, change) }.getOrNull()?.let { return it }
@@ -519,7 +540,7 @@ internal object DesktopAppearancePanel {
         }
 
         fun slider(title: Int, range: Int, value: Int, key: String, manualColor: Boolean = true,
-            change: (Int) -> Unit): ColorSlider {
+            controls: LinearLayout = colorControls, change: (Int) -> Unit): ColorSlider {
             val input = native.seek.newInstance(host) as View
             input.contentDescription = labels.getString(title)
             input.alpha = .01f
@@ -591,7 +612,7 @@ internal object DesktopAppearancePanel {
                     if (start != null && length != null) track.setInputBounds(start, length)
                 }
             }
-            colorControls.addView(holder, LinearLayout.LayoutParams(-1, dp(36)))
+            controls.addView(holder, LinearLayout.LayoutParams(-1, dp(36)))
             return ColorSlider(input, track)
         }
         lateinit var saturation: ColorSlider
@@ -621,7 +642,8 @@ internal object DesktopAppearancePanel {
             displayHue = hue.track.displayedPosition
             updateTintOnFrame()
         }
-        hue.track.setColors(intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED))
+        val spectrum = intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED)
+        hue.track.setColors(spectrum)
         saturation = slider(R.string.desktop_appearance_saturation, 100, profile.saturation, DesktopAppearance.SATURATION) {
             profile = profile.copy(saturation = it)
         }
@@ -640,6 +662,34 @@ internal object DesktopAppearancePanel {
         updateTracks()
         colorReveal.addView(colorControls, FrameLayout.LayoutParams(-1, colorHeight - dp(5)).apply { topMargin = dp(5) })
         body.addView(colorReveal, LinearLayout.LayoutParams(-1, 0))
+        darkLogoControls.addView(label(labels.getString(R.string.desktop_appearance_dark_logo_color), 11f),
+            LinearLayout.LayoutParams(-1, dp(18)))
+        val logoHue = slider(R.string.desktop_appearance_hue, 360, profile.darkLogoHue,
+            DesktopAppearance.DARK_LOGO_HUE, manualColor = false, controls = darkLogoControls) {
+            profile = profile.copy(darkLogoHue = it)
+        }
+        val logoSaturation = slider(R.string.desktop_appearance_saturation, 100, profile.darkLogoSaturation,
+            DesktopAppearance.DARK_LOGO_SATURATION, manualColor = false, controls = darkLogoControls) {
+            profile = profile.copy(darkLogoSaturation = it)
+        }
+        fun updateLogoTracks() {
+            displayDarkLogoHue = logoHue.track.displayedPosition
+            displayDarkLogoSaturation = logoSaturation.track.displayedPosition / 100f
+            val tint = Color.HSVToColor(floatArrayOf(displayDarkLogoHue, displayDarkLogoSaturation, 1f))
+            logoHue.track.setHandle(tint)
+            logoSaturation.track.setHandle(tint)
+            logoSaturation.track.setColors(intArrayOf(Color.WHITE,
+                Color.HSVToColor(floatArrayOf(displayDarkLogoHue, 1f, 1f))))
+            updateSamples(Mode.DARK)
+        }
+        logoHue.track.setColors(spectrum)
+        logoHue.track.onPositionDrawn = ::updateLogoTracks
+        logoSaturation.track.onPositionDrawn = ::updateLogoTracks
+        updateLogoTracks()
+        darkLogoReveal.addView(darkLogoControls, FrameLayout.LayoutParams(-1, darkLogoHeight - dp(5)).apply {
+            topMargin = dp(5)
+        })
+        body.addView(darkLogoReveal, LinearLayout.LayoutParams(-1, 0))
         body.addView(themeControls, LinearLayout.LayoutParams(-1, 0))
 
         fun showColor(hueValue: Int, saturationValue: Int) {

@@ -9,6 +9,7 @@ import com.cosmod.launcherglass.util.Ba31kGenieMotion
 import com.cosmod.launcherglass.util.GlassLogger
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
+import java.lang.reflect.Member
 import java.lang.reflect.Modifier
 import java.util.Collections
 import java.util.WeakHashMap
@@ -20,6 +21,7 @@ internal object Ba31kColorOs16 {
     private val warped = Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap<SurfaceControl, Boolean>()))
     private val buffer = ThreadLocal.withInitial { FloatArray(16) }
     private val mappedBounds = ThreadLocal.withInitial { RectF() }
+    private val reported = Collections.synchronizedSet(HashSet<String>())
     private val identity = FloatArray(16).apply { for (i in 0..3) this[i * 5] = 1f }
 
     fun install(loader: ClassLoader): Boolean = runCatching {
@@ -42,6 +44,13 @@ internal object Ba31kColorOs16 {
         val matrixCommit = helper.declaredMethods.singleOrNull {
             it.name == "zuyqaSetMatrix" && it.returnType == props &&
                 it.parameterTypes.contentEquals(arrayOf(props, Matrix::class.java, params))
+        }
+        val target = requireNotNull(targets.componentType)
+        val float = Float::class.javaPrimitiveType
+        val signature = arrayOf(target, helper, tx, params, Boolean::class.javaPrimitiveType, record, float, RectF::class.java)
+        val callback = helper.declaredMethods.single {
+            it.name.startsWith("applySurfaceParams\$lambda\$") && Modifier.isStatic(it.modifiers) &&
+                it.parameterTypes.contentEquals(signature)
         }
         val hooks = ArrayList<XC_MethodHook.Unhook>()
         try {
@@ -68,15 +77,21 @@ internal object Ba31kColorOs16 {
                             if (!surface.isValid || surface == thumb.invoke(null)) return
                             val owner = p.thisObject
                             val name = (kind.get(owner) as? Enum<*>)?.name
-                            val settings = config.takeIf { isActive(it, name) && taskView.invoke(p.args[2]) == false }
+                            val task = taskView.invoke(p.args[2]) != false
+                            val active = isActive(config, name) && !task
+                            if (reported.add("matrix:$name")) {
+                                GlassLogger.i("Ba31kColorOs16", "App matrix kind=$name active=$active task=$task tilt=${config?.tilt}")
+                            }
+                            if (config?.projectsWindow != true && surface !in warped) return
+                            val settings = config.takeIf { active }
                             val full = bounds.get(owner) as Rect
                             val clip = (crop.get(owner) as Rect).takeUnless(Rect::isEmpty)
                                 ?: (sourceBounds.get(owner) as Rect)
                             val rect = mappedBounds.get()!!
                             rect.set(clip)
                             // Use the transform from this transaction, including the lightweight home gesture.
-                            val mapped = (p.args[1] as Matrix).mapRect(rect)
-                            val scale = if (mapped && !clip.isEmpty) rect.height() / clip.height().toDouble() else 0.0
+                            (p.args[1] as Matrix).mapRect(rect)
+                            val scale = if (clip.isEmpty) 0.0 else rect.height() / clip.height().toDouble()
                             val opening = name in opens
                             val projection = if (scale > 0.0 && settings?.projectsWindow == true) {
                                 sampleProjection(surface, settings, full, clip, rect, scale, opening, name == "SWIPE_TO_HOME")
@@ -93,12 +108,23 @@ internal object Ba31kColorOs16 {
             }.onFailure {
                 GlassLogger.limited("Ba31kColorOs16", "matrixContract") { "Dedicated matrix path unavailable: $it" }
             }.isSuccess
-            val target = requireNotNull(targets.componentType)
-            val float = Float::class.javaPrimitiveType
-            val callback = helper.declaredMethods.single {
-                it.name.startsWith("applySurfaceParams\$lambda\$") && Modifier.isStatic(it.modifiers) &&
-                    it.parameterTypes.contentEquals(arrayOf(target, helper, tx, params,
-                        Boolean::class.javaPrimitiveType, record, float, RectF::class.java))
+            // The verified 16.6.20 Runnable invokes a synthetic bridge before the
+            // frame callback. ART can inline those calls around an otherwise installed hook.
+            if (nativeProjection) runCatching {
+                val deoptimize = XposedBridge::class.java.getMethod("deoptimizeMethod", Member::class.java)
+                val delegate = helper.declaredMethods.single {
+                    it != callback && it.isSynthetic && Modifier.isStatic(it.modifiers) &&
+                        it.returnType == Void.TYPE && it.parameterTypes.contentEquals(signature)
+                }
+                val runner = loader.loadClass("${helper.packageName}.o")
+                check(runner.isSynthetic && Runnable::class.java.isAssignableFrom(runner))
+                runner.getDeclaredConstructor(*signature)
+                for (caller in listOf(callback, delegate, runner.getDeclaredMethod("run"))) {
+                    deoptimize.invoke(null, caller)
+                }
+                GlassLogger.i("Ba31kColorOs16", "Retained ColorOS 16 app-frame call boundaries")
+            }.onFailure {
+                GlassLogger.limited("Ba31kColorOs16", "inline") { "App-frame deoptimization unavailable: ${it.cause ?: it}" }
             }
             val shell = tx.getMethod("forSurface", SurfaceControl::class.java)
             val perspective = if (nativeProjection) null else props.getMethod("setMatrix4x4", FloatArray::class.java)
@@ -117,6 +143,9 @@ internal object Ba31kColorOs16 {
                         val name = (kind.get(owner) as? Enum<*>)?.name
                         val opening = name in opens
                         val active = isActive(settings, name) && taskView.invoke(input) == false
+                        if (reported.add("callback:$name")) {
+                            GlassLogger.i("Ba31kColorOs16", "Window callback kind=$name active=$active direct=$nativeProjection")
+                        }
                         val surface = leash.get(p.args[0]) as? SurfaceControl ?: return
                         if (!surface.isValid || !active && (nativeProjection || surface !in warped)) return
                         val full = bounds.get(owner) as Rect

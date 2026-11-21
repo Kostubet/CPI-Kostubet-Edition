@@ -4,6 +4,18 @@
 
 ## Русский
 
+### Сборка 447
+
+- «Тёмные» используют Frosted для иконок и виджетов. Цвет и насыщенность логотипов настраиваются отдельно. «Прозрачные» и «Однотонные» возвращают жидкое стекло.
+- Смена стиля и цвета в «Оформлении» плавно обновляет видимые иконки и виджеты рабочего стола.
+- На ColorOS 16 штатная подготовка размытия обоев выполняется на фоновом потоке с Looper, если лаунчер запустил её из потока без Looper.
+- Расчёт наклона использует границы окна и на кадрах, где штатная матрица не сохраняет форму прямоугольника.
+
+### Сборка 446
+
+- ColorOS 16 сохраняет точку применения наклона при оптимизации кода лаунчера.
+- На ColorOS 16 и 17 частота копирования фона учитывает профиль, нагрев и энергосбережение. Ползунки переиспользуют состояние стекла, а новые установки начинают с профиля «Авто».
+
 ### Сборка 445
 
 - Наклон окон при открытии и возврате на рабочий стол на ColorOS 16 применяется в транзакции лаунчера. Системная миниатюра сохраняет штатную анимацию.
@@ -258,6 +270,18 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 447
+
+- Dark Appearance uses Frosted for icons and widgets, with separate icon logo hue and saturation. Clear and Tinted restore Liquid Glass.
+- Changing the Appearance style or color fades between the old and new looks of visible home screen icons and widgets.
+- On ColorOS 16, stock wallpaper blur preparation runs on a background Looper when launched from a thread without one.
+- Window tilt uses mapped bounds even when the stock transform does not preserve a rectangle.
+
+### Build 446
+
+- Keeps the ColorOS 16 window tilt hook reachable when the launcher code is optimized.
+- Backdrop capture on ColorOS 16 and 17 follows the selected performance profile, temperature, and battery saver. Sliders retain their glass state and new installs start in Auto mode.
 
 ### Build 445
 

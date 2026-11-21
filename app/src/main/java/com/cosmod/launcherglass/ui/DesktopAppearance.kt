@@ -11,14 +11,17 @@ internal object DesktopAppearance {
     const val THEME = "desktop_appearance_theme"
     const val HUE = "desktop_appearance_hue"
     const val SATURATION = "desktop_appearance_saturation"
+    const val DARK_LOGO_HUE = "desktop_appearance_dark_logo_hue"
+    const val DARK_LOGO_SATURATION = "desktop_appearance_dark_logo_saturation"
     const val TINT_TRANSPARENCY = "desktop_appearance_tint_transparency"
     const val COLOR_SOURCE = "desktop_appearance_color_source"
     const val LARGE_ICONS = "desktop_appearance_large_icons"
     const val DIM_WALLPAPER = "desktop_appearance_dim_wallpaper"
     const val LARGE_ICON_PERCENT = 118
-    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1, TINT_TRANSPARENCY to -1, COLOR_SOURCE to 0, LARGE_ICONS to 0, DIM_WALLPAPER to 0)
+    val defaults = mapOf(MODE to 0, THEME to 0, HUE to -1, SATURATION to -1, TINT_TRANSPARENCY to -1,
+        COLOR_SOURCE to 0, LARGE_ICONS to 0, DIM_WALLPAPER to 0, DARK_LOGO_HUE to 0, DARK_LOGO_SATURATION to 0)
     val ranges = mapOf(MODE to 0..4, THEME to 0..2, HUE to -1..360, SATURATION to -1..100, TINT_TRANSPARENCY to -1..100, COLOR_SOURCE to 0..2,
-        LARGE_ICONS to 0..1, DIM_WALLPAPER to 0..1)
+        LARGE_ICONS to 0..1, DIM_WALLPAPER to 0..1, DARK_LOGO_HUE to 0..360, DARK_LOGO_SATURATION to 0..100)
 
     enum class Mode(val label: Int) {
         MANUAL(R.string.desktop_appearance_manual),
@@ -40,6 +43,8 @@ internal object DesktopAppearance {
         val mode: Mode, val theme: Theme, val hue: Int, val saturation: Int,
         val colorSource: ColorSource = ColorSource.MANUAL,
         val tintTransparency: Int = -1,
+        val darkLogoHue: Int = 0,
+        val darkLogoSaturation: Int = 0,
     ) {
         val hasTintControls get() = mode == Mode.TINTED
 
@@ -96,7 +101,9 @@ internal object DesktopAppearance {
             return (if (value >= 0) value else settings.getInt(manual, SettingsDefaults.integer(manual))).coerceIn(0, max)
         }
         return profile.copy(hue = color(HUE, keys[0], 360), saturation = color(SATURATION, keys[1], 100),
-            tintTransparency = settings.getInt(TINT_TRANSPARENCY, -1).coerceIn(-1, 100))
+            tintTransparency = settings.getInt(TINT_TRANSPARENCY, -1).coerceIn(-1, 100),
+            darkLogoHue = settings.getInt(DARK_LOGO_HUE).coerceIn(0, 360),
+            darkLogoSaturation = settings.getInt(DARK_LOGO_SATURATION).coerceIn(0, 100))
     }
 
     fun apply(settings: Bundle, profile: Profile, systemDark: Boolean) {
@@ -115,6 +122,7 @@ internal object DesktopAppearance {
         }
 
         val dark = profile.dark(systemDark)
+        val frosted = profile.mode == Mode.DARK
         val tinted = profile.mode == Mode.TINTED
         val transparent = profile.mode == Mode.CLEAR
         val lightGlass = profile.usesLightGlass(systemDark)
@@ -143,8 +151,12 @@ internal object DesktopAppearance {
                 settings.putInt(Keys.KEY_BLUR_LIGHTENING, 50)
             }
             settings.putBoolean("icon_logo_tint", !wallpaper)
-            settings.putInt("icon_logo_hue", hue)
-            settings.putInt("icon_logo_saturation", if (tinted) saturation / 3 else 0)
+            settings.putInt("icon_logo_hue", if (frosted) profile.darkLogoHue else hue)
+            settings.putInt("icon_logo_saturation", when {
+                frosted -> profile.darkLogoSaturation
+                tinted -> saturation / 3
+                else -> 0
+            })
             settings.putInt("icon_logo_brightness", when {
                 lightGlass -> 94
                 profile.mode == Mode.DARK && dark -> 92
@@ -152,6 +164,7 @@ internal object DesktopAppearance {
             })
             when (profile.mode) {
                 Mode.DARK -> {
+                    applyFrosted(settings, Keys.KEY_BLUR_STYLE, GlassEngineSettings.ICONS)
                     settings.putInt(Keys.KEY_BG_OPACITY, 100)
                     settings.putInt(Keys.KEY_BLUR_VIBRANCY, 0)
                 }
@@ -168,7 +181,8 @@ internal object DesktopAppearance {
 
         if (settings.getBoolean(widgetSection, true)) {
             settings.putBoolean(Keys.KEY_PHOTO_WIDGET_BLUR, true)
-            if (profile.mode != Mode.DARK) settings.putInt(Keys.KEY_PHOTO_WIDGET_MATERIAL, 1)
+            if (frosted) applyFrosted(settings, Keys.KEY_PHOTO_WIDGET_MATERIAL, GlassEngineSettings.WIDGETS)
+            else settings.putInt(Keys.KEY_PHOTO_WIDGET_MATERIAL, 1)
             settings.putBoolean(Keys.KEY_PHOTO_WIDGET_TINT, !transparent)
             settings.putBoolean(WidgetSettings.WALLPAPER_TINT, wallpaper)
             settings.putInt(WidgetSettings.HUE, hue)
@@ -189,6 +203,12 @@ internal object DesktopAppearance {
             settings.putBoolean("widget_elements_follow_background", monochrome || wallpaper)
             settings.putBoolean("widget_logo_tint", false)
         }
+    }
+
+    private fun applyFrosted(settings: Bundle, styleKey: String, engineKey: String) {
+        settings.putInt(styleKey, Keys.BLUR_STYLE_FROSTED)
+        settings.putBoolean(engineKey, false)
+        settings.putBoolean(GlassEngineSettings.softKey(engineKey), false)
     }
 
     fun affectsManualSettings(key: String): Boolean =

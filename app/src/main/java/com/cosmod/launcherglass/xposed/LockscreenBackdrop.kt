@@ -116,7 +116,10 @@ internal object LockscreenBackdrop {
                     if(result?.live==true){
                         liveMisses=if(changed && result.source=="live wallpaper layer")0
                             else (liveMisses+1).coerceAtMost(5)
-                        val interval=if(liveMisses==0)1000L/PerformancePolicy.captureFps()
+                        // The wallpaper service fallback copies an entire frame. Keep direct layer
+                        // sampling responsive while avoiding repeated full-size copies at 120 Hz.
+                        val fps=PerformancePolicy.captureFps().let { if(result.captureSurface==null) minOf(it,30) else it }
+                        val interval=if(liveMisses==0)(1000L+fps-1)/fps
                             else minOf(1000L,50L shl liveMisses)
                         main.postDelayed(refreshLive,(interval-elapsed).coerceAtLeast(1L))
                     }

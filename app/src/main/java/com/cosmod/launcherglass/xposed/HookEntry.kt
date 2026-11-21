@@ -72,6 +72,7 @@ class HookEntry : IXposedHookLoadPackage {
 
         if (packageName in launcherPackages) {
             GlassLogger.i("HookEntry", ">>> Hooking ColorOS Launcher: $packageName <<<")
+            LegacyWallpaperBlur.install(lpparam.classLoader)
 
             var initialized = false
             fun ensureInit(context: Context, source: String) {

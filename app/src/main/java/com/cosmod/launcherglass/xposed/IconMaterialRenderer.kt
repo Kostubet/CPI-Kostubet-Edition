@@ -371,6 +371,7 @@ object IconMaterialRenderer {
         return true
     }
     internal enum class SampleUpdate { RECORD, CHANGED, UNCHANGED }
+    private val samplerFootprint = ThreadLocal.withInitial { RectF() }
 
     @Synchronized internal fun updateSamplers(view:View,wallpaper:Bitmap?,transform:Matrix?=null,
         nowNs:Long=System.nanoTime()):SampleUpdate {
@@ -385,7 +386,7 @@ object IconMaterialRenderer {
         var folderImage:Bitmap?=null
         val scroll=com.cosmod.launcherglass.util.LiveBlurEngine.wallpaperScrollRatio
         val finish=opticalKey()
-        val footprint=RectF()
+        val footprint=samplerFootprint.get()!!
         for(sampler in entries.values){
             restored=restoreSample(sampler) || restored
             val previousRevision = sampler.sampleRevision

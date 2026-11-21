@@ -518,7 +518,7 @@
     "performance_light_drawer": true,
     "performance_live_transition_glass": false,
     "performance_ltpo_idle": true,
-    "performance_profile": 1,
+    "performance_profile": 0,
     "photo_widget_blur": true,
     "photo_widget_blur_radius": 16,
     "photo_widget_corner": 20,

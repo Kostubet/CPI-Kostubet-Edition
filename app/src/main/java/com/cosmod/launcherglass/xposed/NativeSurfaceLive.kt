@@ -240,6 +240,10 @@ object NativeSurfaceLive {
         }
     }
     private val displayPacer=com.cosmod.launcherglass.util.FramePacer()
+    private fun transitionCaptureFps(): Int {
+        val fps = com.cosmod.launcherglass.util.PerformancePolicy.captureFps()
+        return if (PrefsHelper.liveFps <= 60) minOf(30, fps) else fps
+    }
     private fun schedule() {
         if(!active || !pending.compareAndSet(false,true))return
         // A single in-flight job, aligned to display frames. The launcher UI
@@ -247,7 +251,7 @@ object NativeSurfaceLive {
         main.post {
             Choreographer.getInstance().postFrameCallback {time->
                 val performance=com.cosmod.launcherglass.util.PerformancePolicy
-                if(!displayPacer.ready(time,performance.glassFps(),performance.capturePacingHz)){
+                if(!displayPacer.ready(time,transitionCaptureFps(),performance.capturePacingHz)){
                     pending.set(false)
                     if(active)schedule()
                     return@postFrameCallback
@@ -272,7 +276,7 @@ object NativeSurfaceLive {
                 frames.entries.map {it.key to it.value}
             }
             val now = SystemClock.uptimeMillis()
-            val fps=PrefsHelper.liveFps.let {if(it>60)it else minOf(30,it)}
+            val fps=transitionCaptureFps()
             val nowNs=System.nanoTime()
             val wallpaper = WallpaperHelper.getBlurredWallpaper(IconGlassHook.appContext)
             for((surface,frame) in work) {

@@ -123,6 +123,7 @@ internal object PhotoWidgetMaterial {
 
     private val identities=WeakHashMap<View,ColorDrawable>()
     private val hosts=WeakHashMap<View,Boolean>()
+    internal fun appearanceHosts() = hosts.keys.weakSnapshot()
     private data class WidgetReturn(var startAfter: Long, var native: Boolean, var firstDrawAt: Long = -1L)
     private val returns=java.util.Collections.synchronizedMap(WeakHashMap<View,WidgetReturn>())
     private val transitionDraw=ThreadLocal<Boolean>()

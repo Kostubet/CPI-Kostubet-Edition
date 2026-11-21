@@ -124,7 +124,7 @@ internal class AppearanceSample(context: Context, private val mode: Mode) : View
         val image = if (stock) weather?.source else weather?.glyph
         if (image != null) {
             paint.alpha = 255
-            paint.colorFilter = if (mode == Mode.CLEAR || mode == Mode.TINTED) logoFilter else null
+            paint.colorFilter = if (stock) null else logoFilter
             val layer = canvas.save()
             canvas.clipPath(mask)
             canvas.drawBitmap(image, null, if (stock) bounds else iconBounds, paint)

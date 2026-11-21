@@ -127,8 +127,7 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
         area.top = (top.coerceIn(0,displayHeight)/band)*band
         area.bottom = minOf(displayHeight,((bottom.coerceIn(0,displayHeight)+band-1)/band)*band)
         if (area.isEmpty) return
-        val economy = power.isPowerSaveMode || PerformancePolicy.economy
-        val width = if (economy) 640 else 1080
+        val width = PerformancePolicy.alertWidth
         val layers = AlertBackdrop.excludedSurfaces()
         if (layers.isEmpty()) {
             // A capture without exclusions would feed back into the material.

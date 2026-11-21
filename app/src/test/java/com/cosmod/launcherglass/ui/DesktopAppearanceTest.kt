@@ -66,4 +66,14 @@ class DesktopAppearanceTest {
         assertEquals(listOf(Theme.LIGHT, Theme.DARK, Theme.AUTO), tinted.themeChoices)
         assertEquals(clear.copy(mode = Mode.TINTED), tinted)
     }
+
+    @Test
+    fun darkLogoColorStaysIndependentWhenSwitchingStyles() {
+        val dark = clear.selectMode(Mode.DARK).copy(darkLogoHue = 240, darkLogoSaturation = 85)
+        val tinted = dark.selectMode(Mode.TINTED)
+
+        assertEquals(40, tinted.hue)
+        assertEquals(72, tinted.saturation)
+        assertEquals(dark, tinted.selectMode(Mode.DARK))
+    }
 }

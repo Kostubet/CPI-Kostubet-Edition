@@ -11,6 +11,7 @@ import androidx.annotation.RequiresApi
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Parameter
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Profile
 import com.cosmod.launcherglass.util.GlassLogger
+import java.util.WeakHashMap
 
 /** Shares one live backdrop for tracks that the OEM draws through its older blur wrapper. */
 @RequiresApi(33)
@@ -22,13 +23,15 @@ internal class SoftGlassSliderMaterial(context: Context) {
     private val origin = FloatArray(2)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val visible: (View) -> Boolean = { it.isShown && it.windowVisibility == View.VISIBLE }
-    private val backdrop = ShadeBackdrop(context, View::postInvalidateOnAnimation, { plate?.clearImage() }) { error ->
+    private val plates = WeakHashMap<Drawable, SoftGlassShader.Plate>()
+    private val backdrop = ShadeBackdrop(context, View::postInvalidateOnAnimation, {
+        plates.values.forEach(SoftGlassShader.Plate::clearImage)
+    }) { error ->
         unavailable = true
         clear()
         GlassLogger.e("SoftGlass", "Slider capture unavailable; native tracks retained", error)
     }
     private var unavailable = false
-    private var plate: SoftGlassShader.Plate? = null
     private val drawn = mutableSetOf<Float>()
 
     fun clear() { backdrop.clear() }
@@ -59,7 +62,7 @@ internal class SoftGlassSliderMaterial(context: Context) {
             frame.area.height() * h / (frame.image.height * screen.height()))
         matrix.postTranslate((frame.area.left - screen.left) * w / screen.width(),
             (frame.area.top - screen.top) * h / screen.height())
-        val optics = plate ?: SoftGlassShader.Plate().also { plate = it }
+        val optics = plates.getOrPut(native) { SoftGlassShader.Plate() }
         optics.apply(profile, role, dark, metrics, lightX, lightY)
         optics.bindImage(frame.image, matrix)
         optics.setShape(w, h, corner)

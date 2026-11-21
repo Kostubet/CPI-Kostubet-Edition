@@ -412,6 +412,7 @@ object PrefsHelper {
             }
             loaded=true
             currentDesktopAppearance = appearance
+            DesktopAppearanceTransition.onSettingsApplied(stored)
             if (enabled && (appearanceChanged || masterChanged) && appearance.mode != DesktopAppearance.Mode.MANUAL) {
                 NativeFluxIconStyle.request(context)
             }
