@@ -36,7 +36,7 @@ internal object LiveAlertGlass {
     private val cardClip=Path()
     private val cardMatrix=Matrix()
     private val originalSkip=WeakHashMap<View,Boolean>()
-    fun diagnostics():String=PerformancePolicy.describe()+"\nallowed=$allowed, hooks=$uiHooksInstalled, views=${views.size}\n"+NotificationBannerGlass.diagnostics()+"\n"+AlertBackdrop.diagnostics()+"\n"+AodWallpaperBlur.diagnostics()+"\n"+views.keys.weakSnapshot().take(8).joinToString("\n"){NativeAlertMaterial.describe(it)}
+    fun diagnostics():String=PerformancePolicy.describe()+"\nallowed=$allowed, hooks=$uiHooksInstalled, views=${views.size}\n"+NotificationBannerGlass.diagnostics()+"\n"+AlertBackdrop.diagnostics()+"\n"+SoftGlassNative.diagnostics()+"\n"+AodWallpaperBlur.diagnostics()+"\n"+views.keys.weakSnapshot().take(8).joinToString("\n"){NativeAlertMaterial.describe(it)}
     private fun islandActive()=allowed && prefs.getBoolean(SettingsProvider.KEY_ENABLED,false) &&
         prefs.getBoolean("island_glass_enabled",false)
 
@@ -61,7 +61,8 @@ internal object LiveAlertGlass {
                 }catch(t:Throwable){GlassLogger.limited("LiveAlertGlass","nativeUnderlay"){"Native alert retained: "+t}}
             }
             override fun afterHookedMethod(p:MethodHookParam){
-                val view=p.thisObject as View;views[view]=true
+                val view = p.thisObject as View
+                if (Looper.myLooper() == main.looper) views[view] = true
                 val canvas=p.args[0] as Canvas
                 val save=p.getObjectExtra("cpiAlertNativeClip") as? Int
                 if(save!=null)canvas.restoreToCount(save)
@@ -134,7 +135,14 @@ internal object LiveAlertGlass {
     }
 
     private fun discover(root:View?){
-        if(!allowed || root==null)return
+        if (root == null) return
+        if (Looper.myLooper() != main.looper) {
+            main.post { discover(root) }
+            return
+        }
+        if (!allowed) return
+        val needsMaterial = islandActive() ||
+            SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.LOCK)
         try {LiveAlertTargets.visitViews(root){view->
             SoftGlassNative.liveActivityLoader(view.javaClass.classLoader)
             hookBackground(view.javaClass)
@@ -143,9 +151,13 @@ internal object LiveAlertGlass {
                 parent?.let(::hookCard)
                 parent=parent?.parent as? View
             }
-            if(!views.containsKey(view)){
-                views[view]=true;originalSkip[view]=view.willNotDraw()
-                view.setWillNotDraw(false);view.postInvalidateOnAnimation()
+            if (!originalSkip.containsKey(view)) {
+                views[view] = true
+                originalSkip[view] = view.willNotDraw()
+                if (needsMaterial) {
+                    view.setWillNotDraw(false)
+                    view.postInvalidateOnAnimation()
+                }
                 GlassLogger.i("LiveAlertGlass","Expanded background discovered: "+NativeAlertMaterial.describe(view))
             }
         }}
@@ -160,7 +172,11 @@ internal object LiveAlertGlass {
         context?.let {AodWallpaperBlur.configure(it,null,0)}
         VolumeGlass.configure(false,prefs,null)
         guard?.let {AlertStartupGuard.block(it)}
-        views.keys.weakSnapshot().forEach {NativeAlertMaterial.adjustBlur(it,12,false);it.invalidate()}
+        views.keys.weakSnapshot().forEach {
+            originalSkip[it]?.let(it::setWillNotDraw)
+            NativeAlertMaterial.adjustBlur(it, 12, false)
+            it.invalidate()
+        }
         GlassLogger.e("LiveAlertGlass","Alert material disabled; native rendering retained",t)
     }
     private fun installViewHooks(){
@@ -229,12 +245,14 @@ internal object LiveAlertGlass {
             prefs.getInt(LockscreenSettings.AOD_BLUR_RADIUS,16) else 0)
         VolumeGlass.configure(allowed && wantVolume,prefs,hostLoader)
         val nativeBlur=compositorBlur()
-        views.keys.weakSnapshot().forEach {
-            it.setWillNotDraw(if(active)false else originalSkip[it] ?: false)
-            NativeAlertMaterial.adjustBlur(it,if(active)nativeBlur else 12,false)
-            it.postInvalidateOnAnimation()
+        val needsMaterial = active || allowed && wantSoftLock
+        views.keys.weakSnapshot().forEach { view ->
+            if (needsMaterial) view.setWillNotDraw(false)
+            else originalSkip[view]?.let(view::setWillNotDraw)
+            NativeAlertMaterial.adjustBlur(view, if (active) nativeBlur else 12, false)
+            view.postInvalidateOnAnimation()
         }
-        if(active || allowed && wantSoftLock)try {installViewHooks()}catch(t:Throwable){disable(t)}
+        if (needsMaterial) try { installViewHooks() } catch (t: Throwable) { disable(t) }
     }
     fun install(loader:ClassLoader){
         hostLoader=loader
@@ -270,7 +288,14 @@ internal object LiveAlertGlass {
                     val filter=android.content.IntentFilter(SystemUiControl.ACTION)
                     androidx.core.content.ContextCompat.registerReceiver(c,restart,filter,SystemUiControl.PERMISSION,main,
                         androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
-                    c.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI,true,object:ContentObserver(main){override fun onChange(selfChange:Boolean){try {load()}catch(t:Throwable){disable(t)}}})
+                    val reload = Runnable {
+                        try { load() } catch (t: Throwable) { disable(t) }
+                    }
+                    c.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, true, object : ContentObserver(main) {
+                        override fun onChange(selfChange: Boolean) {
+                            if (!main.hasCallbacks(reload)) main.post(reload)
+                        }
+                    })
                     load()
                 }catch(t:Throwable){disable(t)}
             }

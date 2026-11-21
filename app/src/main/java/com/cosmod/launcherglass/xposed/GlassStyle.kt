@@ -1,5 +1,6 @@
 package com.cosmod.launcherglass.xposed
 
+import android.graphics.Color
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.ColorMatrix
 import android.util.LruCache
@@ -34,16 +35,17 @@ data class GlassStyle(val liquid:Boolean,val width:Int,val distortion:Int,
     val radius:Int,val opacity:Int,val filter:ColorMatrixColorFilter?,val folder:Boolean=false,val plateColor:Int?=null,val extendedLens:Boolean=false,val neutral:Boolean=false,val rimOpacity:Int?=null,val volumeOpacity:Int?=null,val surfaceScope:Int=0,val dispersion:Int=0,
     val newEngine:Boolean=KyantGlassEngine.enabled(surfaceScope),
     val engineOptics:com.cosmod.launcherglass.ui.GlassEngineSettings.Optics=KyantGlassEngine.optics(surfaceScope),
-    val folderBackdrop:Boolean=false,val largeFolderBackdrop:Boolean=false){
-    val backdropFilter get()=BackdropBrightness.filter(filter,engineOptics.backdropBrightness)
+    val folderBackdrop:Boolean=false,val largeFolderBackdrop:Boolean=false,val useWallpaperBrightness:Boolean=false){
+    val backdropFilter get()=if(useWallpaperBrightness) filter else BackdropBrightness.filter(filter,engineOptics.backdropBrightness)
 
     companion object {
         fun icons(): GlassStyle {
             val light = PrefsHelper.desktopLightIconGlass
             return GlassStyle(PrefsHelper.liquidGlass, PrefsHelper.liquidWidth, PrefsHelper.liquidDistortion,
                 PrefsHelper.blurRadius, PrefsHelper.bgOpacity, if (light) null else PrefsHelper.blurColorFilter,
-                plateColor = PrefsHelper.iconPlateColor(), volumeOpacity = if (light) 0 else null,
-                dispersion = PrefsHelper.iconDispersion)
+                plateColor = if (light) Color.WHITE else PrefsHelper.iconPlateColor(),
+                volumeOpacity = if (light) 0 else null, dispersion = PrefsHelper.iconDispersion,
+                useWallpaperBrightness = light)
         }
     }
 }

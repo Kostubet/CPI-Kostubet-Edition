@@ -71,7 +71,10 @@ internal object DesktopAppearance {
         fun usesLightGlass(systemDark: Boolean) = mode == Mode.CLEAR && !iconDark(systemDark)
 
         fun clearOpacity(opacity: Int, systemDark: Boolean) =
-            if (usesLightGlass(systemDark)) 0 else opacity.coerceIn(32, 54)
+            if (usesLightGlass(systemDark)) 8 else opacity.coerceIn(32, 54)
+
+        fun widgetContentOpacity(opacity: Int, systemDark: Boolean) =
+            if (usesLightGlass(systemDark)) minOf(opacity, 32) else opacity
     }
 
     fun read(settings: Bundle, systemDark: Boolean): Profile {
@@ -106,6 +109,7 @@ internal object DesktopAppearance {
         val dark = profile.dark(systemDark)
         val tinted = profile.mode == Mode.TINTED
         val transparent = profile.mode == Mode.CLEAR
+        val lightGlass = profile.usesLightGlass(systemDark)
         val brightness = profile.brightness(systemDark)
         val hue = if (tinted) profile.hue else 0
         val wallpaper = tinted && profile.colorSource == ColorSource.WALLPAPER
@@ -126,14 +130,18 @@ internal object DesktopAppearance {
             settings.putInt(keys[1], saturation)
             settings.putInt(keys[2], brightness)
             settings.putInt(Keys.KEY_CLEAR_BRIGHTNESS, brightness)
-            if (profile.usesLightGlass(systemDark)) {
+            if (lightGlass) {
                 settings.putInt(Keys.KEY_BLUR_VIBRANCY, 0)
                 settings.putInt(Keys.KEY_BLUR_LIGHTENING, 50)
             }
             settings.putBoolean("icon_logo_tint", !wallpaper)
             settings.putInt("icon_logo_hue", hue)
             settings.putInt("icon_logo_saturation", if (tinted) saturation / 3 else 0)
-            settings.putInt("icon_logo_brightness", if (profile.mode == Mode.DARK && dark) 92 else 100)
+            settings.putInt("icon_logo_brightness", when {
+                lightGlass -> 94
+                profile.mode == Mode.DARK && dark -> 92
+                else -> 100
+            })
             when (profile.mode) {
                 Mode.DARK -> {
                     settings.putInt(Keys.KEY_BG_OPACITY, 100)
@@ -164,6 +172,11 @@ internal object DesktopAppearance {
                 val shade = settings.getInt(Keys.KEY_PHOTO_WIDGET_SHADE, SettingsDefaults.integer(Keys.KEY_PHOTO_WIDGET_SHADE))
                 settings.putInt(Keys.KEY_PHOTO_WIDGET_SHADE, if (dark) shade.coerceIn(12, 35) else 0)
             }
+            if (lightGlass) {
+                settings.putInt(WidgetSettings.SCOPE, WidgetSettings.ALL)
+                val opacity = settings.getInt(Keys.KEY_PHOTO_WIDGET_OPACITY, SettingsDefaults.integer(Keys.KEY_PHOTO_WIDGET_OPACITY))
+                settings.putInt(Keys.KEY_PHOTO_WIDGET_OPACITY, profile.widgetContentOpacity(opacity, systemDark))
+            }
             // Tint through the native foreground path without flattening widget text styles.
             settings.putBoolean("widget_elements_follow_background", monochrome || wallpaper)
             settings.putBoolean("widget_logo_tint", false)
@@ -174,7 +187,8 @@ internal object DesktopAppearance {
         key in setOf(Keys.KEY_BLUR_ENABLED, Keys.KEY_BLUR_STYLE, Keys.KEY_COLOR_MODE, Keys.KEY_ICON_APPEARANCE,
             Keys.KEY_BG_OPACITY, Keys.KEY_BLUR_SATURATION, Keys.KEY_BLUR_TONE_ENABLED,
             Keys.KEY_CLEAR_BRIGHTNESS, Keys.KEY_PHOTO_WIDGET_BLUR, "widget_elements_follow_background",
-            Keys.KEY_PHOTO_WIDGET_MATERIAL, Keys.KEY_PHOTO_WIDGET_TINT, IconPalette.FOLLOW_WALLPAPER) ||
+            Keys.KEY_PHOTO_WIDGET_MATERIAL, Keys.KEY_PHOTO_WIDGET_TINT, Keys.KEY_PHOTO_WIDGET_OPACITY,
+            WidgetSettings.SCOPE, IconPalette.FOLLOW_WALLPAPER) ||
             key in Keys.colorKeys(true) || key in Keys.colorKeys(false) ||
             key.startsWith("icon_logo_") || key.startsWith("widget_logo_") || key.startsWith("photo_widget_tint_") ||
             key == WidgetSettings.WALLPAPER_TINT || key == Keys.KEY_PHOTO_WIDGET_SHADE

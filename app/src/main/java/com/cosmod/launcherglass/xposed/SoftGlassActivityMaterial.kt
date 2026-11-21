@@ -2,11 +2,9 @@
 package com.cosmod.launcherglass.xposed
 
 import android.graphics.Bitmap
-import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.RuntimeShader
 import android.os.Build
 import android.view.View
 import androidx.annotation.RequiresApi
@@ -20,16 +18,13 @@ import kotlin.math.roundToInt
 @RequiresApi(Build.VERSION_CODES.TIRAMISU)
 internal object SoftGlassActivityMaterial {
     private class Plate {
-        val shader = RuntimeShader(SoftGlassShader.activitySource())
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = this@Plate.shader }
+        val optics = SoftGlassShader.Plate()
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = optics.shader }
         val viewToScreen = Matrix()
         val screenToView = Matrix()
-        val shapeData = FloatArray(8)
         val imageToView = Matrix()
         val location = IntArray(2)
         val origin = FloatArray(2)
-        var bitmap: Bitmap? = null
-        var input: BitmapShader? = null
     }
 
     private val plates = WeakHashMap<View, Plate>()
@@ -52,7 +47,7 @@ internal object SoftGlassActivityMaterial {
             GlassLogger.limited("SoftGlass", "legacyActivityShader") { "Native activity background retained: ${it.message}" }
             return
         }.also { plates[view] = it }
-        if (!SoftGlassNative.activityUniforms(plate.shader, view)) return
+        if (!SoftGlassNative.activityUniforms(plate.optics, view)) return
 
         val metrics = view.resources.displayMetrics
         val scale = maxOf(metrics.widthPixels.toFloat() / bitmap.width, metrics.heightPixels.toFloat() / bitmap.height)
@@ -74,21 +69,9 @@ internal object SoftGlassActivityMaterial {
         )
         plate.imageToView.postConcat(plate.screenToView)
         plate.imageToView.postTranslate(-bounds.left, -bounds.top)
-        val input = plate.input?.takeIf { plate.bitmap === bitmap } ?: GlassGeometry.wallpaperShader(bitmap).also {
-            plate.bitmap = bitmap
-            plate.input = it
-        }
-        input.setLocalMatrix(plate.imageToView)
-        plate.shader.setInputShader(SoftGlassShader.INPUT, input)
-        val halfWidth = bounds.width() * .5f
-        val halfHeight = bounds.height() * .5f
-        plate.shader.setFloatUniform("u_size", bounds.width(), bounds.height())
-        plate.shapeData[2] = halfWidth
-        plate.shapeData[3] = halfHeight
-        plate.shapeData[4] = halfWidth
-        plate.shapeData[5] = halfHeight
-        plate.shapeData[6] = shape.radius.coerceIn(0f, minOf(halfWidth, halfHeight))
-        plate.shader.setFloatUniform("u_commonArray", plate.shapeData)
+        plate.optics.bindImage(bitmap, plate.imageToView)
+        plate.optics.setShape(bounds.width(), bounds.height(),
+            shape.radius.coerceIn(0f, minOf(bounds.width(), bounds.height()) * .5f))
         plate.paint.alpha = (opacity * profile[Parameter.STRENGTH] * 255f).roundToInt()
         val saved = canvas.save()
         try {

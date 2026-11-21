@@ -20,7 +20,7 @@ import kotlin.math.ceil
 
 /** Main-thread lifecycle, one shared frame and one compositor request in flight. */
 internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> Unit,
-    private val onFailure: (Throwable) -> Unit) {
+    private val onIdle: () -> Unit, private val onFailure: (Throwable) -> Unit) {
     private class Reader(val visible: (View) -> Boolean) {
         val bounds = RectF()
         var padding = 0
@@ -39,7 +39,8 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
     private var epoch = 0
     private var queued = false
     private var busy = false
-    private var nextAllowed = 0L
+    private var retryAt = 0L
+    private val clock = SampleFrameClock()
     private var captures = 0
     private var consecutiveFailures = 0
 
@@ -54,34 +55,38 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
         return frame?.takeIf { rotation == view.display?.rotation }
     }
 
-    fun forget(view: View) {
-        readers.remove(view)
-        if (readers.isEmpty()) clear()
-    }
-
     fun clear() {
         epoch++
         main.removeCallbacks(tick)
         queued = false
-        val notify = readers.keys.weakSnapshot()
+        val notify = if (frame != null) readers.keys.weakSnapshot() else emptyList()
         readers.clear()
         frame = null
         rotation = -1
-        nextAllowed = 0L
+        retryAt = 0L
+        clock.reset()
         consecutiveFailures = 0
+        onIdle()
         notify.forEach(onHidden)
     }
 
     private fun schedule() {
         if (queued || busy || readers.isEmpty()) return
         queued = true
-        main.postAtTime(tick,maxOf(SystemClock.uptimeMillis(),nextAllowed))
+        val remaining = clock.remainingNs(System.nanoTime(), PerformancePolicy.captureFps())
+        val delay = (remaining + 999_999L) / 1_000_000L
+        main.postAtTime(tick, maxOf(SystemClock.uptimeMillis() + delay, retryAt))
     }
 
     private fun isVisible(view: View): Boolean {
         if (!view.isAttachedToWindow || !view.isShown || view.windowVisibility != View.VISIBLE ||
             !view.getGlobalVisibleRect(visibleRect) || visibleRect.isEmpty) return false
-        return generateSequence(view) { it.parent as? View }.none { it.alpha < .025f }
+        var current: View? = view
+        while (current != null) {
+            if (current.alpha < .025f) return false
+            current = current.parent as? View
+        }
+        return true
     }
 
     @Suppress("DEPRECATION")
@@ -96,7 +101,7 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
             val reader = readers[view] ?: continue
             if (!isVisible(view) || !reader.visible(view)) {
                 readers.remove(view)
-                onHidden(view)
+                if (frame != null) onHidden(view)
             }
         }
         if (readers.isEmpty()) {
@@ -124,17 +129,15 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
         if (area.isEmpty) return
         val economy = power.isPowerSaveMode || PerformancePolicy.economy
         val width = if (economy) 640 else 1080
-        val fps = PerformancePolicy.captureFps()
-        val minimumInterval = 1000L/fps
         val layers = AlertBackdrop.excludedSurfaces()
         if (layers.isEmpty()) {
             // A capture without exclusions would feed back into the material.
-            nextAllowed = SystemClock.uptimeMillis() + 80L
+            retryAt = SystemClock.uptimeMillis() + 80L
             schedule()
             return
         }
         val token = epoch
-        val started = SystemClock.uptimeMillis()
+        clock.record(System.nanoTime(), PerformancePolicy.captureFps())
         busy = true
         worker.execute {
             val result = runCatching { AlertBackdrop.capture(area,minOf(1f,width.toFloat()/area.width()),layers) }
@@ -145,9 +148,11 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
                         if (++consecutiveFailures >= 5) {
                             onFailure(it)
                         } else {
-                            frame = null
-                            nextAllowed = SystemClock.uptimeMillis() + (80L shl (consecutiveFailures-1))
-                            readers.keys.weakSnapshot().forEach(onHidden)
+                            retryAt = SystemClock.uptimeMillis() + (80L shl (consecutiveFailures-1))
+                            if (frame != null) {
+                                frame = null
+                                readers.keys.weakSnapshot().forEach(onHidden)
+                            }
                             GlassLogger.limited("ShadeGlass","transient-backdrop") { "Backdrop unavailable: ${it.javaClass.simpleName}" }
                             schedule()
                         }
@@ -157,8 +162,7 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
                     frame = Frame(image,area)
                     rotation = requestedRotation
                     captures++
-                    val elapsed=SystemClock.uptimeMillis()-started
-                    nextAllowed = started + maxOf(minimumInterval,elapsed)
+                    retryAt = 0L
                     readers.keys.weakSnapshot().forEach { it.postInvalidateOnAnimation() }
                 } else result.getOrNull()?.recycle()
                 schedule()

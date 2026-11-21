@@ -18,6 +18,9 @@ internal class SampleFrameClock {
     private var rate=0
     private var refresh=0f
     private var period=0L
+
+    fun reset() { nextNs = 0L }
+
     fun remainingNs(nowNs:Long,fps:Int):Long =
         if(rate!=fps || refresh!=PerformancePolicy.capturePacingHz || nextNs==0L)0L
         else (nextNs-nowNs-500_000L).coerceAtLeast(0L)

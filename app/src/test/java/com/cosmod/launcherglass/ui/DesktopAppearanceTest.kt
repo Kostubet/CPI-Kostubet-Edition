@@ -22,17 +22,26 @@ class DesktopAppearanceTest {
     }
 
     @Test
-    fun lightClearStyleHidesPlateWhileDarkKeepsIt() {
+    fun lightClearStyleUsesSubtleNeutralLiftAndDarkKeepsTint() {
         val dark = clear.copy(theme = Theme.DARK)
         val auto = clear.copy(theme = Theme.AUTO)
         assertTrue(clear.usesLightGlass(systemDark = true))
-        assertEquals(0, clear.clearOpacity(0, systemDark = true))
-        assertEquals(0, clear.clearOpacity(100, systemDark = true))
+        assertEquals(8, clear.clearOpacity(0, systemDark = true))
+        assertEquals(8, clear.clearOpacity(100, systemDark = true))
         assertEquals(32, dark.clearOpacity(0, systemDark = false))
         assertEquals(54, dark.clearOpacity(100, systemDark = false))
-        assertEquals(0, auto.clearOpacity(40, systemDark = false))
+        assertEquals(8, auto.clearOpacity(40, systemDark = false))
         assertEquals(40, auto.clearOpacity(40, systemDark = true))
         assertFalse(clear.selectMode(Mode.TINTED).usesLightGlass(systemDark = false))
+    }
+
+    @Test
+    fun lightClearFadesWidgetContentWithoutIncreasingExistingOpacity() {
+        val auto = clear.copy(theme = Theme.AUTO)
+        assertEquals(32, clear.widgetContentOpacity(100, systemDark = true))
+        assertEquals(15, clear.widgetContentOpacity(15, systemDark = true))
+        assertEquals(32, auto.widgetContentOpacity(55, systemDark = false))
+        assertEquals(55, auto.widgetContentOpacity(55, systemDark = true))
     }
 
     @Test

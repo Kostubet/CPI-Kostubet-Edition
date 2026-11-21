@@ -1,4 +1,5 @@
 package com.cosmod.launcherglass.util
+import com.cosmod.launcherglass.xposed.SampleFrameClock
 import org.junit.Assert.*
 import org.junit.Test
 class FramePacerTest {
@@ -21,6 +22,21 @@ class FramePacerTest {
             }
             assertEquals((0 until 330 step steps).toList(),selected)
         }
+    }
+    @Test fun captureClockContinuesAt120HzAndResetsAfterClosing() {
+        val clock = SampleFrameClock()
+        val start = 1_000_000_000L
+        clock.record(start, 120)
+        for (frame in 1..120) {
+            val time = start + frame * 1_000_000_000L / 120
+            assertTrue(clock.remainingNs(time - 2_000_000L, 120) > 0)
+            assertEquals(0L, clock.remainingNs(time, 120))
+            clock.record(time, 120)
+        }
+        val lastFrame = start + 1_000_000_000L
+        assertTrue(clock.remainingNs(lastFrame, 120) > 0)
+        clock.reset()
+        assertEquals(0L, clock.remainingNs(lastFrame, 120))
     }
     @Test fun switchingHighRefreshPolicyClearsTheOldDeadline(){
         val pacer=FramePacer()

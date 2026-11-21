@@ -58,17 +58,17 @@ class SettingsProvider : ContentProvider() {
             }
             METHOD_REPORT_ICON_APPEARANCE -> {
                 enforceCaller(allowLauncher = true)
-                val support=extras?.getInt(KEY_NATIVE_FLUX_SUPPORT,0) ?: 0
-                if(support in 1..2 && prefs.getInt(KEY_NATIVE_FLUX_SUPPORT,0)!=support) {
-                    prefs.edit().putInt(KEY_NATIVE_FLUX_SUPPORT,support).apply()
-                    context?.contentResolver?.notifyChange(CONTENT_URI,null)
-                }
-                if (extras?.containsKey(KEY_NATIVE_ICON_DARK) == true) {
-                    val dark = extras.getBoolean(KEY_NATIVE_ICON_DARK)
-                    if (!prefs.contains(KEY_NATIVE_ICON_DARK) || prefs.getBoolean(KEY_NATIVE_ICON_DARK, false) != dark) {
-                        prefs.edit().putBoolean(KEY_NATIVE_ICON_DARK, dark).apply()
-                        context?.contentResolver?.notifyChange(CONTENT_URI, null)
-                    }
+                val support = extras?.getInt(KEY_NATIVE_FLUX_SUPPORT, 0) ?: 0
+                val supportChanged = support in 1..2 && prefs.getInt(KEY_NATIVE_FLUX_SUPPORT, 0) != support
+                val dark = extras?.takeIf { it.containsKey(KEY_NATIVE_ICON_DARK) }?.getBoolean(KEY_NATIVE_ICON_DARK, false)
+                val themeChanged = dark != null &&
+                    (!prefs.contains(KEY_NATIVE_ICON_DARK) || prefs.getBoolean(KEY_NATIVE_ICON_DARK, false) != dark)
+                if (supportChanged || themeChanged) {
+                    prefs.edit().apply {
+                        if (supportChanged) putInt(KEY_NATIVE_FLUX_SUPPORT, support)
+                        if (themeChanged) putBoolean(KEY_NATIVE_ICON_DARK, dark == true)
+                    }.apply()
+                    context?.contentResolver?.notifyChange(CONTENT_URI, null)
                 }
             }
             METHOD_SET_DESKTOP_APPEARANCE -> {

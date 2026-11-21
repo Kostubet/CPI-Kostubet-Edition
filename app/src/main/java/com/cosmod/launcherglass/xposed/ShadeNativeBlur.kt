@@ -54,12 +54,12 @@ internal class ShadeNativeBlur(context:Context,loader:ClassLoader,
             Boolean::class.javaPrimitiveType,Float::class.javaPrimitiveType)
         XposedBridge.hookMethod(method,object:XC_MethodHook() {
             override fun beforeHookedMethod(p:MethodHookParam) {
-                if(!adjustRadius() || (p.args[1] as Int)<=0)return
-                val current=active() ?: return
+                if(profile()==null || !adjustRadius() || (p.args[1] as Int)<=0)return
                 val rootImpl=p.args[0] ?: return
                 runCatching {
                     val window=host.get() ?: return
                     if(getView.invoke(rootImpl)!==window)return
+                    val current=active() ?: return
                     val stockMax=(maxRadius.invoke(p.thisObject) as Float).coerceAtLeast(1f)
                     val amount=((p.args[1] as Int)/stockMax).coerceIn(0f,1f)
                     p.args[1]=(amount*current[P.RADIUS]*current.fraction(P.BLUR_OPACITY)*window.resources.displayMetrics.density).roundToInt()
@@ -76,14 +76,14 @@ internal class ShadeNativeBlur(context:Context,loader:ClassLoader,
             Int::class.javaPrimitiveType,Float::class.javaPrimitiveType)
         XposedBridge.hookMethod(method,object:XC_MethodHook() {
             override fun beforeHookedMethod(p:MethodHookParam) {
-                val current=active() ?: return
                 val opacity=p.args[2] as Float
-                if(opacity<=0f || host.get()==null)return
+                if(profile()==null || opacity<=0f || host.get()==null)return
                 runCatching {
                     val controller=p.thisObject
                     if((state.get(controller) as? Enum<*>)?.name!="UNLOCKED" || behind.get(controller)!==p.args[0])return
                     val scrim=p.args[0] as View
                     if(scrim.rootView!==host.get())return
+                    val current=active() ?: return
                     val brightness=current.fraction(P.BRIGHTNESS)-1f
                     val stockTint=p.args[1] as Int
                     p.args[1]=ColorUtils.blendARGB(stockTint,if(brightness<0)Color.BLACK else Color.WHITE,

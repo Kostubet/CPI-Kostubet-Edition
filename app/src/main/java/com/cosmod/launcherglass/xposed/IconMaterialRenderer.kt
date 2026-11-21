@@ -79,7 +79,7 @@ object IconMaterialRenderer {
         var liquid:LiquidGlassShader?=null
         var appliedStyle:GlassStyle?=null
         var mini=false
-        var lastUpdateNs=0L
+        var sampleRevision = 0L
         val clock=SampleFrameClock()
         var finishKey=-1
         var lift:Lift?=null
@@ -273,7 +273,7 @@ object IconMaterialRenderer {
             sampler.source=null
             sampler.wallpaper=null
             sampler.node.discardDisplayList()
-            ensureContents(sampler)
+            if (ensureContents(sampler)) sampler.sampleRevision++
         }
         return false
     }
@@ -314,6 +314,7 @@ object IconMaterialRenderer {
             sampler.finishKey=finish
             sampler.appliedStyle=style
             sampler.source=null
+            sampler.sampleRevision++
             return true
         }
         return false
@@ -364,26 +365,33 @@ object IconMaterialRenderer {
         val previousSource=sampler.source
         if(previousSource==null)sampler.source=RectF(source) else if(previousSource!==source)previousSource.set(source)
         sampler.filter=filter;sampler.appliedStyle=style
-        sampler.lastUpdateNs=nowNs
+        sampler.sampleRevision++
         sampler.finishKey=finishKey
         sampler.clock.record(nowNs,fps)
         return true
     }
-    @Synchronized fun updateSamplers(view:View,wallpaper:Bitmap?,transform:Matrix?=null,nowNs:Long=System.nanoTime()):Boolean {
-        val entries=samplers[view] ?: return false
+    internal enum class SampleUpdate { RECORD, CHANGED, UNCHANGED }
+
+    @Synchronized internal fun updateSamplers(view:View,wallpaper:Bitmap?,transform:Matrix?=null,
+        nowNs:Long=System.nanoTime()):SampleUpdate {
+        val entries=samplers[view] ?: return SampleUpdate.RECORD
         prune(entries)
-        if(entries.isEmpty())return false
+        if(entries.isEmpty())return SampleUpdate.RECORD
         val world=transform ?: Matrix().also {
             view.transformMatrixToGlobal(it)
         }
-        var restored=false
+        var restored = false
+        var changed = false
         var folderImage:Bitmap?=null
         val scroll=com.cosmod.launcherglass.util.LiveBlurEngine.wallpaperScrollRatio
         val finish=opticalKey()
         val footprint=RectF()
         for(sampler in entries.values){
             restored=restoreSample(sampler) || restored
-            if(sampleFolderPanel(sampler,view,sampler.style))continue
+            val previousRevision = sampler.sampleRevision
+            val folder = sampleFolderPanel(sampler, view, sampler.style)
+            changed = changed || previousRevision != sampler.sampleRevision
+            if (folder) continue
             if(sampler.style.folderBackdrop)continue
             val image=if(sampler.style.surfaceScope==GlassSurface.PAGE_INDICATOR){
                 PageIndicatorGlass.wallpaper(view) ?: continue
@@ -409,11 +417,16 @@ object IconMaterialRenderer {
             if(samplerEffect(sampler,image,source,nowNs,view)){
                 if(!hold || !sampler.worldValid)sampler.world.set(world)
                 sampler.worldValid=true;sampler.scroll=scroll
+                changed = changed || previousRevision != sampler.sampleRevision
             }
         }
         // Also re-record the owner once: a native folder preview can have lost
         // its parent display list in the same resource-trimming operation.
-        return !restored
+        return when {
+            restored -> SampleUpdate.RECORD
+            changed -> SampleUpdate.CHANGED
+            else -> SampleUpdate.UNCHANGED
+        }
     }
 
     @Synchronized fun draw(

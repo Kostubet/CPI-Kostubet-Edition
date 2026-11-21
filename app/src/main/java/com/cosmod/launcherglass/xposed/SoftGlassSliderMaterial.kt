@@ -1,12 +1,10 @@
 package com.cosmod.launcherglass.xposed
 
 import android.content.Context
-import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.RuntimeShader
 import android.graphics.drawable.Drawable
 import android.view.View
 import androidx.annotation.RequiresApi
@@ -22,19 +20,20 @@ internal class SoftGlassSliderMaterial(context: Context) {
     private val matrix = Matrix()
     private val location = IntArray(2)
     private val origin = FloatArray(2)
-    private val shape = FloatArray(8)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val visible: (View) -> Boolean = { it.isShown && it.windowVisibility == View.VISIBLE }
-    private val backdrop = ShadeBackdrop(context, View::postInvalidateOnAnimation) { error ->
+    private val backdrop = ShadeBackdrop(context, View::postInvalidateOnAnimation, { plate?.clearImage() }) { error ->
         unavailable = true
         clear()
         GlassLogger.e("SoftGlass", "Slider capture unavailable; native tracks retained", error)
     }
     private var unavailable = false
-    private var shader: RuntimeShader? = null
+    private var plate: SoftGlassShader.Plate? = null
     private val drawn = mutableSetOf<Float>()
 
     fun clear() { backdrop.clear() }
+
+    fun diagnostics() = backdrop.diagnostics()
 
     fun draw(canvas: Canvas, native: Drawable, view: View, profile: Profile,
         role: Float, radius: Float, dark: Boolean, lightX: Float, lightY: Float) {
@@ -60,23 +59,14 @@ internal class SoftGlassSliderMaterial(context: Context) {
             frame.area.height() * h / (frame.image.height * screen.height()))
         matrix.postTranslate((frame.area.left - screen.left) * w / screen.width(),
             (frame.area.top - screen.top) * h / screen.height())
-        val input: BitmapShader = GlassGeometry.wallpaperShader(frame.image)
-        input.setLocalMatrix(matrix)
-        val program = shader ?: RuntimeShader(SoftGlassShader.activitySource()).also { shader = it }
-        SoftGlassShader.applyProfile(program, profile, role, dark, metrics.density,
-            metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(), lightX, lightY, fullMix = true)
-        program.setInputShader(SoftGlassShader.INPUT, input)
-        shape[2] = w * .5f
-        shape[3] = h * .5f
-        shape[4] = shape[2]
-        shape[5] = shape[3]
-        shape[6] = corner
-        program.setFloatUniform("u_size", w, h)
-        program.setFloatUniform("u_commonArray", shape)
+        val optics = plate ?: SoftGlassShader.Plate().also { plate = it }
+        optics.apply(profile, role, dark, metrics, lightX, lightY)
+        optics.bindImage(frame.image, matrix)
+        optics.setShape(w, h, corner)
         val save = canvas.save()
         try {
             canvas.translate(local.left, local.top)
-            paint.shader = program
+            paint.shader = optics.shader
             paint.alpha = (native.alpha * profile[Parameter.STRENGTH]).toInt()
             canvas.drawRoundRect(0f, 0f, w, h, corner, corner, paint)
         } finally {

@@ -545,12 +545,14 @@ internal object PhotoWidgetMaterial {
                             (100-(100-settings.tintTransparency)*progress).toInt(),settings.brightness)
                     val isolated=paint.alpha!=255 || contentTint!=null || settings.hasFade ||
                         settings.shade>0 || WidgetElementColors.enabled
+                    // A separate tint layer is only needed when the photo fade
+                    // has to be applied after tinting the content.
+                    val useSeparateTint = contentTint != null && settings.hasFade
                     if(isolated){
-                        val layerBounds=RectF(bounds).apply {matrix.mapRect(this);union(0f,0f,view.width.toFloat(),view.height.toFloat())}
-                        canvas.saveLayer(layerBounds,paint)
-                    }
-                    if(isolated){
+                        if (!useSeparateTint) paint.colorFilter = contentTint
                         val footprint=RectF(bounds).apply {matrix.mapRect(this)}
+                        val layerBounds=RectF(footprint).apply {union(0f,0f,view.width.toFloat(),view.height.toFloat())}
+                        canvas.saveLayer(layerBounds,paint)
                         if(!WidgetElementColors.followsBackground){
                             val elements=elementLayers.getOrPut(view){com.cosmod.launcherglass.util.WidgetTextLayer()}
                             if(runCatching {elements.record(view,preserveImages=true,contentRoot=child,clipBounds=footprint,
@@ -564,7 +566,7 @@ internal object PhotoWidgetMaterial {
                             param.setObjectExtra("widgetCaptionLayer",caption)
                     }
                     param.setObjectExtra("widgetContentIsolated",isolated)
-                    if(contentTint!=null){
+                    if(useSeparateTint){
                         tintPaint.colorFilter=contentTint
                         param.setObjectExtra("widgetTintSave",canvas.saveLayer(null,tintPaint))
                     }

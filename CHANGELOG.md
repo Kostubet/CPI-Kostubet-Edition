@@ -4,6 +4,14 @@
 
 ## Русский
 
+### Сборка 440
+
+- Стекло «Мягкий свет» переиспользует входные текстуры и параметры шейдера для ползунков и живых оповещений на экране блокировки. Вложенные обёртки больше не запускают резервную отрисовку поверх нативной.
+- Захват фона ползунков прекращает запрашивать перерисовку, когда подходящего кадра нет. Изменение приоритета стекла на панели громкости сразу обновляет материал.
+- Лаунчер пропускает повторную перерисовку неизменившихся образцов стекла. Перекраска виджетов без выцветания использует один слой вместо двух, а хуки анимаций переиспользуют память для матриц.
+- Системные процессы объединяют повторные уведомления об изменении настроек. System UI восстанавливает штатный режим отрисовки фона живых оповещений при отключении эффекта.
+- «Прозрачные → Светлые» используют лёгкий нейтральный оттенок стекла для иконок и делают подложки виджетов прозрачнее.
+
 ### Сборка 439
 
 - В «Оформлении» CPI переключает классические значки и светлый вариант Flux на «Градиент → Тёмный». Уже настроенный тёмный или автоматический режим Flux сохраняется.
@@ -226,6 +234,14 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 440
+
+- Soft Glass reuses input textures and shader uniforms for sliders and lock-screen live activity cards. Nested drawables no longer paint the fallback over the native material.
+- Slider backdrop capture stops requesting redraws when no suitable frame is available. Changing volume-panel material priority refreshes the panel.
+- The launcher skips redraws for unchanged glass samples, combines widget tint and opacity when there is no fade, and reuses matrix storage in transition hooks.
+- System processes coalesce repeated preference notifications. System UI restores the original live activity background drawing mode when the effect is disabled.
+- The light Clear appearance adds a subtle neutral tint to icon glass and makes widget backgrounds more transparent.
 
 ### Build 439
 

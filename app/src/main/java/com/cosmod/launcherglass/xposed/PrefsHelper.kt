@@ -43,6 +43,9 @@ object PrefsHelper {
     @Volatile var iconDispersion=0
     @Volatile var dockDispersion=0
     @Volatile var dockColorFilter:android.graphics.ColorMatrixColorFilter?=null
+        private set
+    private var lastDockSaturation = 100
+    private var lastDockDarkness = 0
     @Volatile var dockBlur=14
     @Volatile var dockStyle=0
     @Volatile var dockOpacity=0
@@ -132,9 +135,11 @@ object PrefsHelper {
         })
 
         try {
-            val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            val main = Handler(Looper.getMainLooper())
+            val reload = Runnable { loadPrefs(context) }
+            val observer = object : ContentObserver(main) {
                 override fun onChange(selfChange: Boolean, uri: Uri?) {
-                    loadPrefs(context)
+                    if (!main.hasCallbacks(reload)) main.post(reload)
                 }
             }
             context.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, true, observer)
@@ -255,14 +260,16 @@ object PrefsHelper {
             val darkIcons = if (appearance.mode == DesktopAppearance.Mode.MANUAL ||
                 appearance.mode == DesktopAppearance.Mode.STOCK) nativeDarkIcons else appearance.iconDark(actualSystemDark)
             val fluxSupport=FluxIconSupport.read(context)
-            if(fluxSupport!=FluxIconSupport.UNKNOWN && bundle.getInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,0)!=fluxSupport) {
-                context.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_REPORT_ICON_APPEARANCE,
-                    null,android.os.Bundle().apply {putInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,fluxSupport)})
-            }
-            if (!bundle.containsKey(SettingsProvider.KEY_NATIVE_ICON_DARK) ||
-                bundle.getBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK) != nativeDarkIcons) {
-                context.contentResolver.call(SettingsProvider.CONTENT_URI, SettingsProvider.METHOD_REPORT_ICON_APPEARANCE,
-                    null, android.os.Bundle().apply { putBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK, nativeDarkIcons) })
+            val reportSupport = fluxSupport != FluxIconSupport.UNKNOWN &&
+                bundle.getInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT, 0) != fluxSupport
+            val reportTheme = !bundle.containsKey(SettingsProvider.KEY_NATIVE_ICON_DARK) ||
+                bundle.getBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK) != nativeDarkIcons
+            if (reportSupport || reportTheme) {
+                val report = Bundle().apply {
+                    if (reportSupport) putInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT, fluxSupport)
+                    if (reportTheme) putBoolean(SettingsProvider.KEY_NATIVE_ICON_DARK, nativeDarkIcons)
+                }
+                context.contentResolver.call(SettingsProvider.CONTENT_URI, SettingsProvider.METHOD_REPORT_ICON_APPEARANCE, null, report)
             }
             val colorKeys = SettingsProvider.colorKeys(darkIcons)
             val hue=bundle.getInt(colorKeys[0],SettingsDefaults.integer(colorKeys[0]))
@@ -322,8 +329,13 @@ object PrefsHelper {
             drawerBlurEnabled = newDrawerBlurEnabled
             val dockSaturation=bundle.getInt("dock_backdrop_saturation",100).coerceIn(0,200)
             val dockDarkness=bundle.getInt("dock_backdrop_darkness",0).coerceIn(0,100)
-            dockColorFilter=if(dockSaturation==100 && dockDarkness==0)null else android.graphics.ColorMatrixColorFilter(
-                com.cosmod.launcherglass.util.DockToneMatrix.values(dockSaturation,dockDarkness))
+            if (lastDockSaturation != dockSaturation || lastDockDarkness != dockDarkness) {
+                dockColorFilter = if (dockSaturation == 100 && dockDarkness == 0) null
+                else android.graphics.ColorMatrixColorFilter(
+                    com.cosmod.launcherglass.util.DockToneMatrix.values(dockSaturation, dockDarkness))
+                lastDockSaturation = dockSaturation
+                lastDockDarkness = dockDarkness
+            }
             dockBlur=bundle.getInt(SettingsProvider.KEY_DOCK_BLUR,14).coerceIn(0,40)
             dockStyle=bundle.getInt(SettingsProvider.KEY_DOCK_STYLE,0).coerceIn(0,2)
             dockOpacity=com.cosmod.launcherglass.ui.GlobalGlassSettings.opacity(bundle).coerceIn(0,100)

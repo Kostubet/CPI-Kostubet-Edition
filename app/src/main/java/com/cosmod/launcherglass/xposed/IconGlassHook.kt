@@ -295,12 +295,14 @@ object IconGlassHook {
                 continue
             }
             if(onlyChangedDrawerSamples && !forceEdge && IconMaterialRenderer.hasBindings(view)){
-                if(IconMaterialRenderer.updateSamplers(view,wallpaper,world)){
-                    if(beforeDraw==null)roots.add(view.rootView)
-                    continue
+                when (IconMaterialRenderer.updateSamplers(view, wallpaper, world)) {
+                    IconMaterialRenderer.SampleUpdate.CHANGED -> if (beforeDraw == null) roots.add(view.rootView)
+                    IconMaterialRenderer.SampleUpdate.RECORD -> {
+                        if (beforeDraw != null && !LiveBlurEngine.isMoving) idleInvalidations++
+                        view.invalidate()
+                    }
+                    IconMaterialRenderer.SampleUpdate.UNCHANGED -> Unit
                 }
-                if(beforeDraw!=null && !LiveBlurEngine.isMoving)idleInvalidations++
-                view.invalidate()
                 continue
             }
             if(!view.getGlobalVisibleRect(visible)){
@@ -528,8 +530,12 @@ object IconGlassHook {
         // stay the size of the original icon, not the offscreen surface.
         val footprint=Rect(0,0,parts.plateMaskBitmap.width,parts.plateMaskBitmap.height)
         val source=compatible?.let {sourceRect(it,a,footprint)}
-        val plateColor=if(PrefsHelper.blurEnabled)PrefsHelper.iconPlateColor(parts.bgColor) else parts.bgColor
-        val plateOpacity = if (PrefsHelper.desktopLightIconGlass && compatible == null) 7 else PrefsHelper.bgOpacity
+        val plateColor = when {
+            PrefsHelper.desktopLightIconGlass -> Color.WHITE
+            PrefsHelper.blurEnabled -> PrefsHelper.iconPlateColor(parts.bgColor)
+            else -> parts.bgColor
+        }
+        val plateOpacity = PrefsHelper.bgOpacity
         val folderBackdrop=PrefsHelper.folderIconsBlurEnabled &&
             (binding?.view?.let(FolderMaterialHook::ownsBackdrop)==true || a?.openFolder==true)
         val style=GlassStyle.icons().copy(folderBackdrop=folderBackdrop)
@@ -540,8 +546,7 @@ object IconGlassHook {
             style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height)){target,local,blurred ->
             if(!blurred){
                 val save=target.saveLayer(RectF(local),null)
-                val fallbackColor = if (PrefsHelper.desktopLightIconGlass) Color.WHITE else plateColor
-                val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (fallbackColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
+                val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (plateColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
                 target.drawBitmap(WallpaperHelper.forCanvas(plateMask,target),null,local,paint)
                 if (!PrefsHelper.desktopLightIconGlass && PrefsHelper.gradientOpacity > 0) {
                     paint.colorFilter=null;paint.shader=GlassVolume.shader(local.height().toFloat(),PrefsHelper.gradientOpacity)

@@ -2,7 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package com.cosmod.launcherglass.xposed
 
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Shader
+import android.graphics.Matrix
 import android.graphics.RuntimeShader
+import android.util.DisplayMetrics
 import androidx.annotation.RequiresApi
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Parameter as P
 import com.cosmod.launcherglass.ui.SoftGlassSettings.Profile
@@ -59,6 +66,76 @@ internal object SoftGlassShader {
         }
     }
 
+    /** Retains the input and uniforms while ColorOS redraws the same sampled geometry. */
+    @RequiresApi(33)
+    class Plate {
+        val shader = RuntimeShader(activitySource())
+        private var bitmap: Bitmap? = null
+        private var input: BitmapShader? = null
+        private val mapping = Matrix()
+        private val shape = FloatArray(8)
+        private var profile: Profile? = null
+        private var role = 0f
+        private var dark = false
+        private var density = 0f
+        private var screenWidth = 0
+        private var screenHeight = 0
+        private var lightX = 0f
+        private var lightY = 0f
+
+        fun apply(profile: Profile, role: Float, dark: Boolean, metrics: DisplayMetrics, x: Float, y: Float) {
+            if (this.profile == profile && this.role == role && this.dark == dark &&
+                density == metrics.density && screenWidth == metrics.widthPixels && screenHeight == metrics.heightPixels) {
+                if (lightX != x || lightY != y) applyLight(shader, profile, x, y)
+            } else {
+                applyProfile(shader, profile, role, dark, metrics.density,
+                    metrics.widthPixels.toFloat(), metrics.heightPixels.toFloat(), x, y, fullMix = true)
+                this.profile = profile
+                this.role = role
+                this.dark = dark
+                density = metrics.density
+                screenWidth = metrics.widthPixels
+                screenHeight = metrics.heightPixels
+            }
+            lightX = x
+            lightY = y
+        }
+
+        fun bindImage(image: Bitmap, transform: Matrix) {
+            if (bitmap === image && mapping == transform) return
+            val source = if (bitmap === image) checkNotNull(input) else GlassGeometry.wallpaperShader(image)
+            source.setLocalMatrix(transform)
+            shader.setInputShader(INPUT, source)
+            bitmap = image
+            input = source
+            mapping.set(transform)
+        }
+
+        fun clearImage() {
+            if (bitmap == null) return
+            shader.setInputShader(INPUT, emptyInput)
+            input = null
+            bitmap = null
+        }
+
+        fun setShape(width: Float, height: Float, radius: Float) {
+            val halfWidth = width * .5f
+            val halfHeight = height * .5f
+            if (shape[2] == halfWidth && shape[3] == halfHeight && shape[6] == radius) return
+            shape[2] = halfWidth
+            shape[3] = halfHeight
+            shape[4] = halfWidth
+            shape[5] = halfHeight
+            shape[6] = radius
+            shader.setFloatUniform("u_size", width, height)
+            shader.setFloatUniform("u_commonArray", shape)
+        }
+    }
+
+    private val emptyInput by lazy {
+        LinearGradient(0f, 0f, 1f, 0f, Color.TRANSPARENT, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+    }
+
     @RequiresApi(33)
     fun applyProfile(shader: RuntimeShader, profile: Profile, role: Float, dark: Boolean, density: Float,
         screenWidth: Float, screenHeight: Float, x: Float = 0f, y: Float = 0f, fullMix: Boolean = false) {
@@ -69,12 +146,17 @@ internal object SoftGlassShader {
         shader.setFloatUniform("onbDimming", profile[P.DIMMING])
         shader.setFloatUniform("onbKeepWhite", if (profile.white) 1f else 0f)
         shader.setFloatUniform("onbSelectionState", if (role == 1f) 1f else 0f)
+        applyLight(shader, profile, x, y)
+        shader.setFloatUniform(UNIFORM, density, screenWidth, screenHeight)
+    }
+
+    @RequiresApi(33)
+    private fun applyLight(shader: RuntimeShader, profile: Profile, x: Float, y: Float) {
         val angle = Math.toRadians(profile.value(P.ANGLE).toDouble())
         val c = cos(angle).toFloat()
         val s = sin(angle).toFloat()
         shader.setFloatUniform("onbLampOffset", .4f * (1f - c) + .6f * s + x * profile[P.RESPONSE],
             .6f * (1f - c) - .4f * s + y * profile[P.RESPONSE])
-        shader.setFloatUniform(UNIFORM, density, screenWidth, screenHeight)
     }
 
     // Older expanded cards use the compositor's BackgroundBlurDrawable instead of the
