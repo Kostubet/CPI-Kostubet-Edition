@@ -29,7 +29,7 @@
 
 ### Установка и совместимость
 
-В разделе «Анимации приложений iOS 27» можно отдельно включить движок ba31k. Пока он включён, действуют его параметры. После отключения возвращается прежний движок, если он был включён. Анимации шторки требуют области лаунчера, а прозрачный фон шторки — области System UI. Движок оставляет штатный переход на прошивках, где системный метод не удаётся подтвердить.
+В разделе «Анимации iOS» можно включить движок переходов между приложениями и рабочим столом, настроить наклон и деформацию. На прошивках, где системный переход не поддерживается, CPI сохраняет штатную анимацию.
 
 1. Скачайте подписанный APK из [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases).
 2. Установите его и включите **CPI Kostubet Edition** в LSPosed. Совместимость отдельных функций с Vector ограничена.
@@ -103,7 +103,7 @@ An LSPosed module written in Kotlin that brings Frosted and Liquid Glass design 
 
 ### Installation
 
-The iOS 27 App Animations page has a separate ba31k engine with independent settings. Disabling it returns to the previously enabled engine. The shade motion uses launcher scope, and the transparent shade uses System UI scope. Firmware with an unrecognized native transition retains the stock behavior.
+The iOS Animations page lets you enable the transition engine for opening apps and returning home and adjust tilt and deformation. CPI uses the stock animation on firmware where the system transition is unsupported.
 
 Install the signed APK from [Releases](https://github.com/Kostubet/CPI-Kostubet-Edition/releases). Enable the module in LSPosed and select the system launcher. Some features have limited compatibility with Vector. Select **System UI** for system overlays and the lock screen. ColorOS calls its Flux icon style **Gradient**. Choosing a CPI Appearance style changes Classic and Gradient → Bright to **Gradient → Dark**. The main development device is the OnePlus 13 on ColorOS 17 with launcher 17.3.12. Feature availability depends on the firmware. [Full installation guide](INSTALL.md#english)
 

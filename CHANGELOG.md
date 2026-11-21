@@ -1,8 +1,12 @@
-# CPI Kostubet Edition 0.3.1
+# CPI Kostubet Edition 0.3.2
 
 [Русский](#русский) · [English](#english)
 
 ## Русский
+
+### Сборка 450 — релиз 0.3.2
+
+- Добавлена проверка версии Android для диагностики стекла. Пипетка сохраняет резервный источник при отказе в доступе к файлу обоев.
 
 ### Сборка 449
 
@@ -279,6 +283,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 450 — version 0.3.2
+
+- Added an Android version guard for glass diagnostics. The eyedropper retains its fallback when wallpaper file access is denied.
 
 ### Build 449
 

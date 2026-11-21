@@ -603,6 +603,8 @@ object WallpaperHelper {
                 NeutralBackdrop.indicatorImage?.isRecycled==false)
 
 
+    // The launcher uses its own wallpaper access. If Android rejects it, use the snapshot below.
+    @android.annotation.SuppressLint("MissingPermission")
     internal fun getPickerWallpaper(context: Context): Bitmap? {
         val maxSide = maxOf(context.resources.displayMetrics.widthPixels,
             context.resources.displayMetrics.heightPixels).coerceIn(1920, 3072)

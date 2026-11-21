@@ -76,7 +76,10 @@ internal object SoftGlassNative {
         Surface.CONTROL in it.profiles && it.panelTargets.supportsVolume && it.followControlForVolume
     } == true
 
-    fun diagnostics() = systemUi?.diagnostics() ?: "Soft Glass: inactive"
+    fun diagnostics(): String {
+        if (Build.VERSION.SDK_INT >= 33) systemUi?.let { return it.diagnostics() }
+        return "Soft Glass: inactive"
+    }
 
     fun replaces(surface: Surface): Boolean = Build.VERSION.SDK_INT >= 33 && systemUi?.profiles?.containsKey(surface) == true
     fun lockedActivityProfile(): Profile? = if (Build.VERSION.SDK_INT >= 33) systemUi?.let { session ->
