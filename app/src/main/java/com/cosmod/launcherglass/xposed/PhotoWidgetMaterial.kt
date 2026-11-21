@@ -439,7 +439,8 @@ internal object PhotoWidgetMaterial {
             tracker.getDeclaredMethod("initForApp", android.content.Context::class.java, Long::class.javaPrimitiveType,
                 Map::class.java)
         }.getOrNull()?.takeIf { it.returnType == Boolean::class.javaPrimitiveType } ?: return
-        ModuleHooks.hookMethod(init, object : XC_MethodHook() {
+        // Stock card tracking can start before CPI's preferences are available.
+        XposedBridge.hookMethod(init, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val error = param.throwable as? NoSuchMethodError ?: return
                 val description = error.message.orEmpty()
@@ -454,7 +455,9 @@ internal object PhotoWidgetMaterial {
     }
 
     fun install(loader:ClassLoader){
-        guardLegacyCardTracking(loader)
+        runCatching { guardLegacyCardTracking(loader) }.onFailure {
+            GlassLogger.limited("PhotoWidget", "legacyCardTrackingHook") { "Native card tracking retained: $it" }
+        }
         val transition="com.android.launcher3.anim.OplusLauncherAppTransitionHelper"
         for(name in listOf(transition,"${transition}V2")){
             val type=XposedHelpers.findClassIfExists(name,loader) ?: continue

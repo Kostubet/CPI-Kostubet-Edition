@@ -94,6 +94,7 @@ class HookEntry : IXposedHookLoadPackage {
                     }
                     appCtx.registerReceiver(object : android.content.BroadcastReceiver() {
                         override fun onReceive(c: Context?, i: android.content.Intent?) {
+                            if (i?.action == android.content.Intent.ACTION_USER_PRESENT) PrefsHelper.retryOnResume(appCtx)
                             if(!PrefsHelper.enabled)return
                             when(i?.action) {
                                 android.content.Intent.ACTION_SCREEN_OFF -> {

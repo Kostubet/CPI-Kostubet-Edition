@@ -4,11 +4,12 @@
 
 ## Русский
 
-### Сборка 443
+### Сборка 444
 
 - Кнопка «Оформление» берёт высоту и размер текста у штатных кнопок редактора ColorOS.
 - Стекло виджетов на ColorOS 16 использует границы карточки и системное сглаживание углов.
-- Анимация возврата домой обрабатывает кадры без обрезки окна. Если настройки не загрузились при запуске, лаунчер повторяет чтение при возвращении на экран.
+- Анимация возврата домой обрабатывает кадры без обрезки окна. Если настройки не загрузились при запуске, лаунчер повторяет чтение при разблокировке и возвращении на экран.
+- Защита от сбоя `CardTracker` на ColorOS 16 включается до загрузки настроек CPI.
 
 ### Сборка 442
 
@@ -254,11 +255,12 @@
 
 ## English
 
-### Build 443
+### Build 444
 
 - The Appearance button inherits the height and text size of the native ColorOS edit controls.
 - Widget glass on ColorOS 16 uses the card bounds and native corner smoothing.
-- Home transitions handle frames without a window crop. The launcher retries reading settings on resume if they were unavailable at startup.
+- Home transitions handle frames without a window crop. The launcher retries reading settings on unlock and resume if they were unavailable at startup.
+- The ColorOS 16 `CardTracker` guard is active before CPI settings load.
 
 ### Build 442
 
