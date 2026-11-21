@@ -182,7 +182,6 @@ object PrefsHelper {
             nativeIconsSupported=bundle.getInt(SettingsProvider.KEY_NATIVE_FLUX_SUPPORT,0)!=2
             val performanceChanged=com.cosmod.launcherglass.util.PerformancePolicy.update(context,bundle)
             Ba31kAppTransitions.update(bundle)
-            Ba31kShadeMotion.update(bundle)
             DockMaterial.updateUnlock(bundle)
             launcherIconSize=bundle.getInt("launcher_icon_size",100).coerceIn(70,130)
             desktopLargeIcons = bundle.getInt(DesktopAppearance.LARGE_ICONS) == 1

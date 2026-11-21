@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 448
+
+- Кнопка «Оформление» подключается при появлении штатной панели редактирования рабочего стола и учитывает состояние лаунчера ColorOS.
+- Удалён эффект «Шторка уведомлений» из раздела «Анимации iOS».
+
 ### Сборка 447
 
 - «Тёмные» используют Frosted для иконок и виджетов. Цвет и насыщенность логотипов настраиваются отдельно. «Прозрачные» и «Однотонные» возвращают жидкое стекло.
@@ -270,6 +275,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 448
+
+- The Appearance button binds when the stock home screen editing toolbar attaches and follows the ColorOS Launcher state.
+- Removed the Notification shade effect from iOS Animations.
 
 ### Build 447
 

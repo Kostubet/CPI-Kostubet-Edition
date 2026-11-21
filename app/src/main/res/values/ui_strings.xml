@@ -504,11 +504,6 @@
     <string name="ui_ba31k_genie">Genie effect</string>
     <string name="ui_ba31k_droplet_strength">Droplet strength</string>
     <string name="ui_ba31k_speed">Overall speed of this engine</string>
-    <string name="ui_ba31k_shade">Notification shade</string>
-    <string name="ui_ba31k_fly">Animate home icons with the shade</string>
-    <string name="ui_ba31k_spread">Icon spread</string>
-    <string name="ui_ba31k_fly_blur">Blur icons during motion</string>
-    <string name="ui_ba31k_clear_shade">Transparent shade background</string>
     <string name="ui_ba31k_app_blur">Blur desktop during app transitions</string>
     <string name="ui_ba31k_spring">Spring motion</string>
     <string name="ui_ba31k_stiffness">Tilt spring stiffness</string>

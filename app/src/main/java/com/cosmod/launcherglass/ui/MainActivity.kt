@@ -3814,7 +3814,6 @@ class MainActivity : AppCompatActivity() {
             add(this,control)
         }
         val appMotion = { active() && (bool(settings.OPEN) || bool(settings.CLOSE)) }
-        val shade = { active() && bool(settings.SHADE) }
         val masterSwitch=switchRow(getString(R.string.ui_ba31k_title),settings.ENABLED,
             getString(R.string.ui_ba31k_summary))
         gate(masterSwitch,::master)
@@ -3840,11 +3839,6 @@ class MainActivity : AppCompatActivity() {
             amount(R.string.ui_ba31k_damping,settings.DAMPING,appMotion)
             amount(R.string.ui_ba31k_velocity,settings.INITIAL_VELOCITY,appMotion)
             amount(R.string.ui_ba31k_duration,settings.DURATION,appMotion)
-        }
-        group(R.string.ui_ba31k_shade) {
-            toggle(R.string.ui_ba31k_fly,settings.SHADE)
-            amount(R.string.ui_ba31k_spread,settings.SPREAD,shade)
-            toggle(R.string.ui_ba31k_clear_shade,settings.CLEAR_SHADE)
         }
         add(body,card(preferenceLink(getString(R.string.ui_reset_section)){anchor->
             choicePopup(anchor,listOf(0 to R.string.ui_cancel,1 to R.string.ui_reset_section_confirm),-1){

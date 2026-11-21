@@ -17,6 +17,7 @@ import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.LiveBlurEngine
 import de.robv.android.xposed.XC_MethodHook
+import de.robv.android.xposed.XposedBridge
 import de.robv.android.xposed.XposedHelpers
 import org.xmlpull.v1.XmlPullParser
 import java.util.WeakHashMap
@@ -27,6 +28,7 @@ internal object DesktopAppearanceToolbar {
     private const val TOOLBAR = "com.android.launcher.togglebar.views.ToggleStateToolbar"
     private const val BUTTON = "com.android.launcher.views.PressFeedbackButton"
     private val wallpaperShades = WeakHashMap<Activity, WeakReference<View>>()
+    private val appearanceButtonId by lazy { View.generateViewId() }
 
     fun updateWallpaperShade() {
         for ((host, shade) in wallpaperShades.toMap()) {
@@ -64,19 +66,40 @@ internal object DesktopAppearanceToolbar {
             val toolbar = loader.loadClass(TOOLBAR)
             val button = loader.loadClass(BUTTON).getConstructor(Context::class.java, AttributeSet::class.java)
             val sheet = DesktopAppearancePanel.contract(loader)
-            ModuleHooks.hookMethod(toolbar.getDeclaredMethod("onFinishInflate"), object : XC_MethodHook() {
+            val editState by lazy {
+                runCatching {
+                    XposedHelpers.getStaticObjectField(
+                        loader.loadClass("com.android.launcher3.LauncherState"), "TOGGLE_BAR",
+                    )
+                }.getOrNull()
+            }
+            val attach = runCatching { toolbar.getDeclaredMethod("onAttachedToWindow") }.getOrElse {
+                toolbar.getDeclaredMethod("onFinishInflate")
+            }
+            // The editor can be inflated before the module preferences are ready.
+            XposedBridge.hookMethod(attach, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (param.hasThrowable()) return
-                    runCatching {
-                        bind(param.thisObject as ViewGroup, { context, attrs -> button.newInstance(context, attrs) as TextView }, sheet)
-                    }.onFailure { report(it) }
+                    val view = param.thisObject as? ViewGroup ?: return
+                    view.post {
+                        if (!view.isAttachedToWindow) return@post
+                        runCatching {
+                            bind(view, { context, attrs -> button.newInstance(context, attrs) as TextView }, sheet, editState)
+                        }.onFailure { report(it) }
+                    }
                 }
             })
             GlassLogger.i("DesktopAppearance", "ColorOS edit toolbar contract installed")
         }.onFailure { report(it) }
     }
 
-    private fun bind(toolbar: ViewGroup, makeButton: (Context, AttributeSet) -> TextView, sheet: DesktopAppearancePanel.Contract) {
+    private fun bind(
+        toolbar: ViewGroup,
+        makeButton: (Context, AttributeSet) -> TextView,
+        sheet: DesktopAppearancePanel.Contract,
+        editState: Any?,
+    ) {
+        if (toolbar.findViewById<View>(appearanceButtonId) != null) return
         val group = XposedHelpers.callMethod(toolbar, "getCancelButton") as? TextView ?: return
         val done = XposedHelpers.callMethod(toolbar, "getDoneButton") as? TextView ?: return
         val parent = done.parent as? ViewGroup ?: return
@@ -86,7 +109,14 @@ internal object DesktopAppearanceToolbar {
         val groupText = resources.getIdentifier("edite_model_tidyup", "string", context.packageName)
         val doneText = resources.getIdentifier("toggle_bar_complete", "string", context.packageName)
         val layout = resources.getIdentifier("toggle_state_tool_bar", "layout", context.packageName)
-        if (groupText == 0 || doneText == 0 || layout == 0) return
+        if (layout == 0) return
+        val host = activity(context) ?: return
+        val stateManager = runCatching { editState?.let { NativeIconAccess.call(host, "getStateManager") } }.getOrNull()
+        val groupSelection = runCatching {
+            stateManager?.let { NativeIconAccess.call(host, "getBatchDragViewManager") }
+        }.getOrNull()
+        val groupLabel = groupText.takeIf { it != 0 }?.let(resources::getString)
+        val doneLabel = doneText.takeIf { it != 0 }?.let(resources::getString)
         // Use the actual button style from the matching resource. Creating the
         // class without attributes selects an unrelated stock button variant.
         val copy = resources.getLayout(layout).use { parser ->
@@ -112,7 +142,7 @@ internal object DesktopAppearanceToolbar {
 
         val title = context.createPackageContext(BuildConfig.APPLICATION_ID, 0).getString(R.string.desktop_appearance_title)
         copy.apply {
-            id = View.generateViewId()
+            id = appearanceButtonId
             text = title
             contentDescription = title
             setTextSize(TypedValue.COMPLEX_UNIT_PX, done.textSize)
@@ -127,24 +157,35 @@ internal object DesktopAppearanceToolbar {
         }
         var dialog: Dialog? = null
         var opening = false
-        fun editorVisible() = group.isShown && done.isShown &&
-            group.text.toString() == resources.getString(groupText) &&
-            done.text.toString() == resources.getString(doneText)
+        fun editorVisible(): Boolean {
+            if (!done.isShown) return false
+            val state = runCatching { stateManager?.let { NativeIconAccess.call(it, "getState") } }.getOrNull()
+            if (state != null) {
+                if (state !== editState) return false
+                val selected = runCatching {
+                    groupSelection?.let { NativeIconAccess.call(it, "getSelectedViewCount") } as? Number
+                }.getOrNull()
+                return (selected?.toInt() ?: 0) == 0
+            }
+            return group.isShown && group.text.toString() == groupLabel && done.text.toString() == doneLabel
+        }
+        var confirmedVisible = false
         val listener = ViewTreeObserver.OnPreDrawListener {
-            val available = PrefsHelper.enabled && group.visibility == View.VISIBLE &&
-                done.visibility == View.VISIBLE && group.text.toString() == resources.getString(groupText) &&
-                done.text.toString() == resources.getString(doneText)
+            val available = PrefsHelper.enabled && editorVisible()
             val visibility = if (available) View.VISIBLE else View.INVISIBLE
             if (copy.visibility != visibility) copy.visibility = visibility
-            val alpha = if (available) minOf(group.alpha, done.alpha) else 0f
+            val alpha = if (available) done.alpha else 0f
             if (copy.alpha != alpha) copy.alpha = alpha
             if (copy.currentTextColor != done.currentTextColor) copy.setTextColor(done.textColors)
             if (copy.isEnabled != (alpha > .6f)) copy.isEnabled = alpha > .6f
+            if (copy.isEnabled && !confirmedVisible) {
+                confirmedVisible = true
+                GlassLogger.i("DesktopAppearance", "Appearance action visible in the stock editor")
+            }
             true
         }
         copy.setOnClickListener {
-            if (!PrefsHelper.enabled || opening || dialog?.isShowing == true) return@setOnClickListener
-            val host = activity(context) ?: return@setOnClickListener
+            if (!PrefsHelper.enabled || !copy.isEnabled || opening || dialog?.isShowing == true) return@setOnClickListener
             if (host.isFinishing || host.isDestroyed) return@setOnClickListener
             opening = true
             val editorWasTracked = LiveBlurEngine.isEditing

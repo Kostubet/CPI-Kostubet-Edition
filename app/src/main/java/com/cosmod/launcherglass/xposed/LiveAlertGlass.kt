@@ -219,7 +219,6 @@ internal object LiveAlertGlass {
         runCatching { ShadeGlass.configure(c,hostLoader,prefs,master) }.onFailure {
             GlassLogger.e("ShadeGlass","Could not apply shade preferences",it)
         }
-        Ba31kShadeTransparency.update(prefs,hostLoader)
         val wantIsland=master && prefs.getBoolean("island_glass_enabled",false)
         val wantBanners=master && prefs.getBoolean("banner_glass_enabled",false)
         val wantSoftLock=master && SoftGlassNative.replaces(com.cosmod.launcherglass.ui.SoftGlassSettings.Surface.LOCK)
