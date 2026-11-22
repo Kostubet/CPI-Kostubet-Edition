@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 453
+
+- Облегчена смена стилей на рабочем столе. Стекло переиспользует кэш материалов, а затухание кадра обрабатывает аппаратный композитор.
+- Ползунки «Оформления» появляются и исчезают с размытием. Смягчён отскок ползунков и панели режимов.
+
 ### Сборка 452
 
 - При смене стиля «Оформление» читает настройки в фоне, распределяет отрисовку иконок по кадрам и объединяет быстрые запросы на пересчёт размытия обоев.
@@ -294,6 +299,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 453
+
+- Desktop style changes reuse icon materials and let the hardware renderer fade the outgoing frame.
+- Appearance sliders blur as they enter and exit. The sliders and mode selector settle with a softer bounce.
 
 ### Build 452
 

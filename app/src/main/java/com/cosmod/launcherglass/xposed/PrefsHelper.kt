@@ -424,9 +424,9 @@ object PrefsHelper {
             // not only update the wallpaper sampling RenderNode.
             if (materialChanged || folderChanged) {
                 if (updatingDesktopProfile && !masterChanged && !backendChanged && !performanceChanged &&
-                    !geometryChanged && !edgeChanged && !opticsChanged && !glassEngineChanged) {
-                    // The renderer reuses its RenderNodes and switches the keyed material
-                    // on draw when the profile only changes color, opacity or style.
+                    !geometryChanged && !edgeChanged && !opticsChanged) {
+                    // GlassStyle keys each sampler by the selected engine and its optics.
+                    // Switching engines here can reuse the existing icon materials.
                     IconGlassHook.invalidateFolderPreviews()
                 } else IconGlassHook.invalidateShaders()
             }
@@ -468,7 +468,7 @@ object PrefsHelper {
                 NativeFluxIconStyle.request(context)
             }
 
-            GlassLogger.i(
+            if (!redrawAppearance) GlassLogger.i(
                 "PrefsHelper",
                 "Preferences loaded: enabled=$enabled, bgOpacity=$bgOpacity%, blur=$blurEnabled(mode=$blurMode, fps=$liveFps, idlePause=$idlePause, r=$blurRadius), stroke=$iconStroke($strokeOpacity%), gradient=$gradientOpacity%, palette=$iconPalette"
             )

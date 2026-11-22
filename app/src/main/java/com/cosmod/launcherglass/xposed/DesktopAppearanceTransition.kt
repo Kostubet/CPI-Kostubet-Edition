@@ -5,19 +5,17 @@ import android.app.Activity
 import android.appwidget.AppWidgetHostView
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.ColorFilter
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
-import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.view.animation.PathInterpolator
 import androidx.core.animation.doOnEnd
 import com.cosmod.launcherglass.ui.DesktopAppearance
@@ -109,15 +107,15 @@ internal object DesktopAppearanceTransition {
         val result = Path()
         val visible = Rect()
         fun collect(view: View) {
-            if (!view.isShown || view.alpha <= .01f || !view.getGlobalVisibleRect(visible) ||
-                !visible.intersect(area)) return
+            if (view.visibility != View.VISIBLE || view.alpha <= .01f) return
             val name = view.javaClass.name
             if (view in tracked || view is AppWidgetHostView ||
                 name.startsWith("com.android.launcher3.") &&
                 (name.endsWith("BubbleTextView") || name.endsWith("FolderIcon"))) {
+                if (!view.getGlobalVisibleRect(visible) || !visible.intersect(area)) return
                 result.addRect(visible.left.toFloat(), visible.top.toFloat(),
                     visible.right.toFloat(), visible.bottom.toFloat(), Path.Direction.CW)
-            } else if (view is ViewGroup) {
+            } else if (view is ViewGroup && view.getGlobalVisibleRect(visible) && visible.intersect(area)) {
                 for (index in 0 until view.childCount) collect(view.getChildAt(index))
             }
         }
@@ -131,20 +129,31 @@ internal object DesktopAppearanceTransition {
     }
 
     private class Frame(
-        private val root: ViewGroup, private val bitmap: Bitmap, area: Rect,
-        private val viewport: Rect, private val clip: Path,
-    ) : Drawable(), View.OnAttachStateChangeListener {
+        private val root: ViewGroup, private val bitmap: Bitmap, private val area: Rect,
+        private val viewport: Rect, clip: Path,
+    ) : View(root.context), View.OnAttachStateChangeListener, ViewTreeObserver.OnPreDrawListener {
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        private val localClip = Path(clip).apply { offset(-area.left.toFloat(), -area.top.toFloat()) }
+        private val destination = Rect(0, 0, area.width(), area.height())
+        private val observer = root.viewTreeObserver
         private val deadline = Runnable { fade() }
         private var animation: ValueAnimator? = null
         private var expected = Bundle()
         private var awaitingRedraw = false
 
-        init { bounds = area }
+        init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
         fun show() {
             root.overlay.add(this)
+            layout(area.left, area.top, area.right, area.bottom)
             root.addOnAttachStateChangeListener(this)
+            observer.addOnPreDrawListener(this)
+        }
+
+        override fun onPreDraw(): Boolean {
+            if (LiveBlurEngine.isWorkspaceScrolling || root.width != viewport.width() ||
+                root.height != viewport.height() || !root.isShown) remove()
+            return true
         }
 
         fun canReuse(view: ViewGroup, size: Rect) = root === view && viewport == size
@@ -172,10 +181,10 @@ internal object DesktopAppearanceTransition {
         fun fade() {
             if (active !== this || animation != null) return
             main.removeCallbacks(deadline)
-            animation = ValueAnimator.ofInt(paint.alpha, 0).apply {
+            animation = ValueAnimator.ofFloat(alpha, 0f).apply {
                 duration = 285L
                 interpolator = curve
-                addUpdateListener { alpha = it.animatedValue as Int }
+                addUpdateListener { alpha = it.animatedValue as Float }
                 doOnEnd { remove() }
                 start()
             }
@@ -185,8 +194,9 @@ internal object DesktopAppearanceTransition {
             if (active === this) active = null
             main.removeCallbacks(deadline)
             stopFade()
-            root.overlay.remove(this)
+            if (observer.isAlive) observer.removeOnPreDrawListener(this)
             root.removeOnAttachStateChangeListener(this)
+            root.overlay.remove(this)
         }
 
         private fun stopFade() {
@@ -195,21 +205,16 @@ internal object DesktopAppearanceTransition {
             animation = null
         }
 
-        override fun draw(canvas: Canvas) {
-            if (LiveBlurEngine.isWorkspaceScrolling || root.width != viewport.width() || root.height != viewport.height()) return
+        // The alpha animation can composite this display list without redrawing its bitmap.
+        override fun hasOverlappingRendering() = false
+
+        override fun onDraw(canvas: Canvas) {
             val save = canvas.save()
-            canvas.clipPath(clip)
-            canvas.drawBitmap(bitmap, null, bounds, paint)
+            canvas.clipPath(localClip)
+            canvas.drawBitmap(bitmap, null, destination, paint)
             canvas.restoreToCount(save)
         }
 
-        override fun setAlpha(alpha: Int) {
-            paint.alpha = alpha
-            invalidateSelf()
-        }
-        override fun setColorFilter(colorFilter: ColorFilter?) = Unit
-        @Deprecated("Deprecated in Java")
-        override fun getOpacity() = PixelFormat.TRANSLUCENT
         override fun onViewAttachedToWindow(view: View) = Unit
         override fun onViewDetachedFromWindow(view: View) = remove()
     }

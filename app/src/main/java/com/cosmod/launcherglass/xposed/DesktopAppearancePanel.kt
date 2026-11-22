@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.RenderEffect
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -53,6 +54,7 @@ import com.cosmod.launcherglass.ui.SettingsProvider.Companion as Keys
 import com.cosmod.launcherglass.ui.onextbox.ColorOsDialogButtonMotion
 import com.cosmod.launcherglass.ui.onextbox.ColorOsPopupMaterialView
 import com.cosmod.launcherglass.ui.onextbox.applyOplusPopupBlur
+import com.cosmod.launcherglass.util.GlassBlur
 import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.IconPalette
 import com.cosmod.launcherglass.util.WallpaperHelper
@@ -73,8 +75,9 @@ internal object DesktopAppearancePanel {
     private val enter = PathInterpolator(.25f, .20f, .22f, 1f)
     private val exit = PathInterpolator(.38f, .04f, .34f, 1f)
     private val modeTransition = PathInterpolator(.24f, .06f, .24f, 1f)
-    private val controlSpring = PathInterpolator(.20f, .07f, .28f, 1.25f)
-    private const val MODE_TRANSITION_MS = 340L
+    private val controlSpring = PathInterpolator(.28f, .02f, .42f, 1.23f)
+    private const val MODE_TRANSITION_MS = 365L
+    private const val SLIDER_BLUR_STEPS = 6
 
     class Contract(loader: ClassLoader) {
         private val seekType = loader.loadClass("com.coui.appcompat.seekbar.COUISeekBar")
@@ -349,6 +352,8 @@ internal object DesktopAppearancePanel {
         }
         val darkLogoHeight = dp(18) + dp(36) * 2 + dp(5)
         val themeControls = FrameLayout(host).apply { alpha = 0f }.also(horizontalControls::add)
+        val sliderBlur = arrayOfNulls<RenderEffect>(SLIDER_BLUR_STEPS + 1)
+        val sliderBlurLevel = IntArray(2)
         val colorHeight = dp(36) * 3 + dp(18) + dp(54) + dp(5)
         val themeHeight = dp(41) + dp(4)
         lateinit var fullTheme: AppearanceSegment
@@ -435,7 +440,7 @@ internal object DesktopAppearancePanel {
             val incomingScale = view.scaleX
             val outgoingAlpha = outgoing.alpha
             themeMotion = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 270L
+                duration = 305L
                 interpolator = android.view.animation.LinearInterpolator()
                 addUpdateListener {
                     val time = it.animatedValue as Float
@@ -495,6 +500,19 @@ internal object DesktopAppearancePanel {
                     view.scaleX = amount
                     view.scaleY = amount
                     view.visibility = if (visible || view.alpha > 0f) View.VISIBLE else View.INVISIBLE
+                    if (index < sliderBlurLevel.size) {
+                        val alpha = view.alpha
+                        val level = if (root.isHardwareAccelerated && alpha > 0f && alpha < 1f) {
+                            ((1f - alpha) * SLIDER_BLUR_STEPS).roundToInt()
+                        } else 0
+                        if (sliderBlurLevel[index] != level) {
+                            val effect = if (level == 0) null else sliderBlur[level]
+                                ?: GlassBlur.effect(density * 4f * level / SLIDER_BLUR_STEPS, 100)
+                                    .also { sliderBlur[level] = it }
+                            view.setRenderEffect(effect)
+                            sliderBlurLevel[index] = level
+                        }
+                    }
                 }
             }
             if (!card.isLaidOut || !ValueAnimator.areAnimatorsEnabled()) {
@@ -1036,6 +1054,8 @@ internal object DesktopAppearancePanel {
             pickerMotion?.cancel()
             heightMotion?.removeAllListeners()
             heightMotion?.cancel()
+            colorControls.setRenderEffect(null)
+            darkLogoControls.setRenderEffect(null)
             handler.removeCallbacks(flush)
             flush.run()
         }
