@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 454
+
+- «Оформление» загружает обои высокого разрешения только при открытии пипетки.
+- При смене стиля лаунчер распределяет перерисовку виджетов и иконок по разным кадрам и по возможности переиспользует захваченные статичные обои.
+- При перетаскивании цветового ползунка переход на ручной цвет и новое значение применяются вместе.
+
 ### Сборка 453
 
 - Облегчена смена стилей на рабочем столе. Стекло переиспользует кэш материалов, а затухание кадра обрабатывает аппаратный композитор.
@@ -299,6 +305,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 454
+
+- Appearance loads the high-resolution wallpaper when the eyedropper opens.
+- Style changes spread widget and icon redraws across frames and reuse the static wallpaper capture when available.
+- Dragging a color slider applies the manual color source and its new value together.
 
 ### Build 453
 

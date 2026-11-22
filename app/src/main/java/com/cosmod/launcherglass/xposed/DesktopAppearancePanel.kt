@@ -124,6 +124,8 @@ internal object DesktopAppearancePanel {
         var darken = stored.getInt(DesktopAppearance.DIM_WALLPAPER) == 1
         var large = stored.getInt(DesktopAppearance.LARGE_ICONS) == 1
         var wallpaper: Bitmap? = null
+        var loadingPickerWallpaper = false
+        var closing = false
         var wallpaperTone: IconPalette.WallpaperTone? = null
         val handler = Handler(Looper.getMainLooper())
         val pending = Bundle()
@@ -629,8 +631,14 @@ internal object DesktopAppearancePanel {
             var downX = 0f
             val slop = ViewConfiguration.get(host).scaledTouchSlop
             var dirty = false
+            var changedSource = false
+            fun saveSliderValue(value: Int) {
+                if (changedSource) save(DesktopAppearance.COLOR_SOURCE to ColorSource.MANUAL.ordinal, key to value)
+                else save(key to value)
+                changedSource = false
+            }
             fun finishDrag() {
-                if (dirty) save(key to track.position)
+                if (dirty) saveSliderValue(track.position)
                 dirty = false
             }
             val callback = Proxy.newProxyInstance(native.listenerType.classLoader, arrayOf(native.listenerType)) { proxy, method, args ->
@@ -643,12 +651,12 @@ internal object DesktopAppearancePanel {
                         if (next != track.position) {
                             if (manualColor && profile.colorSource != ColorSource.MANUAL) {
                                 profile = profile.copy(colorSource = ColorSource.MANUAL)
-                                save(DesktopAppearance.COLOR_SOURCE to ColorSource.MANUAL.ordinal)
+                                changedSource = true
                                 updateSourceButtons()
                             }
                             change(next)
                             track.moveTo(next, animate = !dragging || !moved)
-                            if (dragging) dirty = true else save(key to next)
+                            if (dragging) dirty = true else saveSliderValue(next)
                         }
                         null
                     }
@@ -791,75 +799,94 @@ internal object DesktopAppearancePanel {
             followWallpaper.isSelected = profile.colorSource == ColorSource.WALLPAPER
         }
         updateSourceButtons()
-        val pickerButton = appearanceButton(labels.getDrawable(R.drawable.ic_wallpaper_sample), R.string.desktop_appearance_pick_color, filled = false) {
-            if (pickerActive) return@appearanceButton
-            val image = wallpaper?.takeUnless { it.isRecycled }
-            if (image == null) {
-                Toast.makeText(host, labels.getString(R.string.desktop_appearance_wallpaper_unavailable), Toast.LENGTH_SHORT).show()
-            } else {
-                val closeAppearance = backAction
-                lateinit var picker: DesktopWallpaperColorPicker
-                fun transitionPicker(open: Boolean) {
-                    pickerMotion?.removeAllListeners()
-                    pickerMotion?.cancel()
-                    val initial = picker.alpha
-                    val target = if (open) 1f else 0f
-                    fun position(alpha: Float) {
-                        picker.alpha = alpha
-                        card.alpha = 1f - alpha
+        fun openPicker(image: Bitmap) {
+            val closeAppearance = backAction
+            lateinit var picker: DesktopWallpaperColorPicker
+            fun transitionPicker(open: Boolean) {
+                pickerMotion?.removeAllListeners()
+                pickerMotion?.cancel()
+                val initial = picker.alpha
+                val target = if (open) 1f else 0f
+                fun position(alpha: Float) {
+                    picker.alpha = alpha
+                    card.alpha = 1f - alpha
+                }
+                fun finish() {
+                    if (open) {
+                        card.visibility = View.INVISIBLE
+                    } else {
+                        root.removeView(picker)
+                        pickerActive = false
+                        backAction = closeAppearance
                     }
-                    fun finish() {
-                        if (open) {
-                            card.visibility = View.INVISIBLE
+                }
+                if (initial == target || !ValueAnimator.areAnimatorsEnabled()) {
+                    position(target)
+                    finish()
+                    return
+                }
+                pickerMotion = ValueAnimator.ofFloat(initial, target).apply {
+                    duration = 290L
+                    interpolator = modeTransition
+                    addUpdateListener { position(it.animatedValue as Float) }
+                    doOnEnd { finish() }
+                    start()
+                }
+            }
+            fun hidePicker() {
+                if (!picker.isEnabled) return
+                picker.isEnabled = false
+                card.visibility = View.VISIBLE
+                transitionPicker(false)
+            }
+            picker = DesktopWallpaperColorPicker(host, image,
+                labels.getString(R.string.desktop_appearance_pick_color)) { color ->
+                val hsv = FloatArray(3)
+                Color.colorToHSV(color, hsv)
+                val pickedHue = if (hsv[1] == 0f) profile.hue else hsv[0].roundToInt().coerceIn(0, 360)
+                val pickedSaturation = (hsv[1] * 100f).roundToInt()
+                profile = profile.selectMode(Mode.TINTED).copy(
+                    hue = pickedHue, saturation = pickedSaturation, colorSource = ColorSource.MANUAL,
+                )
+                showColor(pickedHue, pickedSaturation)
+                updateSourceButtons()
+                updateTracks()
+                updateSamples()
+                updateLayout()
+                save(DesktopAppearance.MODE to profile.mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal,
+                    DesktopAppearance.COLOR_SOURCE to ColorSource.MANUAL.ordinal,
+                    DesktopAppearance.HUE to pickedHue, DesktopAppearance.SATURATION to pickedSaturation)
+                hidePicker()
+            }
+            pickerActive = true
+            picker.alpha = 0f
+            backAction = ::hidePicker
+            root.addView(picker, FrameLayout.LayoutParams(-1, -1))
+            transitionPicker(true)
+        }
+
+        val pickerButton = appearanceButton(labels.getDrawable(R.drawable.ic_wallpaper_sample),
+            R.string.desktop_appearance_pick_color, filled = false) {
+            if (pickerActive || loadingPickerWallpaper || closing) return@appearanceButton
+            val image = wallpaper?.takeUnless { it.isRecycled }
+            if (image != null) {
+                openPicker(image)
+            } else {
+                loadingPickerWallpaper = true
+                wallpapers.execute {
+                    val captured = runCatching { WallpaperHelper.getPickerWallpaper(app) }.getOrNull()
+                    handler.post {
+                        loadingPickerWallpaper = false
+                        if (!dialog.isShowing || closing || !profile.hasTintControls) return@post
+                        if (captured == null) {
+                            Toast.makeText(host, labels.getString(R.string.desktop_appearance_wallpaper_unavailable),
+                                Toast.LENGTH_SHORT).show()
                         } else {
-                            root.removeView(picker)
-                            pickerActive = false
-                            backAction = closeAppearance
+                            wallpaper = captured
+                            openPicker(captured)
                         }
                     }
-                    if (initial == target || !ValueAnimator.areAnimatorsEnabled()) {
-                        position(target)
-                        finish()
-                        return
-                    }
-                    pickerMotion = ValueAnimator.ofFloat(initial, target).apply {
-                        duration = 290L
-                        interpolator = modeTransition
-                        addUpdateListener { position(it.animatedValue as Float) }
-                        doOnEnd { finish() }
-                        start()
-                    }
                 }
-                fun hidePicker() {
-                    if (!picker.isEnabled) return
-                    picker.isEnabled = false
-                    card.visibility = View.VISIBLE
-                    transitionPicker(false)
-                }
-                picker = DesktopWallpaperColorPicker(host, image,
-                    labels.getString(R.string.desktop_appearance_pick_color)) { color ->
-                    val hsv = FloatArray(3)
-                    Color.colorToHSV(color, hsv)
-                    val pickedHue = if (hsv[1] == 0f) profile.hue else hsv[0].roundToInt().coerceIn(0, 360)
-                    val pickedSaturation = (hsv[1] * 100f).roundToInt()
-                    profile = profile.selectMode(Mode.TINTED).copy(
-                        hue = pickedHue, saturation = pickedSaturation, colorSource = ColorSource.MANUAL,
-                    )
-                    showColor(pickedHue, pickedSaturation)
-                    updateSourceButtons()
-                    updateTracks()
-                    updateSamples()
-                    updateLayout()
-                    save(DesktopAppearance.MODE to profile.mode.ordinal, DesktopAppearance.THEME to profile.theme.ordinal,
-                        DesktopAppearance.COLOR_SOURCE to ColorSource.MANUAL.ordinal,
-                        DesktopAppearance.HUE to pickedHue, DesktopAppearance.SATURATION to pickedSaturation)
-                    hidePicker()
-                }
-                pickerActive = true
-                picker.alpha = 0f
-                backAction = ::hidePicker
-                root.addView(picker, FrameLayout.LayoutParams(-1, -1))
-                transitionPicker(true)
             }
         }
         val colorActions = LinearLayout(host).apply {
@@ -888,7 +915,6 @@ internal object DesktopAppearancePanel {
         })
         root.addView(cardHost, FrameLayout.LayoutParams(-1, -1))
         var motion: ValueAnimator? = null
-        var closing = false
         var swiping = false
         var lowered = false
         var dragOrigin = 0f
@@ -1101,11 +1127,9 @@ internal object DesktopAppearancePanel {
             }
         }
         wallpapers.execute {
-            val image = runCatching { WallpaperHelper.getPickerWallpaper(app) }.getOrNull()
             val tone = IconPalette.wallpaperTone(app)
             handler.post {
                 if (!dialog.isShowing) return@post
-                wallpaper = image
                 wallpaperTone = tone
                 if (profile.colorSource == ColorSource.WALLPAPER && tone != null) {
                     profile = profile.copy(hue = tone.hue, saturation = tone.saturation)

@@ -195,9 +195,17 @@ internal object PhotoWidgetMaterial {
             }
         }
     }
-    fun onSettingsChanged(){
+    internal fun invalidateAppearanceHost(host: View) {
+        content(host).invalidate()
+        host.invalidate()
+    }
+
+    fun onSettingsChanged(deferRedraw: Boolean = false){
         PhotoFade.clear()
-        hosts.keys.weakSnapshot().forEach {host->content(host).invalidate();host.postInvalidateOnAnimation()}
+        if (!deferRedraw) hosts.keys.weakSnapshot().forEach { host ->
+            content(host).invalidate()
+            host.postInvalidateOnAnimation()
+        }
         if(!PrefsHelper.enabled || !PrefsHelper.widgetGlassEnabled){
             launchHost = null
             returns.clear()

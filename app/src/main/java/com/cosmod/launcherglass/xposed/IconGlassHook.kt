@@ -239,36 +239,55 @@ object IconGlassHook {
 
     private val appearanceHandler by lazy { Handler(Looper.getMainLooper()) }
     private var appearanceRefresh = 0
+    private var appearanceWidgetsPending = false
 
-    internal fun invalidateAppearanceIcons(onRedrawn: (() -> Unit)?) {
+    internal fun invalidateAppearanceItems(redrawIcons: Boolean, redrawWidgets: Boolean, onRedrawn: (() -> Unit)?) {
         val refresh = ++appearanceRefresh
         val visible = Rect()
-        val views = registeredViews().mapNotNull { reference ->
-            reference.get()?.takeIf { view ->
-                view.isAttachedToWindow && view.isShown && !NativeSurfaceLive.ownsSource(view) &&
-                    view.getGlobalVisibleRect(visible)
-            }
+        val widgets = if (redrawWidgets || appearanceWidgetsPending) PhotoWidgetMaterial.appearanceHosts().toSet() else emptySet()
+        val views = LinkedHashSet<View>()
+        if (redrawIcons) for (reference in registeredViews()) {
+            val view = reference.get() ?: continue
+            if (view.isAttachedToWindow && view.isShown && !NativeSurfaceLive.ownsSource(view) &&
+                view.getGlobalVisibleRect(visible)) views.add(view)
+        }
+        for (widget in widgets) {
+            if (widget.isAttachedToWindow && widget.isShown && widget.getGlobalVisibleRect(visible)) views.add(widget)
+            else PhotoWidgetMaterial.invalidateAppearanceHost(widget)
+        }
+        fun redraw(view: View) {
+            if (view in widgets) PhotoWidgetMaterial.invalidateAppearanceHost(view) else view.invalidate()
         }
         val root = views.firstOrNull()?.rootView
         if (onRedrawn == null || root == null) {
-            views.forEach(View::invalidate)
+            views.forEach(::redraw)
+            appearanceWidgetsPending = false
             onRedrawn?.invoke()
             return
         }
 
-        // Keep the old image in place while recording the visible icons over several frames.
-        val batchSize = maxOf(4, (views.size + 5) / 6)
+        // AppWidgetHostViews may re-record their RemoteViews even when only the
+        // glass changes. Give those redraws their own frames under the same cover.
+        appearanceWidgetsPending = widgets.isNotEmpty()
+        val queue = views.toList()
+        val budget = maxOf(4, (views.size + 5) / 6)
         var next = 0
         root.postOnAnimation(object : Runnable {
             override fun run() {
                 if (refresh != appearanceRefresh || !PrefsHelper.enabled) return
-                val end = minOf(next + batchSize, views.size)
-                while (next < end) {
-                    val view = views[next++]
-                    if (view.isAttachedToWindow && view.isShown) view.invalidate()
+                var remaining = budget
+                while (next < queue.size && remaining > 0) {
+                    val view = queue[next]
+                    if (view in widgets && remaining < budget) break
+                    next++
+                    if (view.isAttachedToWindow && view.isShown) redraw(view)
+                    remaining -= if (view in widgets) budget else 1
                 }
-                if (next < views.size && root.isAttachedToWindow) root.postOnAnimation(this)
-                else appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
+                if (next < queue.size && root.isAttachedToWindow) root.postOnAnimation(this)
+                else {
+                    appearanceWidgetsPending = false
+                    appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
+                }
             }
         })
     }

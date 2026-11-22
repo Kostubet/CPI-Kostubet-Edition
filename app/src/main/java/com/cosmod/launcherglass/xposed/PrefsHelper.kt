@@ -432,6 +432,10 @@ object PrefsHelper {
             }
             val redrawAppearance = updatingDesktopProfile && !masterChanged && !backendChanged && !performanceChanged
             val redrawIcons = materialChanged || folderChanged || paletteChanged
+            val redrawWidgets = masterChanged || widgetChanged || widgetElementsChanged || photoSourceChanged ||
+                edgeChanged || glassEngineChanged
+            val fade = DesktopAppearanceTransition.finishWhenRedrawn(stored)
+            val batchWidgets = redrawAppearance && redrawWidgets && fade != null
             if (redrawIcons && !redrawAppearance) IconGlassHook.invalidateActiveIcons()
             // Quick appearance profiles use the same native drawables. Preserve
             // their source layers and skip a native model reload when entering or leaving Stock.
@@ -450,7 +454,7 @@ object PrefsHelper {
             if(masterChanged || iconsSectionChanged || folderEnabledChanged || materialChanged || folderChanged)FolderMaterialHook.onSettingsChanged()
             LiftedBackdrop.onSettingsChanged()
             if(masterChanged || iconsSectionChanged || materialChanged || paletteChanged)MultiIconMaterialHook.onSettingsChanged()
-            if(masterChanged || widgetChanged || widgetElementsChanged || photoSourceChanged || edgeChanged || glassEngineChanged)PhotoWidgetMaterial.onSettingsChanged()
+            if (redrawWidgets) PhotoWidgetMaterial.onSettingsChanged(deferRedraw = batchWidgets)
             DockMaterial.onSettingsChanged()
             LauncherIconSize.onSettingsChanged()
             if (previousWallpaperDim != desktopDimWallpaper) DesktopAppearanceToolbar.updateWallpaperShade()
@@ -461,9 +465,9 @@ object PrefsHelper {
             }
             loaded=true
             currentDesktopAppearance = appearance
-            val fade = DesktopAppearanceTransition.finishWhenRedrawn(stored)
-            if (redrawIcons && redrawAppearance) IconGlassHook.invalidateAppearanceIcons(fade)
-            else fade?.invoke()
+            if (redrawAppearance && (redrawIcons || batchWidgets)) {
+                IconGlassHook.invalidateAppearanceItems(redrawIcons, batchWidgets, fade)
+            } else fade?.invoke()
             if (enabled && (appearanceChanged || masterChanged) && appearance.mode != DesktopAppearance.Mode.MANUAL) {
                 NativeFluxIconStyle.request(context)
             }
