@@ -436,7 +436,12 @@ object PrefsHelper {
                 edgeChanged || glassEngineChanged
             val fade = DesktopAppearanceTransition.finishWhenRedrawn(stored)
             val batchWidgets = redrawAppearance && redrawWidgets && fade != null
-            if (redrawIcons && !redrawAppearance) IconGlassHook.invalidateActiveIcons()
+            if (redrawAppearance && (redrawIcons || batchWidgets)) {
+                IconGlassHook.invalidateAppearanceItems(redrawIcons, batchWidgets, fade)
+            } else {
+                if (redrawIcons) IconGlassHook.invalidateActiveIcons()
+                fade?.invoke()
+            }
             // Quick appearance profiles use the same native drawables. Preserve
             // their source layers and skip a native model reload when entering or leaving Stock.
             if (masterChanged || backendChanged || (iconsSectionChanged && !appearanceChanged)) {
@@ -465,9 +470,6 @@ object PrefsHelper {
             }
             loaded=true
             currentDesktopAppearance = appearance
-            if (redrawAppearance && (redrawIcons || batchWidgets)) {
-                IconGlassHook.invalidateAppearanceItems(redrawIcons, batchWidgets, fade)
-            } else fade?.invoke()
             if (enabled && (appearanceChanged || masterChanged) && appearance.mode != DesktopAppearance.Mode.MANUAL) {
                 NativeFluxIconStyle.request(context)
             }

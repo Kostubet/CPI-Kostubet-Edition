@@ -7,6 +7,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
+import android.view.Choreographer
 import android.view.View
 import android.view.ViewTreeObserver
 import com.cosmod.launcherglass.util.*
@@ -125,6 +126,8 @@ object IconGlassHook {
         for(reference in registeredViews())reference.get()?.invalidate()
         liveViews.clear();liveSnapshot=emptyList();liveSnapshotDirty=true
         pendingIconBackdrops.clear()
+        pendingAppearanceItems.clear()
+        appearanceRefresh++
         ForeignDraw.reset()
         IconMaterialRenderer.clear();DynamicIconForeground.clear()
     }
@@ -135,7 +138,7 @@ object IconGlassHook {
         val visible=Rect()
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
-            if(view.rootView!==root || !view.isAttachedToWindow || !view.isShown)continue
+            if(view.rootView!==root || !view.isAttachedToWindow || !view.isShown || isAppearanceRedrawPending(view))continue
             if(LiveBlurEngine.drawerOccludesWorkspace && !isDrawerIcon(view))continue
             val restored=IconMaterialRenderer.restoreDiscardedSamples(view)
             if(recoverIconBackdrop(view,wallpaper,visible) || restored){view.invalidate();recovered++}
@@ -239,55 +242,63 @@ object IconGlassHook {
 
     private val appearanceHandler by lazy { Handler(Looper.getMainLooper()) }
     private var appearanceRefresh = 0
-    private var appearanceWidgetsPending = false
+    private val pendingAppearanceItems = LinkedHashMap<View, Boolean>()
+
+    internal fun isAppearanceRedrawPending(view: View) = pendingAppearanceItems.containsKey(view)
 
     internal fun invalidateAppearanceItems(redrawIcons: Boolean, redrawWidgets: Boolean, onRedrawn: (() -> Unit)?) {
         val refresh = ++appearanceRefresh
         val visible = Rect()
-        val widgets = if (redrawWidgets || appearanceWidgetsPending) PhotoWidgetMaterial.appearanceHosts().toSet() else emptySet()
-        val views = LinkedHashSet<View>()
+        // An interrupted transition may still have items that have never drawn
+        // the previous selection, even if the newest change only affects widgets.
         if (redrawIcons) for (reference in registeredViews()) {
             val view = reference.get() ?: continue
             if (view.isAttachedToWindow && view.isShown && !NativeSurfaceLive.ownsSource(view) &&
-                view.getGlobalVisibleRect(visible)) views.add(view)
+                view.getGlobalVisibleRect(visible)) pendingAppearanceItems.putIfAbsent(view, false)
         }
-        for (widget in widgets) {
-            if (widget.isAttachedToWindow && widget.isShown && widget.getGlobalVisibleRect(visible)) views.add(widget)
-            else PhotoWidgetMaterial.invalidateAppearanceHost(widget)
+        if (redrawWidgets) for (widget in PhotoWidgetMaterial.appearanceHosts()) {
+            if (widget.isAttachedToWindow && widget.isShown && widget.getGlobalVisibleRect(visible)) {
+                pendingAppearanceItems[widget] = true
+            } else {
+                PhotoWidgetMaterial.invalidateAppearanceHost(widget)
+            }
         }
-        fun redraw(view: View) {
-            if (view in widgets) PhotoWidgetMaterial.invalidateAppearanceHost(view) else view.invalidate()
+
+        fun redraw(view: View, widget: Boolean) {
+            if (widget) PhotoWidgetMaterial.invalidateAppearanceHost(view) else view.invalidate()
         }
-        val root = views.firstOrNull()?.rootView
-        if (onRedrawn == null || root == null) {
-            views.forEach(::redraw)
-            appearanceWidgetsPending = false
+        if (onRedrawn == null || pendingAppearanceItems.isEmpty()) {
+            pendingAppearanceItems.forEach(::redraw)
+            pendingAppearanceItems.clear()
             onRedrawn?.invoke()
             return
         }
 
-        // AppWidgetHostViews may re-record their RemoteViews even when only the
-        // glass changes. Give those redraws their own frames under the same cover.
-        appearanceWidgetsPending = widgets.isNotEmpty()
-        val queue = views.toList()
-        val budget = maxOf(4, (views.size + 5) / 6)
-        var next = 0
-        root.postOnAnimation(object : Runnable {
-            override fun run() {
+        // The wallpaper pre-draw pass can run during this transition. Give it
+        // the current set of pending views so it cannot repaint the whole queue.
+        val budget = maxOf(4, (pendingAppearanceItems.size + 5) / 6)
+        val frames = Choreographer.getInstance()
+        frames.postFrameCallback(object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
                 if (refresh != appearanceRefresh || !PrefsHelper.enabled) return
-                var remaining = budget
-                while (next < queue.size && remaining > 0) {
-                    val view = queue[next]
-                    if (view in widgets && remaining < budget) break
-                    next++
-                    if (view.isAttachedToWindow && view.isShown) redraw(view)
-                    remaining -= if (view in widgets) budget else 1
+                android.os.Trace.beginSection("CherryPick.appearanceRedrawBatch")
+                try {
+                    val items = pendingAppearanceItems.iterator()
+                    var remaining = budget
+                    while (items.hasNext() && remaining > 0) {
+                        val (view, widget) = items.next()
+                        if (widget && remaining < budget) break
+                        items.remove()
+                        if (view.isAttachedToWindow) {
+                            redraw(view, widget)
+                            remaining -= if (widget) budget else 1
+                        }
+                    }
+                } finally {
+                    android.os.Trace.endSection()
                 }
-                if (next < queue.size && root.isAttachedToWindow) root.postOnAnimation(this)
-                else {
-                    appearanceWidgetsPending = false
-                    appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
-                }
+                if (pendingAppearanceItems.isNotEmpty()) frames.postFrameCallback(this)
+                else appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
             }
         })
     }
@@ -323,7 +334,7 @@ object IconGlassHook {
         val roots=LinkedHashSet<View>()
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
-            if(beforeDraw!=null && view.rootView!==beforeDraw)continue
+            if (isAppearanceRedrawPending(view) || (beforeDraw != null && view.rootView !== beforeDraw)) continue
             if(NativeSurfaceLive.ownsSource(view) || !view.isAttachedToWindow || !view.isShown)continue
             if(onlyChangedDrawerSamples && LiveBlurEngine.drawerOccludesWorkspace && !isDrawerIcon(view))continue
             world.reset()

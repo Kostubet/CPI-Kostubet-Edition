@@ -567,7 +567,8 @@ object WallpaperHelper {
         val revision = sourceRevision
 
         val liveSerial=livePublishSerial
-        val previousInput = wallpaperInput.takeIf { appearanceReloadAt != 0L }
+        val appearanceReload = appearanceReloadAt != 0L
+        val previousInput = wallpaperInput.takeIf { appearanceReload }
         val scroll = LiveBlurEngine.wallpaperScrollRatio
 
         val ctx = context.applicationContext ?: context
@@ -622,10 +623,16 @@ object WallpaperHelper {
 
             if (published) mainHandler.post {
 
-                if (PrefsHelper.enabled && ((LiveBlurEngine.isResumed && !LiveBlurEngine.isAppLaunchInProgress) || com.cosmod.launcherglass.xposed.NativeSurfaceLive.active)) {
-
-                    LiveBlurEngine.invalidate()
-
+                val streaming = com.cosmod.launcherglass.xposed.NativeSurfaceLive.active
+                if (PrefsHelper.enabled && ((LiveBlurEngine.isResumed && !LiveBlurEngine.isAppLaunchInProgress) || streaming)) {
+                    if (appearanceReload && PrefsHelper.gpuEffects && !streaming &&
+                        !LiveBlurEngine.deferWorkspaceSampling) {
+                        // Refresh the sampler textures after a style change without forcing all
+                        // launcher items to re-record their display lists again.
+                        LiveBlurEngine.onWallpaperFrameReady()
+                    } else {
+                        LiveBlurEngine.invalidate()
+                    }
                 }
 
             }

@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 456
+
+- При переключении стилей «Оформление» распределяет обновление иконок и виджетов по кадрам. Когда новое размытие обоев готово, оно обновляет текстуры стекла без повторной перерисовки всего рабочего стола на GPU.
+
 ### Сборка 455
 
 - При переключении стилей «Оформление» заранее измеряет ползунки и панель режимов. Анимация высоты карточки переиспользует этот расчёт.
@@ -309,6 +313,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 456
+
+- Desktop Appearance redraws icons and widgets across several frames when changing styles. When the new wallpaper blur is ready, GPU rendering updates the glass textures without forcing the entire workspace to redraw.
 
 ### Build 455
 
