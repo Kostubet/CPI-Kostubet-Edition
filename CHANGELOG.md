@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 455
+
+- При переключении стилей «Оформление» заранее измеряет ползунки и панель режимов. Анимация высоты карточки переиспользует этот расчёт.
+
 ### Сборка 454
 
 - «Оформление» загружает обои высокого разрешения только при открытии пипетки.
@@ -305,6 +309,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 455
+
+- Desktop Appearance measures the sliders and theme picker before changing styles. The card reuses that layout throughout its resize animation.
 
 ### Build 454
 

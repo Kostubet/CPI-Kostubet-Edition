@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.RenderEffect
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -180,6 +181,8 @@ internal object DesktopAppearancePanel {
             doOnPreDraw { applyOplusPopupBlur(this, systemDark, density, radius) }
         }
         var heightMotion: ValueAnimator? = null
+        var applyResizeFrame: (() -> Unit)? = null
+        var animatedTopInset = 0
         var pickerMotion: ValueAnimator? = null
         var pickerActive = false
         var pull: (Offset, Boolean) -> Unit = { _, _ -> }
@@ -196,6 +199,7 @@ internal object DesktopAppearancePanel {
             private var velocity: VelocityTracker? = null
 
             override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN && event.y < animatedTopInset) return false
                 when (event.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         velocity?.recycle()
@@ -233,6 +237,11 @@ internal object DesktopAppearancePanel {
                     MeasureSpec.makeMeasureSpec(measuredHeight, MeasureSpec.EXACTLY))
             }
 
+            override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+                super.onLayout(changed, left, top, right, bottom)
+                applyResizeFrame?.invoke()
+            }
+
             private fun pastSlop(delta: Float): Float = delta.sign * (abs(delta) - slop).coerceAtLeast(0f)
 
             private fun pullAt(event: MotionEvent) {
@@ -246,7 +255,7 @@ internal object DesktopAppearancePanel {
                         startY = event.rawY
                         pulling = false
                         verticalPull = false
-                        beganOnHeader = event.y <= dp(54)
+                        beganOnHeader = event.y - animatedTopInset <= dp(54)
                         val position = IntArray(2)
                         beganOnHorizontalControl = horizontalControls.any { control ->
                             if (!control.isShown) return@any false
@@ -458,12 +467,20 @@ internal object DesktopAppearancePanel {
             }
         }
 
+        val modes = LinearLayout(host).apply {
+            isBaselineAligned = false
+            setPadding(0, dp(9), 0, 0)
+        }
+        var displayedColor = 0f
+        var displayedTheme = 0f
+
         fun updateLayout(entering: Boolean = false) {
+            heightMotion?.removeAllListeners()
             heightMotion?.cancel()
             val choices = profile.themeChoices
             updateTheme(choices)
-            val oldColor = colorReveal.layoutParams.height
-            val oldTheme = themeControls.layoutParams.height
+            val oldColor = displayedColor
+            val oldTheme = displayedTheme
             val showColor = profile.hasTintControls
             val showDarkLogo = profile.mode == Mode.DARK
             val targetColor = when {
@@ -487,12 +504,65 @@ internal object DesktopAppearancePanel {
                 view.forceLayout()
                 return true
             }
+            fun setHeights(color: Int, theme: Int) {
+                val colorChanged = setHeight(colorReveal, color)
+                val themeChanged = setHeight(themeControls, theme)
+                if (colorChanged || themeChanged) body.requestLayout()
+            }
+
+            fun clearResizeFrame() {
+                if (applyResizeFrame == null) return
+                applyResizeFrame = null
+                animatedTopInset = 0
+                material.top = 0
+                header.translationY = 0f
+                modes.translationY = 0f
+                colorReveal.translationY = 0f
+                themeControls.translationY = 0f
+                colorReveal.clipBounds = null
+                themeControls.clipBounds = null
+                card.resetPivot()
+            }
+
+            val reserveColor = maxOf(oldColor.roundToInt(), targetColor)
+            val reserveTheme = maxOf(oldTheme.roundToInt(), targetTheme)
+            val reservedHeight = body.height + reserveColor + reserveTheme -
+                colorReveal.height - themeControls.height
+            val bottomMargin = (card.layoutParams as? FrameLayout.LayoutParams)?.bottomMargin ?: 0
+            val availableHeight = cardHost.height - cardHost.paddingBottom - bottomMargin
+            val dimensionsChange = reserveColor != targetColor || reserveTheme != targetTheme ||
+                oldColor != targetColor.toFloat() || oldTheme != targetTheme.toFloat()
+            val transformResize = card.isLaidOut && ValueAnimator.areAnimatorsEnabled() && dimensionsChange &&
+                scroll.scrollY == 0 && reservedHeight <= availableHeight
+
+            if (transformResize) {
+                // Reserve space once so only the material bounds and layer transforms
+                // change on each frame. Keep the scrollable layout on compact screens.
+                setHeights(reserveColor, reserveTheme)
+                applyResizeFrame = {
+                    val themeInset = (reserveTheme - displayedTheme).coerceAtLeast(0f)
+                    val topInset = (reserveColor - displayedColor).coerceAtLeast(0f) + themeInset
+                    animatedTopInset = topInset.roundToInt()
+                    material.top = animatedTopInset.coerceAtMost(material.bottom)
+                    header.translationY = topInset
+                    modes.translationY = topInset
+                    colorReveal.translationY = topInset
+                    themeControls.translationY = themeInset
+                    colorReveal.clipBounds = Rect(0, 0, colorReveal.width, displayedColor.roundToInt())
+                    themeControls.clipBounds = Rect(0, 0, themeControls.width, displayedTheme.roundToInt())
+                    card.pivotY = (card.height + topInset) / 2f
+                }
+            } else {
+                clearResizeFrame()
+            }
+
             fun position(time: Float) {
                 val progress = modeTransition.getInterpolation(time)
                 val bounce = controlSpring.getInterpolation(time)
-                val colorChanged = setHeight(colorReveal, (oldColor + (targetColor - oldColor) * progress).roundToInt())
-                val themeChanged = setHeight(themeControls, (oldTheme + (targetTheme - oldTheme) * progress).roundToInt())
-                if (colorChanged || themeChanged) body.requestLayout()
+                displayedColor = oldColor + (targetColor - oldColor) * progress
+                displayedTheme = oldTheme + (targetTheme - oldTheme) * progress
+                if (transformResize) applyResizeFrame?.invoke()
+                else setHeights(displayedColor.roundToInt(), displayedTheme.roundToInt())
                 targets.forEachIndexed { index, (view, visible) ->
                     val targetAlpha = if (visible) 1f else 0f
                     val targetScale = if (visible) 1f else .76f
@@ -526,12 +596,12 @@ internal object DesktopAppearancePanel {
                 duration = MODE_TRANSITION_MS
                 interpolator = android.view.animation.LinearInterpolator()
                 addUpdateListener { position(it.animatedValue as Float) }
+                doOnEnd {
+                    clearResizeFrame()
+                    setHeights(targetColor, targetTheme)
+                }
                 start()
             }
-        }
-        val modes = LinearLayout(host).apply {
-            isBaselineAligned = false
-            setPadding(0, dp(9), 0, 0)
         }
         for (mode in listOf(Mode.STOCK, Mode.DARK, Mode.CLEAR, Mode.TINTED)) {
             val sample = AppearanceSample(host, mode)
