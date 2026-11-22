@@ -37,17 +37,42 @@ internal class LockscreenMaterial {
     private var saturationFilter:ColorMatrixColorFilter?=null
     private var clockVeil:LinearGradient?=null
     private var clockVeilHeight=0f
-    private var masked:RuntimeShader?=null
-    private var maskWidth=0
-    private var maskHeight=0
-    private var maskCorner=0f
+    private val fallbackMatrix=Matrix()
+    private var fallbackImage:Bitmap?=null
+    private var fallbackShader:BitmapShader?=null
 
-    fun discard(){node.discardDisplayList();node.setRenderEffect(null);current=null}
+    private companion object {
+        // RenderEffect snapshots the shader state on the UI thread. Reuse the
+        // mask program across key caps and cards with the same geometry.
+        private val mask by lazy(LazyThreadSafetyMode.NONE) {
+            RuntimeShader("""
+                uniform float2 size;
+                uniform float radius;
+                half4 main(float2 p) {
+                    float2 q=abs(p-size*.5)-(size*.5-radius);
+                    float d=length(max(q,0.0))+min(max(q.x,q.y),0.0)-radius;
+                    return half4(1.0-smoothstep(-.85,.45,d));
+                }
+            """)
+        }
+        private var maskWidth=0
+        private var maskHeight=0
+        private var maskCorner=0f
+    }
+
+    fun discard(){
+        node.discardDisplayList()
+        node.setRenderEffect(null)
+        current=null
+        fallbackImage=null
+        fallbackShader=null
+    }
 
     fun draw(canvas:Canvas,view:View,surface:Surface,profile:Profile,frame:LockscreenBackdrop.Frame?,
         native:android.graphics.drawable.Drawable?=null,glyphs:Boolean=false,bounds:RectF?=null,amount:Float=1f,
         nativeRadius:Float?=null,replaceBackground:Boolean=false,useNativeMask:Boolean=true,drawRim:Boolean=true,
         exactPath:Path?=null,maskOnly:Boolean=false){
+        if(amount<=0f)return
         val input=frame?.images?.get(profile.sourceRadius(surface)) ?: return
         val image=current?.takeIf {profile.liquid && profile.engine?.blur?.live==false && it.profile==profile &&
             it.image.width==input.width && it.image.height==input.height && !it.image.isRecycled}?.image ?: input
@@ -148,8 +173,13 @@ internal class LockscreenMaterial {
         val filter=BackdropBrightness.filter(if(glyphs)glyphColors else if(neutral)saturationFilter else null,
             profile.backdropBrightness)
         if(!profile.liquid || Build.VERSION.SDK_INT<33 || !lens(image,profile,corner,width,height,glyphs,neutral,filter,clipped)){
-            val shader=GlassGeometry.wallpaperShader(image)
-            shader.setLocalMatrix(Matrix().apply {setRectToRect(source,local,Matrix.ScaleToFit.FILL)})
+            val shader=fallbackShader?.takeIf {fallbackImage===image}
+                ?: GlassGeometry.wallpaperShader(image).also {
+                    fallbackImage=image
+                    fallbackShader=it
+                }
+            fallbackMatrix.setRectToRect(source,local,Matrix.ScaleToFit.FILL)
+            shader.setLocalMatrix(fallbackMatrix)
             paint.shader=shader
             paint.colorFilter=filter
             paint.alpha=(alpha*255).roundToInt()
@@ -173,15 +203,7 @@ internal class LockscreenMaterial {
                 it.corner==corner && it.profile==profile && it.glyphs==glyphs && it.neutral==neutral &&
                 it.clipped==clipped && it.newEngine==newEngine}==true && node.hasDisplayList())return true
         val lens=LiquidGlassShader.shared() ?: return false
-        val mask=masked ?: RuntimeShader("""
-            uniform float2 size;
-            uniform float radius;
-            half4 main(float2 p) {
-                float2 q=abs(p-size*.5)-(size*.5-radius);
-                float d=length(max(q,0.0))+min(max(q.x,q.y),0.0)-radius;
-                return half4(1.0-smoothstep(-.85,.45,d));
-            }
-        """).also {masked=it}
+        val mask=Companion.mask
         // Exact paths already clip the lens output. Keep the native radius
         // for refraction, but leave the inner mask rectangular.
         val maskRadius=if(clipped)0f else corner

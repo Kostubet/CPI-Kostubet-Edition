@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
 import android.view.View
+import android.view.animation.AnimationUtils
 import androidx.core.graphics.ColorUtils
 import com.cosmod.launcherglass.ui.ShadeGlassSettings.Parameter as P
 import com.cosmod.launcherglass.ui.ShadeGlassSettings.Profile
@@ -21,19 +22,26 @@ internal class ShadeNativeBlur(context:Context,loader:ClassLoader,
     private var control=WeakReference<View>(null)
     private var host=WeakReference<View>(null)
     private val visibleBounds=Rect()
+    private var visibilityFrame=Long.MIN_VALUE
+    private var visibleThisFrame=false
 
     fun observe(view:View) {
         if(control.get()===view)return
         control=WeakReference(view)
         host=WeakReference(view.rootView)
+        visibilityFrame=Long.MIN_VALUE
     }
 
     private fun active():Profile? {
         val profile=profile() ?: return null
         val view=control.get() ?: return null
-        if(!view.isShown || view.alpha<=.001f || !view.getGlobalVisibleRect(visibleBounds) ||
-            keyguard?.isKeyguardLocked!=false)return null
-        return profile
+        val frame=AnimationUtils.currentAnimationTimeMillis()
+        if(visibilityFrame!=frame){
+            visibilityFrame=frame
+            visibleThisFrame=view.isShown && view.alpha>.001f && view.getGlobalVisibleRect(visibleBounds) &&
+                keyguard?.isKeyguardLocked==false
+        }
+        return profile.takeIf {visibleThisFrame}
     }
 
     init {

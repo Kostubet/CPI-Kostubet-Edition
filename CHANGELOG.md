@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 459
+
+- Центр управления переиспользует кадр фона ползунков во время открытия. В центре управления и шторке уведомлений отключённые эффекты больше не запускают лишние выборки фона в шейдере.
+- Кнопки PIN используют одну программу маски стекла. При сворачивании уведомлений в капсулу каждая поверхность рисует свой материал без промежуточных слоёв смешивания.
+
 ### Сборка 458
 
 - «Оформление» распределяет тяжёлую перерисовку по кадрам даже при задержке снимка перехода. Переключение на «Авто» с тем же итоговым оформлением обходится без снимка.
@@ -322,6 +327,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 459
+
+- The Control Center reuses the slider backdrop while opening. In both shades, disabled effects skip redundant backdrop samples in the shader.
+- PIN keys share a glass mask program. When notifications collapse into the capsule, each surface draws its own material without intermediate blending layers.
 
 ### Build 458
 

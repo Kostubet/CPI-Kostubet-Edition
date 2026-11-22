@@ -39,7 +39,8 @@ internal class SoftGlassSliderMaterial(context: Context) {
     fun diagnostics() = backdrop.diagnostics()
 
     fun draw(canvas: Canvas, native: Drawable, view: View, profile: Profile,
-        role: Float, radius: Float, dark: Boolean, lightX: Float, lightY: Float) {
+        kind: SoftGlassPanelTargets.Kind, radius: Float, dark: Boolean, lightX: Float, lightY: Float) {
+        val role = kind.role
         if (unavailable || !canvas.isHardwareAccelerated || !view.isAttachedToWindow || !visible(view) ||
             native.bounds.isEmpty || native.alpha <= 0) return
         local.set(native.bounds)
@@ -53,7 +54,8 @@ internal class SoftGlassSliderMaterial(context: Context) {
         screen.offset(location[0] - origin[0], location[1] - origin[1])
         if (screen.isEmpty) return
         val metrics = view.resources.displayMetrics
-        val frame = backdrop.frameFor(view, screen, (112 * metrics.density).toInt(), visible) ?: return
+        val frame = backdrop.frameFor(view, screen, (112 * metrics.density).toInt(), visible,
+            kind == SoftGlassPanelTargets.Kind.SEEK_TRACK) ?: return
         if (frame.image.isRecycled || screen.top < frame.area.top || screen.bottom > frame.area.bottom) return
         val w = local.width()
         val h = local.height()

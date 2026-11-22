@@ -139,7 +139,9 @@ internal object SoftGlassNative {
         var followControlForVolume = true
             private set
         private val lock = Any()
-        private class ShaderState(var applied: Applied?)
+        private class ShaderState(var applied: Applied?) {
+            var everApplied = applied != null
+        }
         private val shaders = WeakHashMap<RuntimeShader, ShaderState>()
         private val effects = WeakHashMap<RenderEffect, EffectState>()
         private val nodes = WeakHashMap<RenderNode, Binding>()
@@ -150,7 +152,7 @@ internal object SoftGlassNative {
             if (Looper.myLooper() != Looper.getMainLooper()) return@SoftGlassPanelTargets
             val view = target.view.get() ?: host(drawable) ?: return@SoftGlassPanelTargets
             val state = state(view, target) ?: return@SoftGlassPanelTargets
-            sliderMaterial?.draw(canvas, drawable, view, state.profile, state.role, target.radius, state.dark, state.x, state.y)
+            sliderMaterial?.draw(canvas, drawable, view, state.profile, target.kind, target.radius, state.dark, state.x, state.y)
         }
         private val sources = LruCache<String, String>(16)
         private val materialBuilders = hashSetOf<Method>()
@@ -367,9 +369,13 @@ internal object SoftGlassNative {
                         val tracked = synchronized(lock) { shaders[shader] } ?: return
                         val target = if (sidebar || Surface.CONTROL !in profiles) null else panelTargets.owner(plate)
                         val state = if (profiles.isEmpty()) null else state(target?.view?.get() ?: host(plate), target)
+                        if (state == null && !tracked.everApplied) return
                         if (tracked.applied != state) {
                             apply(shader, state)
-                            synchronized(lock) { tracked.applied = state }
+                            synchronized(lock) {
+                                tracked.applied = state
+                                tracked.everApplied = true
+                            }
                         }
                         for (field in nodeFields) {
                             val node = field.get(plate) as? RenderNode ?: continue
