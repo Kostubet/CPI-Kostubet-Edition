@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.Trace
 import com.cosmod.launcherglass.ui.GlassDispersionSettings
 import com.cosmod.launcherglass.ui.DesktopAppearance
 import com.cosmod.launcherglass.ui.SettingsDefaults
@@ -15,6 +16,8 @@ import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.IconPalette
 import com.cosmod.launcherglass.util.LiveBlurEngine
 import com.cosmod.launcherglass.util.WallpaperHelper
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 
 object PrefsHelper {
     @Volatile var iconsFeatureEnabled=true
@@ -100,12 +103,15 @@ object PrefsHelper {
     @Volatile var blurLightening = 50
         private set
     @Volatile var blurColorFilter: android.graphics.ColorMatrixColorFilter? = null
+    private val preferenceReader by lazy { Executors.newSingleThreadExecutor() }
+    private val synchronousLoads = AtomicLong()
     private var initialized = false
     @Volatile private var loaded=false
     @Volatile private var currentDesktopAppearance: DesktopAppearance.Profile? = null
     fun usesDesktopAppearance() = enabled && currentDesktopAppearance?.let { it.mode != DesktopAppearance.Mode.MANUAL } == true
     private var followsWallpaper=false
     private var wallpaperTone:IconPalette.WallpaperTone?=null
+    private var wallpaperToneLoaded = false
 
     internal fun backdropFilter(vibrancy:Int,palette:IconPalette)=
         com.cosmod.launcherglass.util.IconBackdropFilter.create(vibrancy,palette)
@@ -118,9 +124,12 @@ object PrefsHelper {
         runCatching {
             val manager=WallpaperManager.getInstance(context)
             manager.addOnColorsChangedListener({ colors,which ->
-                if(enabled && followsWallpaper && (which and WallpaperManager.FLAG_SYSTEM)!=0){
-                    val tone=IconPalette.wallpaperTone(colors)
-                    if(tone!=wallpaperTone)loadPrefs(context,wallpaperOverride=tone)
+                if ((which and WallpaperManager.FLAG_SYSTEM) != 0) {
+                    val tone = IconPalette.wallpaperTone(colors)
+                    val changed = !wallpaperToneLoaded || tone != wallpaperTone
+                    wallpaperTone = tone
+                    wallpaperToneLoaded = true
+                    if (enabled && followsWallpaper && changed) loadPrefs(context)
                 }
             },Handler(Looper.getMainLooper()))
         }
@@ -136,9 +145,30 @@ object PrefsHelper {
 
         try {
             val main = Handler(Looper.getMainLooper())
-            val reload = Runnable { loadPrefs(context) }
+            var requested = false
+            var reading = false
+            val reload = object : Runnable {
+                override fun run() {
+                    if (reading || !requested) return
+                    requested = false
+                    reading = true
+                    val lastSynchronousLoad = synchronousLoads.get()
+                    preferenceReader.execute {
+                        val stored = readStoredPrefs(context)
+                        main.post {
+                            reading = false
+                            // A newer request can supersede the bundle while Binder is reading it.
+                            if (!requested && lastSynchronousLoad == synchronousLoads.get() && stored != null) {
+                                applyPrefs(context, stored)
+                            }
+                            if (requested && !main.hasCallbacks(this)) main.post(this)
+                        }
+                    }
+                }
+            }
             val observer = object : ContentObserver(main) {
                 override fun onChange(selfChange: Boolean, uri: Uri?) {
+                    requested = true
                     if (!main.hasCallbacks(reload)) main.post(reload)
                 }
             }
@@ -156,14 +186,25 @@ object PrefsHelper {
         if (!loaded) loadPrefs(context)
     }
 
-    fun loadPrefs(context: Context, systemDark: Boolean? = null,wallpaperOverride:IconPalette.WallpaperTone?=null) {
+    fun loadPrefs(context: Context, systemDark: Boolean? = null) {
+        synchronousLoads.incrementAndGet()
+        val stored = readStoredPrefs(context) ?: return
+        applyPrefs(context, stored, systemDark)
+    }
+
+    private fun readStoredPrefs(context: Context): Bundle? = runCatching {
+        context.contentResolver.call(SettingsProvider.CONTENT_URI, SettingsProvider.METHOD_GET_ALL, null, null)
+    }.onFailure {
+        GlassLogger.e("PrefsHelper", "Failed to read preferences", it)
+    }.getOrNull()
+
+    private fun applyPrefs(
+        context: Context,
+        stored: Bundle,
+        systemDark: Boolean? = null,
+    ) {
+        Trace.beginSection("CherryPick.applyLauncherPreferences")
         try {
-            val stored = context.contentResolver.call(
-                SettingsProvider.CONTENT_URI,
-                SettingsProvider.METHOD_GET_ALL,
-                null,
-                null
-            ) ?: return
             val actualSystemDark = systemDark ?: IconPalette.isSystemDark(context)
             val appearance = DesktopAppearance.read(stored, actualSystemDark)
             val previousAppearance = currentDesktopAppearance
@@ -213,7 +254,10 @@ object PrefsHelper {
             val iconFollowsWallpaper=newEnabled && colorMode==1 && !clearIcons &&
                 bundle.getBoolean(IconPalette.FOLLOW_WALLPAPER,true)
             followsWallpaper=iconFollowsWallpaper || newEnabled && (WidgetMaterialSettings.followsWallpaper(bundle) || SurfaceTints.followsWallpaper(bundle))
-            wallpaperTone=if(followsWallpaper)wallpaperOverride ?: IconPalette.wallpaperTone(context) else null
+            if (followsWallpaper && !wallpaperToneLoaded) {
+                wallpaperTone = IconPalette.wallpaperTone(context)
+                wallpaperToneLoaded = true
+            }
             val tintChanged=SurfaceTints.update(bundle,wallpaperTone)
             val widgetElementsChanged=WidgetElementColors.update(bundle)
             val newWidgets=WidgetMaterialSettings.read(bundle,wallpaperTone)
@@ -364,29 +408,31 @@ object PrefsHelper {
             gradientOpacity = newGradientOpacity
             val folderChanged=FolderSettings.update(bundle)
             WallpaperHelper.onProcessingSettingsChanged()
-            if(!NeutralBackdrop.onSettingsChanged() && (blurEnabledChanged || blurRadiusChanged ||
+            if (!NeutralBackdrop.onSettingsChanged() && (blurEnabledChanged || blurRadiusChanged ||
                 performanceChanged || blurStyleChanged || qualityChanged || vibrancyChanged ||
                 processingDepthChanged || backendChanged || folderChanged || folderEnabledChanged ||
-                shadowToneChanged || photoSourceChanged || masterChanged || glassEngineChanged))WallpaperHelper.invalidate()
+                shadowToneChanged || photoSourceChanged || masterChanged || glassEngineChanged)) {
+                if (updatingDesktopProfile && !masterChanged && !performanceChanged && !backendChanged) {
+                    WallpaperHelper.invalidateForAppearance()
+                } else {
+                    WallpaperHelper.invalidate()
+                }
+            }
 
             // Publish all new values before invalidating recorded materials.
             // In particular, a contour toggle must rebuild the overlay itself,
             // not only update the wallpaper sampling RenderNode.
             if (materialChanged || folderChanged) {
-                if (updatingDesktopProfile && !masterChanged && !backendChanged && !folderChanged &&
+                if (updatingDesktopProfile && !masterChanged && !backendChanged && !performanceChanged &&
                     !geometryChanged && !edgeChanged && !opticsChanged && !glassEngineChanged) {
                     // The renderer reuses its RenderNodes and switches the keyed material
                     // on draw when the profile only changes color, opacity or style.
                     IconGlassHook.invalidateFolderPreviews()
                 } else IconGlassHook.invalidateShaders()
             }
-            if (materialChanged || folderChanged || paletteChanged) {
-                if (updatingDesktopProfile && !masterChanged && !backendChanged && !performanceChanged) {
-                    IconGlassHook.invalidateAppearanceIcons()
-                } else {
-                    IconGlassHook.invalidateActiveIcons()
-                }
-            }
+            val redrawAppearance = updatingDesktopProfile && !masterChanged && !backendChanged && !performanceChanged
+            val redrawIcons = materialChanged || folderChanged || paletteChanged
+            if (redrawIcons && !redrawAppearance) IconGlassHook.invalidateActiveIcons()
             // Quick appearance profiles use the same native drawables. Preserve
             // their source layers and skip a native model reload when entering or leaving Stock.
             if (masterChanged || backendChanged || (iconsSectionChanged && !appearanceChanged)) {
@@ -415,7 +461,9 @@ object PrefsHelper {
             }
             loaded=true
             currentDesktopAppearance = appearance
-            DesktopAppearanceTransition.onSettingsApplied(stored)
+            val fade = DesktopAppearanceTransition.finishWhenRedrawn(stored)
+            if (redrawIcons && redrawAppearance) IconGlassHook.invalidateAppearanceIcons(fade)
+            else fade?.invoke()
             if (enabled && (appearanceChanged || masterChanged) && appearance.mode != DesktopAppearance.Mode.MANUAL) {
                 NativeFluxIconStyle.request(context)
             }
@@ -426,6 +474,8 @@ object PrefsHelper {
             )
         } catch (t: Throwable) {
             GlassLogger.e("PrefsHelper", "Failed to load preferences", t)
+        } finally {
+            Trace.endSection()
         }
     }
 }

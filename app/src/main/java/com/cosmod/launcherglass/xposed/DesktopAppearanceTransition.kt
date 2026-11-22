@@ -125,13 +125,9 @@ internal object DesktopAppearanceTransition {
         return result
     }
 
-    fun onSettingsApplied(stored: Bundle) {
-        if (Looper.myLooper() != Looper.getMainLooper()) {
-            main.post { onSettingsApplied(stored) }
-            return
-        }
-        val frame = active ?: return
-        if (frame.matches(stored)) frame.fade()
+    fun finishWhenRedrawn(stored: Bundle): (() -> Unit)? {
+        val frame = active?.takeIf { it.matches(stored) } ?: return null
+        return frame.finishWhenRedrawn()
     }
 
     private class Frame(
@@ -142,6 +138,7 @@ internal object DesktopAppearanceTransition {
         private val deadline = Runnable { fade() }
         private var animation: ValueAnimator? = null
         private var expected = Bundle()
+        private var awaitingRedraw = false
 
         init { bounds = area }
 
@@ -156,8 +153,16 @@ internal object DesktopAppearanceTransition {
             // Preserve the currently visible blend and avoid copying a frame that still contains this overlay.
             stopFade()
             expected = change
+            awaitingRedraw = true
             main.removeCallbacks(deadline)
             main.postDelayed(deadline, 240L)
+        }
+
+        fun finishWhenRedrawn(): (() -> Unit)? {
+            if (!awaitingRedraw) return null
+            awaitingRedraw = false
+            val change = expected
+            return { if (expected === change) fade() }
         }
 
         fun matches(stored: Bundle) = expected.keySet().all { key ->

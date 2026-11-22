@@ -182,6 +182,10 @@ object WallpaperHelper {
     private var sourceRevision = 0L
 
     private var cachedRevision = -1L
+    private var appearanceReloadAt = 0L
+    private val reloadAppearanceBackdrop = Runnable {
+        synchronized(this) { appContext?.let(::requestLoad) }
+    }
 
     private var retryAfterMs = 0L
 
@@ -374,9 +378,23 @@ object WallpaperHelper {
         sourceRevision++
 
         retryAfterMs = 0L
+        appearanceReloadAt = 0L
+        mainHandler.removeCallbacks(reloadAppearanceBackdrop)
 
         appContext?.let { requestLoad(it) }
 
+    }
+
+
+
+    @Synchronized
+    fun invalidateForAppearance() {
+        // Keep the currently published blur available during a burst of style changes.
+        sourceRevision++
+        retryAfterMs = 0L
+        appearanceReloadAt = SystemClock.uptimeMillis() + 96L
+        mainHandler.removeCallbacks(reloadAppearanceBackdrop)
+        mainHandler.postAtTime(reloadAppearanceBackdrop, appearanceReloadAt)
     }
 
 
@@ -529,7 +547,7 @@ object WallpaperHelper {
 
         val radius = PrefsHelper.blurRadius.coerceIn(0, 50)
 
-        if (isReloading || SystemClock.uptimeMillis() < retryAfterMs ||
+        if (isReloading || SystemClock.uptimeMillis() < maxOf(retryAfterMs, appearanceReloadAt) ||
 
             (cachedRevision == sourceRevision && cachedBlurRadius == radius && hasBackdropForActiveEffects())) return
 

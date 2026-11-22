@@ -237,15 +237,40 @@ object IconGlassHook {
     fun invalidateFolderPreviews(){revision++}
     fun invalidateShaders(){IconMaterialRenderer.clear();GlyphMaterialRenderer.clear();revision++}
 
-    fun invalidateAppearanceIcons() {
+    private val appearanceHandler by lazy { Handler(Looper.getMainLooper()) }
+    private var appearanceRefresh = 0
+
+    internal fun invalidateAppearanceIcons(onRedrawn: (() -> Unit)?) {
+        val refresh = ++appearanceRefresh
         val visible = Rect()
-        for (reference in registeredViews()) {
-            val view = reference.get() ?: continue
-            if (view.isAttachedToWindow && view.isShown && !NativeSurfaceLive.ownsSource(view) &&
-                view.getGlobalVisibleRect(visible)) {
-                view.invalidate()
+        val views = registeredViews().mapNotNull { reference ->
+            reference.get()?.takeIf { view ->
+                view.isAttachedToWindow && view.isShown && !NativeSurfaceLive.ownsSource(view) &&
+                    view.getGlobalVisibleRect(visible)
             }
         }
+        val root = views.firstOrNull()?.rootView
+        if (onRedrawn == null || root == null) {
+            views.forEach(View::invalidate)
+            onRedrawn?.invoke()
+            return
+        }
+
+        // Keep the old image in place while recording the visible icons over several frames.
+        val batchSize = maxOf(4, (views.size + 5) / 6)
+        var next = 0
+        root.postOnAnimation(object : Runnable {
+            override fun run() {
+                if (refresh != appearanceRefresh || !PrefsHelper.enabled) return
+                val end = minOf(next + batchSize, views.size)
+                while (next < end) {
+                    val view = views[next++]
+                    if (view.isAttachedToWindow && view.isShown) view.invalidate()
+                }
+                if (next < views.size && root.isAttachedToWindow) root.postOnAnimation(this)
+                else appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
+            }
+        })
     }
 
     private data class RepaintStamp(val x:Int,val y:Int,val w:Int,val h:Int,val scroll:Int,val wallpaper:Bitmap?,val revision:Long)

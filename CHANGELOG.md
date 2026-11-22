@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 452
+
+- При смене стиля «Оформление» читает настройки в фоне, распределяет отрисовку иконок по кадрам и объединяет быстрые запросы на пересчёт размытия обоев.
+
 ### Сборка 451
 
 - При быстрых переключениях стилей «Оформление» сохраняет плавную смену стекла на иконках и виджетах с меньшим числом захватов экрана.
@@ -290,6 +294,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 452
+
+- Appearance loads settings off the launcher UI thread, spreads icon redraws across frames, and coalesces wallpaper blur updates when switching styles quickly.
 
 ### Build 451
 
