@@ -38,7 +38,10 @@ internal object DesktopAppearanceTransition {
         val root = host.window.peekDecorView() as? ViewGroup
         if (root == null || !root.isShown || !root.isAttachedToWindow || !root.isHardwareAccelerated ||
             root.width <= 0 || root.height <= 0 || !ValueAnimator.areAnimatorsEnabled() ||
-            copyPending || LiveBlurEngine.isWorkspaceScrolling || change.keySet().none { it in visualKeys }) {
+            copyPending || LiveBlurEngine.isWorkspaceScrolling || change.keySet().none { it in visualKeys } ||
+            change.size() == 1 && change.containsKey(DesktopAppearance.THEME) &&
+            PrefsHelper.isSameAppearanceTheme(change.getInt(DesktopAppearance.THEME),
+                com.cosmod.launcherglass.util.IconPalette.isSystemDark(host))) {
             apply()
             return
         }
@@ -164,7 +167,7 @@ internal object DesktopAppearanceTransition {
             expected = change
             awaitingRedraw = true
             main.removeCallbacks(deadline)
-            main.postDelayed(deadline, 240L)
+            main.postDelayed(deadline, 360L)
         }
 
         fun finishWhenRedrawn(): (() -> Unit)? {

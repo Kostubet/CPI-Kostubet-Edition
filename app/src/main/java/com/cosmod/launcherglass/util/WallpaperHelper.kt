@@ -184,7 +184,9 @@ object WallpaperHelper {
     private var cachedRevision = -1L
     private var appearanceReloadAt = 0L
 
-    private data class WallpaperInputKey(val wallpaperId: Int, val width: Int, val height: Int, val scroll: Float)
+    private data class WallpaperInputKey(
+        val wallpaperId: Int, val width: Int, val height: Int, val scroll: Float, val systemEffect: Boolean,
+    )
     private class WallpaperInput(val key: WallpaperInputKey, bitmap: Bitmap) {
         private val image = WeakReference(bitmap)
         private val generation = bitmap.generationId
@@ -575,13 +577,19 @@ object WallpaperHelper {
 
         loader.execute {
             val systemEffect = hasSystemWallpaperEffect(ctx)
-            val key = if (systemEffect) null else staticWallpaperInputKey(ctx, scroll)
-            val raw = previousInput?.reuse(key) ?: runCatching { loadRawWallpaper(ctx, systemEffect) }
+            val key = staticWallpaperInputKey(ctx, scroll, systemEffect)
+            // ColorOS enables the effect flag for static depth wallpapers too. After
+            // a fresh wallpaper frame or while the desktop is moving, recapture it.
+            val retained = previousInput?.reuse(key)?.takeIf {
+                !systemEffect || it === systemSnapshot && !LiveBlurEngine.hasRecentMotion
+            }
+            val raw = retained ?: runCatching { loadRawWallpaper(ctx, systemEffect) }
                 .onFailure { GlassLogger.limited("WallpaperHelper", "wallpaper-input") { "Wallpaper capture failed: $it" } }
                 .getOrNull()
             // A rapid style change can supersede this request during wallpaper capture.
             val current = synchronized(this) { revision == sourceRevision && liveSerial == livePublishSerial }
-            val candidate = if (raw != null && current) loadAndBlurWallpaper(radius, raw, live = false) else null
+            val candidate = if (raw != null && current) loadAndBlurWallpaper(radius, raw, live = false,
+                reuseStatic = key != null) else null
 
             var published = false
 
@@ -725,15 +733,17 @@ object WallpaperHelper {
 
 
 
-    private fun staticWallpaperInputKey(context: Context, scroll: Float): WallpaperInputKey? = runCatching {
+    private fun staticWallpaperInputKey(
+        context: Context, scroll: Float, systemEffect: Boolean,
+    ): WallpaperInputKey? = runCatching {
         val manager = WallpaperManager.getInstance(context)
         val id = manager.getWallpaperId(WallpaperManager.FLAG_SYSTEM)
         if (id <= 0 || manager.wallpaperInfo != null) return null
         val metrics = context.resources.displayMetrics
-        WallpaperInputKey(id, metrics.widthPixels, metrics.heightPixels, scroll)
+        WallpaperInputKey(id, metrics.widthPixels, metrics.heightPixels, scroll, systemEffect)
     }.getOrNull()
 
-    private fun loadAndBlurWallpaper(radius: Int, rawBitmap: Bitmap, live: Boolean): Backdrops? {
+    private fun loadAndBlurWallpaper(radius: Int, rawBitmap: Bitmap, live: Boolean, reuseStatic: Boolean = false): Backdrops? {
 
         try {
 
@@ -745,7 +755,7 @@ object WallpaperHelper {
             val widgets=runCatching {widgetBackdrop(rawBitmap,PrefsHelper.widgets,heightLimit)}.onFailure {
                 GlassLogger.limited("PhotoWidget","backdrop") {"Widget wallpaper processing failed: $it"}
             }.getOrNull()
-            val neutral=NeutralBackdrop.prepare(rawBitmap,heightLimit)
+            val neutral=NeutralBackdrop.prepare(rawBitmap,heightLimit,reuseStatic)
             if(!PrefsHelper.blurEnabled)return Backdrops(null,null,widgets,null,neutral).takeIf {
                 widgets!=null || neutral.indicator!=null || neutral.dock!=null
             }

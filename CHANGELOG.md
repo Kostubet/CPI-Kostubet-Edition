@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 458
+
+- «Оформление» распределяет тяжёлую перерисовку по кадрам даже при задержке снимка перехода. Переключение на «Авто» с тем же итоговым оформлением обходится без снимка.
+- При смене стиля переиспользуется готовое размытие статичных обоев для дока и индикатора страниц.
+
 ### Сборка 457
 
 - При перекраске совместимых иконок Flux лаунчер переиспользует исходный слой логотипа. Стекло также сохраняет результат проверки сглаживания для каждой формы иконок.
@@ -317,6 +322,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 458
+
+- Appearance spreads expensive redraws across frames even if the transition snapshot is delayed. Selecting Auto with the same effective theme skips the snapshot.
+- Reused the dock and page indicator blur from unchanged static wallpaper when switching appearance.
 
 ### Build 457
 

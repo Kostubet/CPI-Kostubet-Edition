@@ -267,16 +267,15 @@ object IconGlassHook {
         fun redraw(view: View, widget: Boolean) {
             if (widget) PhotoWidgetMaterial.invalidateAppearanceHost(view) else view.invalidate()
         }
-        if (onRedrawn == null || pendingAppearanceItems.isEmpty()) {
-            pendingAppearanceItems.forEach(::redraw)
-            pendingAppearanceItems.clear()
+        if (pendingAppearanceItems.isEmpty()) {
             onRedrawn?.invoke()
             return
         }
 
         // The wallpaper pre-draw pass can run during this transition. Give it
         // the current set of pending views so it cannot repaint the whole queue.
-        val budget = maxOf(4, (pendingAppearanceItems.size + 5) / 6)
+        val refreshRate = pendingAppearanceItems.keys.first().display?.refreshRate ?: 60f
+        val budget = if (refreshRate > 90f) 2 else 3
         val frames = Choreographer.getInstance()
         frames.postFrameCallback(object : Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
@@ -287,18 +286,23 @@ object IconGlassHook {
                     var remaining = budget
                     while (items.hasNext() && remaining > 0) {
                         val (view, widget) = items.next()
-                        if (widget && remaining < budget) break
+                        val name = view.javaClass.name
+                        val cost = if (widget || name.endsWith("FolderIcon") ||
+                            name.endsWith("ShortcutContainer") || name.endsWith("GridRecyclerView")) budget else 1
+                        if (cost > remaining) break
                         items.remove()
                         if (view.isAttachedToWindow) {
                             redraw(view, widget)
-                            remaining -= if (widget) budget else 1
+                            remaining -= cost
                         }
                     }
                 } finally {
                     android.os.Trace.endSection()
                 }
                 if (pendingAppearanceItems.isNotEmpty()) frames.postFrameCallback(this)
-                else appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
+                else if (onRedrawn != null) {
+                    appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
+                }
             }
         })
     }

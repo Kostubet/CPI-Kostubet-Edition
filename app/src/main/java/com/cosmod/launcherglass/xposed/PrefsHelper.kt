@@ -109,6 +109,11 @@ object PrefsHelper {
     @Volatile private var loaded=false
     @Volatile private var currentDesktopAppearance: DesktopAppearance.Profile? = null
     fun usesDesktopAppearance() = enabled && currentDesktopAppearance?.let { it.mode != DesktopAppearance.Mode.MANUAL } == true
+    internal fun isSameAppearanceTheme(theme: Int, systemDark: Boolean): Boolean {
+        val current = currentDesktopAppearance ?: return false
+        val selected = DesktopAppearance.Theme.entries.getOrNull(theme) ?: return false
+        return current.copy(theme = selected).dark(systemDark) == current.dark(systemDark)
+    }
     private var followsWallpaper=false
     private var wallpaperTone:IconPalette.WallpaperTone?=null
     private var wallpaperToneLoaded = false
@@ -435,7 +440,7 @@ object PrefsHelper {
             val redrawWidgets = masterChanged || widgetChanged || widgetElementsChanged || photoSourceChanged ||
                 edgeChanged || glassEngineChanged
             val fade = DesktopAppearanceTransition.finishWhenRedrawn(stored)
-            val batchWidgets = redrawAppearance && redrawWidgets && fade != null
+            val batchWidgets = redrawAppearance && redrawWidgets
             if (redrawAppearance && (redrawIcons || batchWidgets)) {
                 IconGlassHook.invalidateAppearanceItems(redrawIcons, batchWidgets, fade)
             } else {

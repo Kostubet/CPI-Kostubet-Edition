@@ -2,17 +2,24 @@ package com.cosmod.launcherglass.xposed
 
 import android.graphics.Bitmap
 import com.cosmod.launcherglass.util.*
+import java.lang.ref.WeakReference
 import kotlin.math.roundToInt
 
 /** Neutral dock source, produced on the existing wallpaper worker before icon color processing. */
 internal object NeutralBackdrop {
-    data class Images(val dock:Bitmap?=null,val indicator:Bitmap?=null) {
+    data class Images(val dock:Bitmap?=null,val indicator:Bitmap?=null,private val cached:Boolean=false) {
         fun discard() {
+            if(cached)return
             dock?.recycle()
             if(indicator!==dock)indicator?.recycle()
         }
     }
 
+    private data class SurfaceBlur(val mode:Int,val radius:Int,val opacity:Int)
+    private data class StaticInput(val dock:SurfaceBlur,val indicator:SurfaceBlur,val height:Int,val gpu:Boolean)
+    private data class StaticBlur(val source:WeakReference<Bitmap>,val generation:Int,val input:StaticInput,val images:Images)
+
+    @Volatile private var staticBlur:StaticBlur?=null
     @Volatile private var images=Images()
     val image get()=images.dock
     val indicatorImage get()=images.indicator
@@ -24,6 +31,7 @@ internal object NeutralBackdrop {
             KyantGlassEngine.optics(GlassSurface.DOCK).blur.opacity,indicator.style.engineOptics.blur.opacity)
         if(settings==current)return false
         settings=current
+        staticBlur=null
         synchronized(WallpaperHelper){
             WallpaperHelper.invalidate()
             val currentImages=images
@@ -32,25 +40,34 @@ internal object NeutralBackdrop {
         }
         return true
     }
-    fun prepare(raw:Bitmap,heightLimit:Int):Images {
+    fun prepare(raw:Bitmap,heightLimit:Int,reuseStatic:Boolean):Images {
         if(!PrefsHelper.enabled)return Images()
         val indicator=PageIndicatorGlass.profile
-        val height=minOf(raw.height,PerformancePolicy.sourceHeight,heightLimit)
-        val dockEnabled=PrefsHelper.dockGlassEnabled
-        val dockStyle=PrefsHelper.dockStyle
-        val dockBlur=PrefsHelper.dockBlur
-        val dockOpacity=KyantGlassEngine.optics(GlassSurface.DOCK).blur.opacity
-        val indicatorOpacity=indicator.style.engineOptics.blur.opacity
-        fun render(radius:Int,liquid:Boolean,opacity:Int)=runCatching {
-            blur(raw,radius,liquid,height,opacity)
-        }.onFailure {
-            GlassLogger.limited("NeutralBackdrop","wallpaper-processing"){"Neutral glass backdrop unavailable: $it"}
-        }.getOrNull()
-        val preparedIndicator=if(indicator.mode>0)
-            render(indicator.blur,indicator.mode==2,indicatorOpacity) else null
-        val shared=preparedIndicator?.takeIf {indicator.mode==dockStyle && indicator.blur==dockBlur && indicatorOpacity==dockOpacity}
-        val dock=if(dockEnabled)shared ?: render(dockBlur,dockStyle==2,dockOpacity) else null
-        return Images(dock,preparedIndicator)
+        val input=StaticInput(
+            dock=SurfaceBlur(if(PrefsHelper.dockGlassEnabled)PrefsHelper.dockStyle else 0,
+                PrefsHelper.dockBlur,KyantGlassEngine.optics(GlassSurface.DOCK).blur.opacity),
+            indicator=SurfaceBlur(indicator.mode,indicator.blur,indicator.style.engineOptics.blur.opacity),
+            height=minOf(raw.height,PerformancePolicy.sourceHeight,heightLimit),
+            gpu=PrefsHelper.gpuEffects,
+        )
+        val generation=raw.generationId
+        if(reuseStatic)staticBlur?.takeIf {
+            it.source.get()===raw && it.generation==generation && it.input==input
+        }?.let {return it.images}
+        fun render(surface:SurfaceBlur):Bitmap? {
+            if(surface.mode==0)return null
+            return runCatching {
+                blur(raw,surface.radius,surface.mode==2,input.height,surface.opacity,input.gpu)
+            }.onFailure {
+                GlassLogger.limited("NeutralBackdrop","wallpaper-processing"){"Neutral glass backdrop unavailable: $it"}
+            }.getOrNull()
+        }
+        val preparedIndicator=render(input.indicator)
+        val dock=if(input.dock==input.indicator)preparedIndicator else render(input.dock)
+        val complete=(input.dock.mode==0 || dock!=null) && (input.indicator.mode==0 || preparedIndicator!=null)
+        val result=Images(dock,preparedIndicator,cached=reuseStatic && complete)
+        if(reuseStatic && complete)staticBlur=StaticBlur(WeakReference(raw),generation,input,result)
+        return result
     }
 
     fun publish(next:Images) {
@@ -60,10 +77,10 @@ internal object NeutralBackdrop {
         if(next.indicator!==previous.indicator)main.post {PageIndicatorGlass.onBackdropChanged()}
     }
 
-    private fun blur(raw:Bitmap,requested:Int,liquid:Boolean,height:Int,opacity:Int):Bitmap? {
+    private fun blur(raw:Bitmap,requested:Int,liquid:Boolean,height:Int,opacity:Int,gpu:Boolean):Bitmap? {
         val width=(raw.width.toFloat()*height/raw.height).roundToInt().coerceAtLeast(1)
         val radius=requested*(height/800f)*(if(liquid).28f else 1f)
-        if(PrefsHelper.gpuEffects){
+        if(gpu){
             val result=runCatching {GpuWallpaperBlur.blurDock(raw,width,height,radius,opacity)}.getOrNull()
             if(result!=null)return result
         }
