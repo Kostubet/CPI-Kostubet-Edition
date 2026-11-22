@@ -4,6 +4,13 @@
 
 ## Русский
 
+### Сборка 451
+
+- При быстрых переключениях стилей «Оформление» сохраняет плавную смену стекла на иконках и виджетах с меньшим числом захватов экрана.
+- Короткий свайп вниз опускает карточку «Оформление», чтобы открыть обзор рабочего стола. Свайп вверх возвращает её на место, длинный свайп вниз закрывает.
+- Ползунки цвета и панель «Светлые / Тёмные / Авто» плавно увеличиваются с лёгким отскоком.
+- Экран обновлений оформлен на COUI 17. CPI проверяет релизы при открытии приложения и в фоне, а при блокировке уведомлений показывает ссылку на системные настройки.
+
 ### Сборка 450 — релиз 0.3.2
 
 - Добавлена проверка версии Android для диагностики стекла. Пипетка сохраняет резервный источник при отказе в доступе к файлу обоев.
@@ -283,6 +290,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 451
+
+- Rapid style changes in Appearance reuse the active transition frame to cut screen captures while icons and widgets fade between styles.
+- A short downward swipe lowers the Appearance sheet to reveal more of the home screen. Swipe up to raise it again or swipe farther down to close it.
+- The color sliders and Light / Dark / Auto controls grow into place with a gentle bounce.
+- The Updates screen uses COUI 17. CPI checks for releases when you open it and in the background, and links to Android's settings when update notifications are blocked.
 
 ### Build 450 — version 0.3.2
 

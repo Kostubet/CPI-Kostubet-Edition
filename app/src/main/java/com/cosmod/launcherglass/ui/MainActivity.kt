@@ -252,7 +252,6 @@ class MainActivity : AppCompatActivity() {
         prefs = getSharedPreferences(SettingsProvider.PREFS_NAME, MODE_PRIVATE)
         prefs.registerOnSharedPreferenceChangeListener(supportListener)
         SettingsDefaults.initialize(this, prefs)
-        com.cosmod.launcherglass.update.CpiUpdateService.reconcile(this)
         screen = Screen.entries.firstOrNull { it.name == savedInstanceState?.getString("catalogScreen") } ?: if(savedInstanceState?.getString("catalogScreen")=="BA31K_MOTION")Screen.MOTION else Screen.OVERVIEW
         detailParent=Screen.entries.firstOrNull {it.name==savedInstanceState?.getString("catalogParent") && it in rootTabs} ?: Screen.HOME
         for(tab in rootTabs)tabScroll[tab]=savedInstanceState?.getInt("catalogScroll_"+tab.name)
@@ -315,6 +314,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        com.cosmod.launcherglass.update.CpiUpdateService.reconcile(this, foreground = true)
         if(::prefs.isInitialized && number("coloros_feature_background")==2)atmosphere?.start()
         glassPreview?.let(::loadPreviewScene)
         if(::prefs.isInitialized) {

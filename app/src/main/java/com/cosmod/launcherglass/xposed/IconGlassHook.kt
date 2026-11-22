@@ -236,6 +236,18 @@ object IconGlassHook {
     }
     fun invalidateFolderPreviews(){revision++}
     fun invalidateShaders(){IconMaterialRenderer.clear();GlyphMaterialRenderer.clear();revision++}
+
+    fun invalidateAppearanceIcons() {
+        val visible = Rect()
+        for (reference in registeredViews()) {
+            val view = reference.get() ?: continue
+            if (view.isAttachedToWindow && view.isShown && !NativeSurfaceLive.ownsSource(view) &&
+                view.getGlobalVisibleRect(visible)) {
+                view.invalidate()
+            }
+        }
+    }
+
     private data class RepaintStamp(val x:Int,val y:Int,val w:Int,val h:Int,val scroll:Int,val wallpaper:Bitmap?,val revision:Long)
     private val repaintStamps=WeakHashMap<View,RepaintStamp>()
     fun onNativeIconReturned(view:View?) {

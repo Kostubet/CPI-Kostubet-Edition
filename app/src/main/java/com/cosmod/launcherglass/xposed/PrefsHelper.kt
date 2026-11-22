@@ -380,8 +380,12 @@ object PrefsHelper {
                     IconGlassHook.invalidateFolderPreviews()
                 } else IconGlassHook.invalidateShaders()
             }
-            if(materialChanged || folderChanged || paletteChanged){
-                IconGlassHook.invalidateActiveIcons()
+            if (materialChanged || folderChanged || paletteChanged) {
+                if (updatingDesktopProfile && !masterChanged && !backendChanged && !performanceChanged) {
+                    IconGlassHook.invalidateAppearanceIcons()
+                } else {
+                    IconGlassHook.invalidateActiveIcons()
+                }
             }
             // Quick appearance profiles use the same native drawables. Preserve
             // their source layers and skip a native model reload when entering or leaving Stock.

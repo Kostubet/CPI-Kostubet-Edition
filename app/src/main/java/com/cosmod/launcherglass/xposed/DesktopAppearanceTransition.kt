@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.os.Bundle
 import android.os.Handler
@@ -43,13 +44,24 @@ internal object DesktopAppearanceTransition {
             apply()
             return
         }
-        val area = Rect(0, 0, root.width, root.height)
-        val clip = itemBounds(root, area)
-        if (clip.isEmpty) {
+        val viewport = Rect(0, 0, root.width, root.height)
+        active?.let { frame ->
+            if (frame.canReuse(root, viewport)) {
+                frame.holdFor(change)
+                apply()
+                return
+            }
+            frame.remove()
+        }
+        val clip = itemBounds(root, viewport)
+        val area = Rect().also { crop ->
+            RectF().also { clip.computeBounds(it, true) }.roundOut(crop)
+        }
+        if (area.isEmpty) {
             apply()
             return
         }
-        val scale = minOf(1f, 800f / area.width(), 1560f / area.height())
+        val scale = minOf(1f, 800f / viewport.width(), 1560f / viewport.height())
         val bitmap = runCatching {
             Bitmap.createBitmap((area.width() * scale).roundToInt().coerceAtLeast(1),
                 (area.height() * scale).roundToInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
@@ -74,9 +86,11 @@ internal object DesktopAppearanceTransition {
                     main.removeCallbacks(timeout)
                     waiting = false
                     if (result == PixelCopy.SUCCESS && root.isShown && root.isAttachedToWindow &&
-                        root.width == area.width() && root.height == area.height()) {
-                        active?.remove()
-                        active = Frame(root, bitmap, area, clip, change).also { it.show() }
+                        root.width == viewport.width() && root.height == viewport.height()) {
+                        val frame = Frame(root, bitmap, area, viewport, clip)
+                        active = frame
+                        frame.show()
+                        frame.holdFor(change)
                     } else bitmap.recycle()
                     apply()
                 }
@@ -122,18 +136,28 @@ internal object DesktopAppearanceTransition {
 
     private class Frame(
         private val root: ViewGroup, private val bitmap: Bitmap, area: Rect,
-        private val clip: Path, private val expected: Bundle,
+        private val viewport: Rect, private val clip: Path,
     ) : Drawable(), View.OnAttachStateChangeListener {
         private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         private val deadline = Runnable { fade() }
         private var animation: ValueAnimator? = null
+        private var expected = Bundle()
 
         init { bounds = area }
 
         fun show() {
             root.overlay.add(this)
             root.addOnAttachStateChangeListener(this)
-            main.postDelayed(deadline, 380L)
+        }
+
+        fun canReuse(view: ViewGroup, size: Rect) = root === view && viewport == size
+
+        fun holdFor(change: Bundle) {
+            // Preserve the currently visible blend and avoid copying a frame that still contains this overlay.
+            stopFade()
+            expected = change
+            main.removeCallbacks(deadline)
+            main.postDelayed(deadline, 240L)
         }
 
         fun matches(stored: Bundle) = expected.keySet().all { key ->
@@ -143,7 +167,7 @@ internal object DesktopAppearanceTransition {
         fun fade() {
             if (active !== this || animation != null) return
             main.removeCallbacks(deadline)
-            animation = ValueAnimator.ofInt(255, 0).apply {
+            animation = ValueAnimator.ofInt(paint.alpha, 0).apply {
                 duration = 285L
                 interpolator = curve
                 addUpdateListener { alpha = it.animatedValue as Int }
@@ -155,14 +179,19 @@ internal object DesktopAppearanceTransition {
         fun remove() {
             if (active === this) active = null
             main.removeCallbacks(deadline)
-            animation?.removeAllListeners()
-            animation?.cancel()
+            stopFade()
             root.overlay.remove(this)
             root.removeOnAttachStateChangeListener(this)
         }
 
+        private fun stopFade() {
+            animation?.removeAllListeners()
+            animation?.cancel()
+            animation = null
+        }
+
         override fun draw(canvas: Canvas) {
-            if (LiveBlurEngine.isWorkspaceScrolling || root.width != bounds.width() || root.height != bounds.height()) return
+            if (LiveBlurEngine.isWorkspaceScrolling || root.width != viewport.width() || root.height != viewport.height()) return
             val save = canvas.save()
             canvas.clipPath(clip)
             canvas.drawBitmap(bitmap, null, bounds, paint)
