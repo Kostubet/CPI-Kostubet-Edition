@@ -535,14 +535,26 @@ object IconGlassHook {
             val bg=XposedHelpers.getObjectField(drawable,"mBgPaint") as? Paint
             val foreground=XposedHelpers.getObjectField(drawable,"mMonoPaint") as? Paint
             if(mono!=null && mask!=null && !mono.isRecycled && !mask.isRecycled){
-                val palette=PrefsHelper.iconPalette
-                val output=Bitmap.createBitmap(mono.width,mono.height,Bitmap.Config.ARGB_8888)
-                val paint=Paint(foreground ?: Paint()).apply {
-                    alpha=255
-                    if(palette.custom || palette.whiteGlyph)colorFilter=palette.filter
+                val palette = PrefsHelper.iconPalette
+                val color = if (palette.custom) palette.background else bg?.color ?: Color.TRANSPARENT
+                val tint = palette.filter.takeIf { palette.custom || palette.whiteGlyph }
+                val density = appContext?.resources?.displayMetrics?.densityDpi
+                if (tint != null && (mono.density == Bitmap.DENSITY_NONE || mono.density == density) &&
+                    foreground?.shader == null && foreground?.xfermode == null &&
+                    foreground?.maskFilter == null) {
+                    // A source-in tint only needs the native logo alpha. Keeping
+                    // the source lets the material cache reuse it across palettes.
+                    val shape = WallpaperHelper.forSoftwareCanvas(mask)
+                    if (shape != null) return ProcessedIcon(mono, shape, color, glyphTint = tint)
                 }
-                Canvas(output).drawBitmap(WallpaperHelper.forCanvas(mono,Canvas(output)),0f,0f,paint)
-                return ProcessedIcon(output,WallpaperHelper.forCanvas(mask,Canvas(output)),if(palette.custom)palette.background else bg?.color ?: Color.TRANSPARENT)
+                val output = Bitmap.createBitmap(mono.width, mono.height, Bitmap.Config.ARGB_8888)
+                val paint = Paint(foreground ?: Paint()).apply {
+                    alpha = 255
+                    if (tint != null) colorFilter = tint
+                }
+                val target = Canvas(output)
+                target.drawBitmap(WallpaperHelper.forCanvas(mono, target), 0f, 0f, paint)
+                return ProcessedIcon(output, WallpaperHelper.forCanvas(mask, target), color)
             }
         }catch(_:Throwable){}
         Oxygen16IconSupport.background(drawable)?.let {return it}
@@ -610,7 +622,8 @@ object IconGlassHook {
             com.cosmod.launcherglass.util.PerformancePolicy.lightDrawer
         IconMaterialRenderer.draw(canvas,bounds,plateMask,parts.glyphBitmap,plateColor,
             plateOpacity*255/100,false,compatible,source,binding,
-            style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height)){target,local,blurred ->
+            style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height),
+            glyphTint=parts.glyphTint){target,local,blurred ->
             if(!blurred){
                 val save=target.saveLayer(RectF(local),null)
                 val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (plateColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
@@ -629,7 +642,7 @@ object IconGlassHook {
         }
     }
     private fun drawIconGlyph(canvas: Canvas, bounds: Rect, parts: ProcessedIcon) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { colorFilter = parts.glyphTint }
         val glyph = WallpaperHelper.forCanvas(parts.glyphBitmap, canvas)
         if (parts.artwork) canvas.drawBitmap(glyph, null, bounds, paint)
         else GlyphMaterialRenderer.draw(canvas, bounds, glyph, paint)
@@ -648,7 +661,10 @@ object IconGlassHook {
             GlassLogger.i("MaterialEngine","No material layers for animation: ${original.javaClass.name}, raw=${raw(original)?.width}")
             return null
         }
-        val parts=if(backgroundOnly)complete.copy(glyphBitmap=Bitmap.createBitmap(complete.glyphBitmap.width,complete.glyphBitmap.height,Bitmap.Config.ARGB_8888))else complete
+        val parts = if (backgroundOnly) complete.copy(
+            glyphBitmap = Bitmap.createBitmap(complete.glyphBitmap.width, complete.glyphBitmap.height, Bitmap.Config.ARGB_8888),
+            glyphTint = null,
+        ) else complete
         val bitmap=raw(original)
         val owner=explicitHost ?: host(original)
         val bounds=Rect(0,0,bitmap?.width ?: 210,bitmap?.height ?: 210)

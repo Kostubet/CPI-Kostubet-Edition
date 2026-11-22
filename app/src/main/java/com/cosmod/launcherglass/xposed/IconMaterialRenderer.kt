@@ -14,7 +14,9 @@ import com.cosmod.launcherglass.util.GlassLogger
 /** UI-thread cache: moving wallpaper changes a shader matrix, not icon layers. */
 object IconMaterialRenderer {
     private data class Key(
-        val mask: Bitmap, val glyph: Bitmap, val width: Int, val height: Int,
+        val mask: Bitmap, val maskGeneration: Int, val glyph: Bitmap, val glyphGeneration: Int,
+        val glyphTint: PorterDuffColorFilter?,
+        val width: Int, val height: Int,
         val color: Int, val opacity: Int, val hideGlyph: Boolean, val blurred: Boolean,
         val gradient: Int, val stroke: Int, val glyphStroke: Int, val glyphStrokeWidth: Int, val glyphStrokeBrightness: Int,
         val depthBits:Int,val depthStage:Int
@@ -435,6 +437,7 @@ object IconMaterialRenderer {
         color: Int, tintAlpha: Int, hideGlyph: Boolean,
         wallpaper: Bitmap?, source: RectF?,binding:Binding?=null,volume:Boolean=true,style:GlassStyle=GlassStyle.icons(),
         displayEdge:Float=binding?.local?.let {minOf(it.width(),it.height())} ?: minOf(bounds.width(),bounds.height()).toFloat(),
+        glyphTint: PorterDuffColorFilter? = null,
         buildOverlay: (Canvas, Rect, Boolean) -> Unit
     ) {
         val width = bounds.width()
@@ -444,7 +447,7 @@ object IconMaterialRenderer {
             canvas.isHardwareAccelerated && android.os.Build.VERSION.SDK_INT >= 33
         val blurred = folderSample || (wallpaper != null && source != null && !style.folderBackdrop)
         val surfaceTint=SurfaceTints.get(style.surfaceScope)
-        val key = Key(mask, glyph, width, height, surfaceTint?.color ?: color,
+        val key = Key(mask, mask.generationId, glyph, glyph.generationId, glyphTint, width, height, surfaceTint?.color ?: color,
             surfaceTint?.let {it.opacity*255/100} ?: tintAlpha, hideGlyph, blurred,
             if(volume)style.volumeOpacity ?: PrefsHelper.gradientOpacity else 0,
             style.rimOpacity ?: if (!hideGlyph && PrefsHelper.iconStroke) PrefsHelper.strokeOpacity else 0,
@@ -471,7 +474,7 @@ object IconMaterialRenderer {
             if(changed && (frame.bitmap==null || remaining==0L)){
                 val bitmap=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
                 val software=wallpaper?.let {com.cosmod.launcherglass.util.WallpaperHelper.forCanvas(it,Canvas(bitmap))}
-                draw(Canvas(bitmap),Rect(0,0,width,height),mask,glyph,color,tintAlpha,hideGlyph,software,footprint,null,volume,style,displayEdge,buildOverlay)
+                draw(Canvas(bitmap),Rect(0,0,width,height),mask,glyph,color,tintAlpha,hideGlyph,software,footprint,null,volume,style,displayEdge,glyphTint,buildOverlay)
                 frame.bitmap=bitmap;frame.wallpaper=wallpaper;frame.source=footprint?.let(::RectF);frame.style=style;frame.finish=opticalKey();frame.clock.record(now,fps)
             }else if(changed)scheduleSampleRefresh(binding?.view,remaining)
             frame.bitmap?.let {canvas.drawBitmap(it,null,bounds,outputPaint)}

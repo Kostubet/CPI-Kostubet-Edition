@@ -8,7 +8,7 @@ import kotlin.math.*
 /** Native Flux alpha geometry, shared and baked once, never on live frames. */
 internal object GlassGeometry {
     private data class ShapeKey(val w:Int,val h:Int,val hash:Long)
-    private class Geometry(val key:ShapeKey,val alpha:ByteArray,val rounding:Float){
+    private class Geometry(val key:ShapeKey,val alpha:ByteArray,val rounding:Float,val antialiased:Boolean){
         // Only the contour rim needs the distance field; material creation
         // with the contour switched off reads alpha and rounding only.
         var depth:FloatArray?=null
@@ -37,8 +37,7 @@ internal object GlassGeometry {
         val height=mask.height
         if(width<3 || height<3)return mask
         // Native anti-aliased coverage is already precise. A second blur softens it into a halo.
-        val partial=shape.alpha.count {val a=it.toInt() and 255;a in 16..239}
-        if(partial>=maxOf(4,min(width,height)/10))return mask
+        if(shape.antialiased)return mask
         val pixels=IntArray(width*height)
         val alpha=shape.alpha
         for(y in 0 until height){
@@ -70,8 +69,10 @@ internal object GlassGeometry {
         if(readable!==mask)readable.recycle()
         val alpha=ByteArray(pixels.size)
         var hash=-3750763034362895579L
+        var partialCoverage = 0
         for(i in pixels.indices){
             val a=pixels[i] ushr 24
+            if (a in 16..239) partialCoverage++
             alpha[i]=a.toByte();hash=(hash xor a.toLong())*1099511628211L
         }
         val key=ShapeKey(w,h,hash)
@@ -90,7 +91,7 @@ internal object GlassGeometry {
         while(inset<edge/2 && (alpha[(top+inset).coerceIn(0,h-1)*w+(left+inset).coerceIn(0,w-1)].toInt() and 255)<128)inset++
         val rounding=(inset/(.29289322f*edge)).coerceIn(0f,.5f)
         com.cosmod.launcherglass.util.GlassLogger.limited("GlassGeometry","nativeMask"){"Native mask ${w}x$h, bounds=$left,$top,$right,$bottom, opticalCorner=$rounding"}
-        return Geometry(key,alpha,rounding).also {
+        return Geometry(key,alpha,rounding,antialiased = partialCoverage >= maxOf(4,min(w,h)/10)).also {
             shapes.put(key,it);nativeMasks[mask]=NativeMask(mask.generationId,it)
         }
     }
