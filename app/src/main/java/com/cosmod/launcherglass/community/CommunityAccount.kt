@@ -69,8 +69,20 @@ internal class CommunityAccount private constructor(context: Context) {
     fun setName(name: String) = api.setName(access(), name)
 
     @Synchronized
-    fun search(query: String, after: CommunityApi.Entry?, mine: Boolean) =
-        api.search(query, after, mine, if (mine) access() else null)
+    fun search(query: String, after: CommunityApi.Entry?, mine: Boolean, favorites: Boolean): CommunityApi.Page {
+        val token = if (mine || favorites) access() else current()?.access
+        return api.search(query, after, mine, favorites, token)
+    }
+
+    @Synchronized
+    fun canPin() = current()?.let { api.canPin(it.access) } ?: false
+
+    @Synchronized
+    fun setPin(id: String, pinned: Boolean) = api.setPin(access(), id, pinned)
+
+    @Synchronized
+    fun setReaction(id: String, reaction: CommunityApi.Reaction, selected: Boolean) =
+        api.setReaction(access(), id, reaction, selected)
 
     fun download(id: String) = api.download(id)
 

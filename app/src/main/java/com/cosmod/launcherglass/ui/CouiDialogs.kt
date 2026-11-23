@@ -64,18 +64,20 @@ internal fun CouiAction(
 internal fun CouiConfirmation(
     show: Boolean,
     title: String,
-    summary: String,
+    summary: String?,
     negativeText: String,
-    positiveText: String,
+    positiveText: String?,
     onDismissRequest: () -> Unit,
     onNegative: () -> Unit,
     onPositive: () -> Unit,
     onDismissFinished: () -> Unit,
     content: (@Composable () -> Unit)?,
+    positiveEnabled: Boolean = true,
+    negativeEnabled: Boolean = true,
 ) {
     if (CouiAppearance.read(LocalContext.current) == CouiAppearance.ORIGINAL) {
         ColorOs17ConfirmDialog(show, title, summary, negativeText, positiveText, onDismissRequest,
-            onNegative, onPositive, onDismissFinished, content)
+            onNegative, onPositive, onDismissFinished, content, positiveEnabled, negativeEnabled)
         return
     }
     WindowDialog(
@@ -88,8 +90,10 @@ internal fun CouiConfirmation(
         customContent = content,
     ) {
         DialogButtonBar(
-            negative = DialogButtonBarAction(negativeText, onClick = onNegative),
-            positive = DialogButtonBarAction(positiveText, recommended = true, onClick = onPositive),
+            negative = DialogButtonBarAction(negativeText, enabled = negativeEnabled, onClick = onNegative),
+            positive = positiveText?.let {
+                DialogButtonBarAction(it, enabled = positiveEnabled, recommended = true, onClick = onPositive)
+            },
         )
     }
 }

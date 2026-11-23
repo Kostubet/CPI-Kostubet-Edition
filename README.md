@@ -58,7 +58,7 @@
 
 ### Каталог конфигов
 
-Откройте **Функции → Каталог конфигов**. Ищите по названию, описанию или нику автора. Нажмите на конфиг, чтобы увидеть его на своих обоях и применить настройки. Для публикации текущих настроек войдите через GitHub и выберите публичный ник CPI. Свои конфиги можно удалить из каталога через «Мои публикации».
+Откройте **Функции → Каталог конфигов**. Ищите по названию, описанию или нику автора. Нажмите на конфиг, чтобы открыть предпросмотр на своих обоях. Поверхности в предпросмотре сгруппированы по типу стекла. Для публикации войдите через GitHub в **О модуле → Аккаунт CPI**, выберите публичный ник и нажмите «+» внизу каталога. Свои конфиги можно удалить из каталога через «Мои публикации». Лайки и избранное привязаны к аккаунту CPI. Их счётчики видны всем.
 
 Для включения каталога в сборке подключите [сервер каталога](supabase/README.md).
 
@@ -125,7 +125,7 @@ On a compatible ColorOS 17 launcher, enter home screen edit mode and tap **Appea
 
 ### Config catalog
 
-Open **Features → Config catalog**. Search by title, description, or the author’s nickname. Open a result to preview it with your wallpaper and apply the settings. To publish your current settings, sign in with GitHub and choose a public CPI nickname. You can remove your configs under “My publications.”
+Open **Features → Config catalog**. Search by title, description, or the author’s nickname. Open a result to preview it with your wallpaper. Preview surfaces are grouped by glass material. To publish, sign in with GitHub under **About → CPI account**, choose a public nickname, and tap “+” at the bottom of the catalog. You can remove your configs under “My publications.” Like and favorite configs with your CPI account. Both counts are public.
 
 To enable the catalog in a build, connect the [catalog backend](supabase/README.md).
 

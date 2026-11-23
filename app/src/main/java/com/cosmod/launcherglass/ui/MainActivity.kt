@@ -32,7 +32,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.res.painterResource
 import com.cosmod.launcherglass.ui.onextbox.ColorOsAppBarBlurView
-import io.github.suqi8.coui.kmp.preference.WindowDropdownPreference
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.CardListGroup
 import io.github.suqi8.coui.kmp.basic.SmallTitle
@@ -47,7 +46,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp as couiDp
 import io.github.suqi8.coui.kmp.basic.HorizontalDivider
-import io.github.suqi8.coui.kmp.basic.DropdownDefaults
 import io.github.suqi8.coui.kmp.theme.defaultTextStyles
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
@@ -74,7 +72,7 @@ class MainActivity : AppCompatActivity() {
     private val previewExecutor = Executors.newSingleThreadExecutor { task -> Thread(task,"CPI-Preview") }
     private var pendingConfigExport:String?=null
     private val communitySignIn = mutableStateOf<CommunityOAuth.Result?>(null)
-    private data class ImportRequest(val anchor:View,val dialog:CouiAnchoredDialog)
+    private data class ImportRequest(val dialog:CouiAnchoredDialog)
     private var pendingConfigImport:ImportRequest?=null
     private val exportSettings = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         val json=pendingConfigExport
@@ -173,6 +171,7 @@ class MainActivity : AppCompatActivity() {
         CAMERA_ZOOM(R.string.camera_zoom_title, R.drawable.ic_cpi_camera, 0x6793F2, R.string.camera_zoom_keywords),
         PERFORMANCE(R.string.ui_performance, R.drawable.ic_catalog_speed, 0x31B881, R.string.ui_catalog_keywords_performance),
         COMMUNITY(R.string.community_title, R.drawable.ic_catalog_folder, 0x498DFF, R.string.community_keywords),
+        COMMUNITY_ACCOUNT(R.string.community_account, R.drawable.ic_cpi_people, 0, 0),
         HAPTIC(R.string.ui_haptic_studio, R.drawable.ic_catalog_motion, 0x926DF5, R.string.ui_haptic_studio_keywords),
         TOOLS(R.string.ui_about_module, R.drawable.ic_cpi_module, 0, 0),
         SETTINGS(R.string.ui_cpi_settings, R.drawable.ic_settings, 0x969AA8, R.string.ui_catalog_keywords_tools),
@@ -334,7 +333,7 @@ class MainActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) {
                 CommunityAccount.get(this@MainActivity).finishGitHubSignIn(callback)
             } ?: return@launch
-            if (screen != Screen.COMMUNITY) openScreen(Screen.COMMUNITY)
+            openCommunityAccount()
             communitySignIn.value = result
         }
     }
@@ -876,6 +875,15 @@ class MainActivity : AppCompatActivity() {
         showPage(1)
     }
 
+    private fun openCommunityAccount() {
+        if (screen == Screen.COMMUNITY_ACCOUNT) return
+        if (screen != Screen.TOOLS) {
+            if (screen in rootTabs) saveTabScroll()
+            screen = Screen.TOOLS
+            showPage()
+        }
+        openScreen(Screen.COMMUNITY_ACCOUNT)
+    }
     private fun captureBackDestination(){
         backDestination?.takeIf {it!==pageLayer}?.let(page::removeView)
         backDestination=pageLayer?.takeIf {canAnimate()}
@@ -1043,6 +1051,8 @@ class MainActivity : AppCompatActivity() {
             Screen.OVERVIEW->buildOverview(body)
             Screen.HOME->buildCatalog(body,scroll,heading,requireNotNull(floatingHeading),headerBlur,layer,navigation)
             Screen.TOOLS->buildModule(body)
+            Screen.COMMUNITY->communityCatalogSection(layer)
+            Screen.COMMUNITY_ACCOUNT->communityAccountSection(body)
             Screen.DEVICE->buildDeviceDetails(body)
             Screen.CONTRIBUTORS->buildContributors(body)
             else->buildFeaturePage(body,screen)
@@ -1089,16 +1099,16 @@ class MainActivity : AppCompatActivity() {
                 .setDuration(if(previous.translationX==0f)365L else 285L).setInterpolator(pageEase)
                 .withEndAction {if(pageLayer!==previous){if(previous===backDestination)previous.visibility=View.INVISIBLE else page.removeView(previous)}}.start()
         }else if(animate && previous!=null){
-            val tabs = screen in rootTabs && previous.tag in rootTabs
+            val slide = (screen in rootTabs && previous.tag in rootTabs) || screen == Screen.COMMUNITY
             val rtl=if(resources.configuration.layoutDirection==View.LAYOUT_DIRECTION_RTL)-1f else 1f
             previous.importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-            val duration = if (tabs) 325L else 380L
-            val offset = (if (tabs) page.width.toFloat() else page.width * .22f) * direction * rtl
+            val duration = if (slide) 325L else 380L
+            val offset = (if (slide) page.width.toFloat() else page.width * .22f) * direction * rtl
             previous.alpha = 1f
-            previous.animate().translationX(if(tabs)-offset else -offset*.24f)
+            previous.animate().translationX(if(slide)-offset else -offset*.24f)
                 .setDuration(duration).setInterpolator(pageEase).start()
             layer.translationX = offset
-            layer.alpha = if(tabs)1f else 0f
+            layer.alpha = if(slide)1f else 0f
             layer.animate().translationX(0f).alpha(1f).setDuration(duration).setInterpolator(pageEase)
                 .withEndAction {
                     if (pageLayer === layer) {
@@ -1540,10 +1550,9 @@ class MainActivity : AppCompatActivity() {
             Screen.CAMERA_ZOOM->buildCameraZoom(body)
             Screen.PERFORMANCE->buildPerformance(body)
             Screen.SETTINGS->buildTools(body)
-            Screen.COMMUNITY->communityCatalogSection(body)
             else->return
         }
-        if(section !in setOf(Screen.SETTINGS,Screen.MOTION,Screen.SHADE,Screen.CAMERA_ZOOM,Screen.COMMUNITY))
+        if(section !in setOf(Screen.SETTINGS,Screen.MOTION,Screen.SHADE,Screen.CAMERA_ZOOM))
             addSavedSettings(common,position=savedPosition)
         if(separated){
             for(tab in listOf(general,colors,body))add(pageBody,tab)
@@ -1862,6 +1871,7 @@ class MainActivity : AppCompatActivity() {
             onEnabled={save(SettingsProvider.KEY_ENABLED,it)},
             onSettings={openScreen(Screen.SETTINGS)},
             onUpdates={startActivity(Intent(this,com.cosmod.launcherglass.update.CpiUpdateActivity::class.java))},
+            onAccount=::openCommunityAccount,
             onContributors={openScreen(Screen.CONTRIBUTORS)},onLink=::openLink)
         body.addView(about,LinearLayout.LayoutParams(-1,-2).apply {marginStart=-dp(16);marginEnd=-dp(16)})
         buildSupport(body)
@@ -2575,14 +2585,33 @@ class MainActivity : AppCompatActivity() {
         accordionCard(body,R.string.ui_page_indicator_glass,indicator)
     }
 
-    private fun communityCatalogSection(body: LinearLayout) {
-        add(body, CouiSlot(this, darkUi, primary) {
+    private fun communityCatalogSection(layer:FrameLayout) {
+        val catalog = CouiSlot(this, darkUi, primary, fill = true) {
             CommunityCatalog(
                 snapshot = { SettingsTransfer.export(prefs) },
                 onPreview = { showConfigPreview(it) },
-                signInResult = communitySignIn.value,
-                onSignInHandled = { communitySignIn.value = null },
+                onAccount = ::openCommunityAccount,
             )
+        }
+        layer.addView(catalog, 1, FrameLayout.LayoutParams(-1, -1).apply {
+            topMargin = topInset + dp(62)
+            bottomMargin = bottomInset
+        })
+        val header = applyHeaderInset
+        applyHeaderInset = { inset ->
+            header?.invoke(inset)
+            catalog.layoutParams = (catalog.layoutParams as FrameLayout.LayoutParams).apply { topMargin = inset + dp(62) }
+        }
+        val bottom = applyBottomInset
+        applyBottomInset = { inset ->
+            bottom?.invoke(inset)
+            catalog.layoutParams = (catalog.layoutParams as FrameLayout.LayoutParams).apply { bottomMargin = inset }
+        }
+    }
+
+    private fun communityAccountSection(body:LinearLayout) {
+        add(body, CouiSlot(this, darkUi, primary) {
+            CommunityAccountScreen(communitySignIn.value) { communitySignIn.value = null }
         })
     }
 
@@ -2610,7 +2639,7 @@ class MainActivity : AppCompatActivity() {
         add(form,CouiSlot(this,darkUi,primary){
             CouiAction(getString(R.string.ui_config_pick_file),primary=true,modifier=Modifier.fillMaxWidth(),
                 onClick={
-                    pendingConfigImport=ImportRequest(anchor,dialog)
+                    pendingConfigImport=ImportRequest(dialog)
                     openConfigPicker {importSettings.launch(arrayOf("application/json","text/plain","application/octet-stream"))}
                 })
         })
@@ -2643,7 +2672,7 @@ class MainActivity : AppCompatActivity() {
                 actionDescription=getString(R.string.ui_config_import_preview),onAction={
                     val data=metadata()
                     runCatching {SettingsTransfer.parseDocument(SettingsTransfer.withMetadata(snapshot,data))}
-                        .onSuccess {document->dialog.close {showConfigPreview(document,anchor,returnToExport={
+                        .onSuccess {document->dialog.close {showConfigPreview(document,returnToExport={
                             showConfigExport(anchor,data,snapshot)
                         })}}
                         .onFailure(::configError)
@@ -2672,56 +2701,24 @@ class MainActivity : AppCompatActivity() {
         dialog.animateWithKeyboard()
     }
 
-    private fun showConfigPreview(document:SettingsTransfer.Document,anchor:View?=null,returnToExport:(()->Unit)?=null){
-        val config=column().apply {setPadding(dp(17),dp(11),dp(17),dp(16))}
-        val body=column()
-        val title=document.metadata.title.ifBlank {getString(R.string.ui_config_legacy_title)}
-        lateinit var dialog:CouiAnchoredDialog
-        fun cancel(){dialog.close {returnToExport?.invoke()}}
-        add(config,CouiSlot(this,darkUi,primary){
-            FloatingDialogHeader(getString(R.string.ui_config_preview_title),ComposeColor(onSurface),onClose=::cancel)
-        },bottom=5)
-        val details=listOf(R.string.ui_config_title to title,R.string.ui_config_description to document.metadata.description,
-            R.string.ui_config_author to document.metadata.author)
-        add(body,card(CouiSlot(this,darkUi,primary){
-            androidx.compose.foundation.layout.Column(Modifier.fillMaxWidth().padding(vertical=4.couiDp)){
-                val colors=io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme
-                details.forEachIndexed {index,(label,value)->
-                    if(index>0)HorizontalDivider()
-                    androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth()
-                        .padding(horizontal=16.couiDp,vertical=12.couiDp),
-                        horizontalArrangement=Arrangement.spacedBy(12.couiDp),
-                        verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){
-                        val heading=getString(label)
-                        val content=value.ifBlank {"—"}
-                        io.github.suqi8.coui.kmp.basic.Text(heading,
-                            modifier=Modifier.weight(.42f),
-                            color=colors.labelSecondary,
-                            style=couiTextStyles.bodyM)
-                        io.github.suqi8.coui.kmp.basic.Text(content,
-                            modifier=Modifier.weight(.58f),
-                            color=ComposeColor(onSurface),
-                            style=couiTextStyles.bodyM,textAlign=androidx.compose.ui.text.style.TextAlign.End)
-                    }
-                }
-            }
-        }),bottom=9)
-        addConfigScenes(body,document)
-        config.addView(ScrollView(this).apply {addView(body)},LinearLayout.LayoutParams(-1,-2,1f))
-        add(config,CouiSlot(this,darkUi,primary){
-            androidx.compose.foundation.layout.Row(horizontalArrangement=Arrangement.spacedBy(8.couiDp)){
-                CouiAction(getString(android.R.string.cancel),primary=false,modifier=Modifier.weight(1f),onClick=::cancel)
-                CouiAction(getString(R.string.ui_config_apply),primary=true,modifier=Modifier.weight(1f),
-                    enabled=returnToExport==null,onClick={dialog.close {applyConfig(document)}})
-            }
-        },top=12)
-        dialog=anchoredDialog(config,anchor,swipeHeader=true)
-        if(returnToExport!=null)dialog.setOnCancelListener {returnToExport()}
+    private fun showConfigPreview(document:SettingsTransfer.Document,returnToExport:(()->Unit)?=null) {
+        val layer = pageLayer ?: return
+        lateinit var host: CouiSlot
+        host = CouiSlot(this, darkUi, primary) {
+            ConfigPreviewCard(
+                document = document,
+                createScenes = { createConfigScenes(document) },
+                onApply = if (returnToExport == null) ({ applyConfig(document) }) else null,
+                onDismissFinished = { applied ->
+                    layer.removeView(host)
+                    if (!applied) returnToExport?.invoke()
+                },
+            )
+        }
+        layer.addView(host, FrameLayout.LayoutParams(0, 0))
     }
 
-
-
-    private fun addConfigScenes(body:LinearLayout,document:SettingsTransfer.Document){
+    private fun createConfigScenes(document:SettingsTransfer.Document): ConfigPreviewScenes {
         val snapshot=Bundle()
         for((key,value) in SettingsTransfer.previewValues(document))when(value){
             is Boolean->snapshot.putBoolean(key,value)
@@ -2735,7 +2732,7 @@ class MainActivity : AppCompatActivity() {
         val widgetNames=NativePreviewScenes.widgetOptions(this)
         val labels=options.map {(screen,widget)->if(widget!=null)widgetNames[widget.ordinal] else getString(screen.title)}
         val preview=GlassPreview(this,darkUi,useDeviceWallpaperColor=false)
-        val note=mutableStateOf<Int?>(R.string.ui_config_loading)
+        val note=mutableStateOf<Int?>(null)
         val sceneStatus=mutableStateOf<Int?>(R.string.ui_config_loading)
         val sceneResults=mutableMapOf<Int,NativePreviewScenes.Scene?>()
         val pending=mutableSetOf<Int>()
@@ -2796,7 +2793,7 @@ class MainActivity : AppCompatActivity() {
                 val photo=if(widget?.family=="photo" && scene==null)
                     com.cosmod.launcherglass.util.PreviewPhotoStore.read(context) else null
                 runOnUiThread {
-                    if(isDestroyed || isFinishing || !body.isAttachedToWindow)return@runOnUiThread
+                    if(isDestroyed || isFinishing || !preview.isAttachedToWindow)return@runOnUiThread
                     pending.remove(index)
                     if(sourceIcons!=null)icons=sourceIcons
                     if(folderScenes!=null)folders=folderScenes
@@ -2813,54 +2810,60 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        val sampleCard=column().apply {setPadding(dp(10),0,dp(10),dp(10))}
-        add(sampleCard,CouiSlot(this,darkUi,primary){
-            val option=remember {mutableIntStateOf(0)}
-            WindowDropdownPreference(labels,option.intValue,labels[option.intValue],
-                dropdownColors=DropdownDefaults.dropdownColors(),maxHeight=260.couiDp,showValue=false,
-                onSelectedIndexChange={index->
-                    option.intValue=index
-                    select(index)
-                })
-        })
         val frame=FrameLayout(this).apply {
             background=panelShape(raised,18)
             addView(preview,FrameLayout.LayoutParams(-1,-1))
             addView(CouiSlot(this@MainActivity,darkUi,primary){
                 sceneStatus.value?.let {label->
-                    io.github.suqi8.coui.kmp.basic.Text(getString(label),
+                    if (label == R.string.ui_config_loading) CommunityLoading(label)
+                    else io.github.suqi8.coui.kmp.basic.Text(getString(label),
                         modifier=Modifier.fillMaxWidth().padding(horizontal=12.couiDp),
                         color=ComposeColor(onSurface),style=couiTextStyles.bodyM,
                         textAlign=androidx.compose.ui.text.style.TextAlign.Center)
                 }
             },FrameLayout.LayoutParams(-1,-2,Gravity.CENTER))
         }
-        sampleCard.addView(frame,LinearLayout.LayoutParams(-1,dp(144)))
-        add(sampleCard,CouiSlot(this,darkUi,primary){
-            note.value?.let {label->
-                io.github.suqi8.coui.kmp.basic.Text(getString(label),modifier=Modifier.padding(top=6.couiDp),
-                    color=io.github.suqi8.coui.kmp.theme.COUITheme.colorScheme.labelSecondary,
-                    style=couiTextStyles.bodyM)
-            }
-        })
-        add(body,CouiSlot(this,darkUi,primary){SmallTitle(getString(R.string.ui_config_local_preview))},bottom=3)
-        add(body,card(sampleCard))
         watchPreviewWallpaper(preview) {frame->
             val hadWallpaper=wallpaper!=null
             wallpaper=frame
             if(hadWallpaper)preview.setWallpaper(frame) else render()
         }
-        body.doOnLayout {
+        frame.doOnLayout {
             previewExecutor.execute {
                 val local=runCatching {com.cosmod.launcherglass.util.PreviewWallpaper.read(context)}.getOrNull()
                 runOnUiThread {
-                    if(isDestroyed || isFinishing || !body.isAttachedToWindow)return@runOnUiThread
+                    if(isDestroyed || isFinishing || !preview.isAttachedToWindow)return@runOnUiThread
                     if(wallpaper==null)wallpaper=local
                     wallpaperReady=true
                     render()
                 }
             }
-            select(0)
+            select(selection)
+        }
+        val materials = options.map { (screen, _) ->
+            when (screen) {
+                Screen.ICONS -> ConfigGlassMaterial.read(snapshot, GlassEngineSettings.ICONS,
+                    snapshot.getInt(SettingsProvider.KEY_BLUR_STYLE) == 1)
+                Screen.FOLDERS -> {
+                    val own = snapshot.getBoolean(FolderSettingsKeys.OWN)
+                    val style = SettingsProvider.KEY_BLUR_STYLE
+                    val source = if (own) GlassEngineSettings.FOLDERS else GlassEngineSettings.ICONS
+                    val liquid = snapshot.getInt(FolderSettingsKeys.key(style), snapshot.getInt(style)) == 1
+                    ConfigGlassMaterial.read(snapshot, source, if (own) liquid else snapshot.getInt(style) == 1)
+                }
+                Screen.PHOTO -> ConfigGlassMaterial.read(snapshot, GlassEngineSettings.WIDGETS,
+                    snapshot.getInt(SettingsProvider.KEY_PHOTO_WIDGET_MATERIAL) == 1)
+                Screen.DOCK -> ConfigGlassMaterial.read(snapshot, GlassEngineSettings.DOCK,
+                    snapshot.getInt(SettingsProvider.KEY_DOCK_STYLE) == 2)
+                Screen.BANNERS -> ConfigGlassMaterial.read(snapshot, GlassEngineSettings.BANNERS)
+                Screen.LIVE -> ConfigGlassMaterial.read(snapshot, GlassEngineSettings.LIVE)
+                Screen.VOLUME -> ConfigGlassMaterial.read(snapshot, GlassEngineSettings.VOLUME,
+                    snapshot.getInt("volume_glass_style") == 1)
+                else -> error("Missing config preview material")
+            }
+        }
+        return ConfigPreviewScenes(frame, labels.zip(materials), note) { index ->
+            if (index != selection) select(index)
         }
     }
 
@@ -2901,7 +2904,7 @@ class MainActivity : AppCompatActivity() {
                 if(isFinishing || isDestroyed)return@runOnUiThread
                 if(request==null)showConfigPreview(document)
                 else if(settingsDialogOwner===request.dialog)
-                    request.dialog.close {showConfigPreview(document,request.anchor)}
+                    request.dialog.close {showConfigPreview(document)}
             }}.onFailure(::configError)
         }
     }

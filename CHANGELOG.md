@@ -4,6 +4,17 @@
 
 ## Русский
 
+### Сборка 465
+
+- Кнопка публикации в каталоге использует круглый «+» со свечением COUI. Форма публикации использует диалог COUI с действиями в нижней панели.
+- Исправлены перепутанные подписи и значки в «Оформлении» рабочего стола, когда лаунчер продолжает работать после обновления CPI.
+
+### Сборка 464
+
+- Аккаунт CPI перенесён в «О модуле». В каталоге появился отдельный поиск COUI и кнопка публикации внизу справа.
+- В диалоге COUI образец показывается над метаданными. Поверхности сгруппированы по типу стекла, а для загрузки используется круговой индикатор COUI.
+- Добавлены лайки, избранное с публичными счётчиками и закрепление конфигов главным администратором каталога.
+
 ### Сборка 462
 
 - Для входа в аккаунт CPI используется GitHub. Публикации подписываются выбранным в CPI ником.
@@ -340,6 +351,17 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 465
+
+- The catalog uses a round COUI “+” button with a native glow. The publication form uses a COUI dialog with footer actions.
+- Fixed mismatched desktop Appearance labels and icons when the launcher stays open across a CPI update.
+
+### Build 464
+
+- Moved the CPI account to About. The catalog has a dedicated COUI search bar and a bottom-right publish button.
+- The COUI dialog shows the preview above config details, groups surfaces by glass material, and uses the COUI circular loading indicator.
+- Added likes, favorites with public counts, and catalog pinning for the owner.
 
 ### Build 462
 

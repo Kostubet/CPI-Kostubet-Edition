@@ -37,4 +37,17 @@
     <string name="community_name_taken">Этот ник уже занят.</string>
     <string name="community_rate_limited">Достигнут лимит. Попробуй позже.</string>
     <string name="community_missing_entry">Этот конфиг больше недоступен.</string>
+    <string name="community_open_account">Открыть аккаунт CPI</string>
+    <string name="community_glass_frosted">Frosted</string>
+    <string name="community_glass_liquid">Liquid Glass</string>
+    <string name="community_glass_new_engine">Liquid Glass (NewEngine)</string>
+    <string name="community_filter_all">Все</string>
+    <string name="community_filter_favorites">Избранное</string>
+    <string name="community_like">Поставить лайк</string>
+    <string name="community_unlike">Убрать лайк</string>
+    <string name="community_favorite">Добавить в избранное</string>
+    <string name="community_unfavorite">Убрать из избранного</string>
+    <string name="community_pinned">Закреплено</string>
+    <string name="community_pin">Закрепить в каталоге</string>
+    <string name="community_unpin">Открепить из каталога</string>
 </resources>

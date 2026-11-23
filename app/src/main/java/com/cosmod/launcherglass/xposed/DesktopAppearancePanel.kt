@@ -45,8 +45,6 @@ import androidx.compose.ui.unit.IntSize
 import androidx.dynamicanimation.animation.FloatValueHolder
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
-import com.cosmod.launcherglass.BuildConfig
-import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.DesktopAppearance
 import com.cosmod.launcherglass.ui.DesktopAppearance.ColorSource
 import com.cosmod.launcherglass.ui.DesktopAppearance.Mode
@@ -119,7 +117,7 @@ internal object DesktopAppearancePanel {
             override fun onBackPressed() = backAction()
         }
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val labels = host.createPackageContext(BuildConfig.APPLICATION_ID, 0)
+        val resources = DesktopAppearanceResources(host)
         val systemDark = IconPalette.isSystemDark(host)
         var profile = DesktopAppearance.read(stored, systemDark)
         var darken = stored.getInt(DesktopAppearance.DIM_WALLPAPER) == 1
@@ -315,9 +313,9 @@ internal object DesktopAppearancePanel {
             })
         val buttonTint = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_selected), intArrayOf()),
             intArrayOf(accent, foreground))
-        fun appearanceButton(icon: android.graphics.drawable.Drawable?, title: Int, filled: Boolean, action: () -> Unit) =
+        fun appearanceButton(icon: android.graphics.drawable.Drawable?, title: String, filled: Boolean, action: () -> Unit) =
             AppearanceIconButton(host, systemDark, icon, buttonTint, filled).apply {
-                contentDescription = labels.getString(title)
+                contentDescription = resources.text(title)
                 setOnClickListener { action() }
             }
         val body = LinearLayout(host).apply {
@@ -327,12 +325,12 @@ internal object DesktopAppearancePanel {
             setPadding(dp(14), dp(7), dp(14), dp(13))
         }
         val header = FrameLayout(host).apply { clipChildren = false; clipToPadding = false }
-        header.addView(label(labels.getString(R.string.desktop_appearance_title), 16f).apply {
+        header.addView(label(resources.text("title"), 16f).apply {
             typeface = Typeface.DEFAULT_BOLD
             isAccessibilityHeading = true
         }, FrameLayout.LayoutParams(-1, -1).apply { marginStart = dp(52); marginEnd = dp(52) })
         lateinit var shadeButton: View
-        shadeButton = appearanceButton(labels.getDrawable(R.drawable.ic_nav_light), R.string.desktop_appearance_dim_wallpaper, filled = true) {
+        shadeButton = appearanceButton(resources.icon("ic_nav_light"), "dim_wallpaper", filled = true) {
             darken = !darken
             shadeButton.isSelected = darken
             save(DesktopAppearance.DIM_WALLPAPER to if (darken) 1 else 0)
@@ -340,7 +338,7 @@ internal object DesktopAppearancePanel {
         shadeButton.isSelected = darken
         header.addView(shadeButton, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.START or Gravity.CENTER_VERTICAL))
         lateinit var sizeButton: View
-        sizeButton = appearanceButton(COUIIcons.Copy.asLauncherGlyph(host), R.string.desktop_appearance_icon_size_toggle, filled = true) {
+        sizeButton = appearanceButton(COUIIcons.Copy.asLauncherGlyph(host), "icon_size_toggle", filled = true) {
             large = !large
             sizeButton.isSelected = large
             save(DesktopAppearance.LARGE_ICONS to if (large) 1 else 0, delay = 145L)
@@ -605,7 +603,7 @@ internal object DesktopAppearancePanel {
         }
         for (mode in listOf(Mode.STOCK, Mode.DARK, Mode.CLEAR, Mode.TINTED)) {
             val sample = AppearanceSample(host, mode)
-            val caption = label(labels.getString(mode.label), 11.5f).apply {
+            val caption = label(resources.text(mode.name.lowercase()), 11.5f).apply {
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -677,18 +675,18 @@ internal object DesktopAppearancePanel {
             return AppearanceSegment(row, ::highlight)
         }
         val themeOrder = listOf(Theme.LIGHT, Theme.DARK, Theme.AUTO)
-        fullTheme = segment(themeOrder, themeOrder.map { labels.getString(it.label) })
+        fullTheme = segment(themeOrder, themeOrder.map { resources.text(it.name.lowercase()) })
         darkTheme = segment(listOf(Theme.DARK, Theme.AUTO),
-            listOf(labels.getString(R.string.desktop_appearance_dark_always), labels.getString(Theme.AUTO.label)))
+            listOf(resources.text("dark_always"), resources.text("auto")))
         for (segment in listOf(fullTheme, darkTheme)) {
             segment.view.visibility = View.GONE
             themeControls.addView(segment.view, FrameLayout.LayoutParams(-1, dp(41)).apply { topMargin = dp(4) })
         }
 
-        fun slider(title: Int, range: Int, value: Int, key: String, manualColor: Boolean = true,
+        fun slider(title: String, range: Int, value: Int, key: String, manualColor: Boolean = true,
             controls: LinearLayout = colorControls, change: (Int) -> Unit): ColorSlider {
             val input = native.seek.newInstance(host) as View
-            input.contentDescription = labels.getString(title)
+            input.contentDescription = resources.text(title)
             input.alpha = .01f
             native.max.invoke(input, range)
             native.progress.invoke(input, value)
@@ -787,7 +785,7 @@ internal object DesktopAppearancePanel {
                 updateSamples(Mode.TINTED)
             }
         }
-        val hue = slider(R.string.desktop_appearance_hue, 360, profile.hue, DesktopAppearance.HUE) {
+        val hue = slider("hue", 360, profile.hue, DesktopAppearance.HUE) {
             profile = profile.copy(hue = it)
         }
         hue.track.onPositionDrawn = {
@@ -796,16 +794,16 @@ internal object DesktopAppearancePanel {
         }
         val spectrum = intArrayOf(Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED)
         hue.track.setColors(spectrum)
-        saturation = slider(R.string.desktop_appearance_saturation, 100, profile.saturation, DesktopAppearance.SATURATION) {
+        saturation = slider("saturation", 100, profile.saturation, DesktopAppearance.SATURATION) {
             profile = profile.copy(saturation = it)
         }
         saturation.track.onPositionDrawn = {
             displaySaturation = saturation.track.displayedPosition / 100f
             updateTintOnFrame()
         }
-        colorControls.addView(label(labels.getString(R.string.desktop_appearance_tint_transparency), 11f),
+        colorControls.addView(label(resources.text("tint_transparency"), 11f),
             LinearLayout.LayoutParams(-1, dp(18)))
-        transparency = slider(R.string.desktop_appearance_tint_transparency, 100, initialTransparency,
+        transparency = slider("tint_transparency", 100, initialTransparency,
             DesktopAppearance.TINT_TRANSPARENCY, manualColor = false) { profile = profile.copy(tintTransparency = it) }
         transparency.track.onPositionDrawn = {
             displayTransparency = transparency.track.displayedPosition.roundToInt().coerceIn(0, 100)
@@ -814,13 +812,13 @@ internal object DesktopAppearancePanel {
         updateTracks()
         colorReveal.addView(colorControls, FrameLayout.LayoutParams(-1, colorHeight - dp(5)).apply { topMargin = dp(5) })
         body.addView(colorReveal, LinearLayout.LayoutParams(-1, 0))
-        darkLogoControls.addView(label(labels.getString(R.string.desktop_appearance_dark_logo_color), 11f),
+        darkLogoControls.addView(label(resources.text("dark_logo_color"), 11f),
             LinearLayout.LayoutParams(-1, dp(18)))
-        val logoHue = slider(R.string.desktop_appearance_hue, 360, profile.darkLogoHue,
+        val logoHue = slider("hue", 360, profile.darkLogoHue,
             DesktopAppearance.DARK_LOGO_HUE, manualColor = false, controls = darkLogoControls) {
             profile = profile.copy(darkLogoHue = it)
         }
-        val logoSaturation = slider(R.string.desktop_appearance_saturation, 100, profile.darkLogoSaturation,
+        val logoSaturation = slider("saturation", 100, profile.darkLogoSaturation,
             DesktopAppearance.DARK_LOGO_SATURATION, manualColor = false, controls = darkLogoControls) {
             profile = profile.copy(darkLogoSaturation = it)
         }
@@ -858,10 +856,10 @@ internal object DesktopAppearancePanel {
             save(DesktopAppearance.COLOR_SOURCE to source.ordinal,
                 DesktopAppearance.HUE to selectedHue, DesktopAppearance.SATURATION to selectedSaturation)
         }
-        val monochrome = appearanceButton(labels.getDrawable(R.drawable.ic_desktop_monochrome), R.string.desktop_appearance_monochrome, filled = false) {
+        val monochrome = appearanceButton(resources.icon("ic_desktop_monochrome"), "monochrome", filled = false) {
             selectColorSource(ColorSource.MONOCHROME, null)
         }
-        val followWallpaper = appearanceButton(COUIIcons.Image.asLauncherGlyph(host), R.string.desktop_appearance_wallpaper_colors, filled = false) {
+        val followWallpaper = appearanceButton(COUIIcons.Image.asLauncherGlyph(host), "wallpaper_colors", filled = false) {
             selectColorSource(ColorSource.WALLPAPER, wallpaperTone)
         }
         updateSourceButtons = {
@@ -910,7 +908,7 @@ internal object DesktopAppearancePanel {
                 transitionPicker(false)
             }
             picker = DesktopWallpaperColorPicker(host, image,
-                labels.getString(R.string.desktop_appearance_pick_color)) { color ->
+                resources.text("pick_color")) { color ->
                 val hsv = FloatArray(3)
                 Color.colorToHSV(color, hsv)
                 val pickedHue = if (hsv[1] == 0f) profile.hue else hsv[0].roundToInt().coerceIn(0, 360)
@@ -935,8 +933,8 @@ internal object DesktopAppearancePanel {
             transitionPicker(true)
         }
 
-        val pickerButton = appearanceButton(labels.getDrawable(R.drawable.ic_wallpaper_sample),
-            R.string.desktop_appearance_pick_color, filled = false) {
+        val pickerButton = appearanceButton(resources.icon("ic_wallpaper_sample"),
+            "pick_color", filled = false) {
             if (pickerActive || loadingPickerWallpaper || closing) return@appearanceButton
             val image = wallpaper?.takeUnless { it.isRecycled }
             if (image != null) {
@@ -949,7 +947,7 @@ internal object DesktopAppearancePanel {
                         loadingPickerWallpaper = false
                         if (!dialog.isShowing || closing || !profile.hasTintControls) return@post
                         if (captured == null) {
-                            Toast.makeText(host, labels.getString(R.string.desktop_appearance_wallpaper_unavailable),
+                            Toast.makeText(host, resources.text("wallpaper_unavailable"),
                                 Toast.LENGTH_SHORT).show()
                         } else {
                             wallpaper = captured

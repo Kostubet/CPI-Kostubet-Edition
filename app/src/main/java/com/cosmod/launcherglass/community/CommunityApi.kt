@@ -28,8 +28,19 @@ internal class CommunityApi(url: String, private val key: String) {
         }
     }
 
+    enum class Reaction(val value: String) { LIKE("like"), FAVORITE("favorite") }
+
+    data class Reactions(val likes: Long, val favorites: Long, val liked: Boolean, val favorited: Boolean) {
+        companion object {
+            fun read(row: JSONObject) = Reactions(row.getLong("likes"), row.getLong("favorites"),
+                row.getBoolean("liked"), row.getBoolean("favorited"))
+        }
+    }
+
     data class Entry(val id: String, val title: String, val description: String, val author: String,
-        val createdAt: String)
+        val createdAt: String, val pinned: Boolean, val reactions: Reactions?)
+
+    data class Page(val entries: List<Entry>, val supportsReactions: Boolean)
 
     fun githubSignInUrl(verifier: String): String = CommunityOAuth.authorizeUrl(base, verifier)
 
@@ -60,17 +71,42 @@ internal class CommunityApi(url: String, private val key: String) {
         rpc("cpi_set_profile_name", JSONObject().put("nickname", name), access)
     }
 
-    fun search(query: String, after: Entry?, mine: Boolean, access: String?): List<Entry> {
-        val payload = JSONObject().put("search_text", query.take(80)).put("own_only", mine)
+    fun search(query: String, after: Entry?, mine: Boolean, favorites: Boolean, access: String?): Page {
+        val cursor = JSONObject().put("search_text", query.take(80)).put("own_only", mine)
             .put("after_time", after?.createdAt ?: JSONObject.NULL)
             .put("after_id", after?.id ?: JSONObject.NULL)
-        val rows = JSONArray(rpc("cpi_find_configs", payload, access))
+        val payload = JSONObject(cursor.toString()).put("favorites_only", favorites)
+            .put("after_pinned", after?.pinned ?: JSONObject.NULL)
+        val (rows, supportsReactions) = try {
+            JSONArray(rpc("cpi_find_configs_v2", payload, access)) to true
+        } catch (error: Failure) {
+            if (error.code != "PGRST202" || favorites) throw error
+            JSONArray(rpc("cpi_find_configs", cursor, access)) to false
+        }
         require(rows.length() <= PAGE_SIZE)
-        return List(rows.length()) { i ->
+        val entries = List(rows.length()) { i ->
             val row = rows.getJSONObject(i)
             Entry(row.getString("id"), row.getString("title"), row.getString("description"),
-                row.getString("author"), row.getString("created_at"))
+                row.getString("author"), row.getString("created_at"), row.optBoolean("pinned"),
+                if (supportsReactions) Reactions.read(row) else null)
         }
+        return Page(entries, supportsReactions)
+    }
+
+    fun canPin(access: String): Boolean = try {
+        rpc("cpi_can_pin_configs", JSONObject(), access).trim() == "true"
+    } catch (error: Failure) {
+        if (error.code != "PGRST202") throw error
+        false
+    }
+
+    fun setPin(access: String, id: String, pinned: Boolean) {
+        rpc("cpi_set_config_pin", JSONObject().put("config_id", id).put("pinned", pinned), access)
+    }
+
+    fun setReaction(access: String, id: String, reaction: Reaction, selected: Boolean): Reactions {
+        val payload = JSONObject().put("config_id", id).put("reaction", reaction.value).put("selected", selected)
+        return Reactions.read(JSONArray(rpc("cpi_set_config_reaction", payload, access)).getJSONObject(0))
     }
 
     fun download(id: String): SettingsTransfer.Document {

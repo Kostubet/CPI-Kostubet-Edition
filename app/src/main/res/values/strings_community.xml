@@ -37,4 +37,17 @@
     <string name="community_name_taken">That nickname is already taken.</string>
     <string name="community_rate_limited">Limit reached. Try again later.</string>
     <string name="community_missing_entry">This config is no longer available.</string>
+    <string name="community_open_account">Open CPI account</string>
+    <string name="community_glass_frosted">Frosted</string>
+    <string name="community_glass_liquid">Liquid Glass</string>
+    <string name="community_glass_new_engine">Liquid Glass (NewEngine)</string>
+    <string name="community_filter_all">All</string>
+    <string name="community_filter_favorites">Favorites</string>
+    <string name="community_like">Like</string>
+    <string name="community_unlike">Remove like</string>
+    <string name="community_favorite">Add to favorites</string>
+    <string name="community_unfavorite">Remove from favorites</string>
+    <string name="community_pinned">Pinned</string>
+    <string name="community_pin">Pin to catalog</string>
+    <string name="community_unpin">Unpin from catalog</string>
 </resources>

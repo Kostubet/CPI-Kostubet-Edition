@@ -31,11 +31,7 @@ internal object DesktopAppearance {
         TINTED(R.string.desktop_appearance_tinted)
     }
 
-    enum class Theme(val label: Int) {
-        AUTO(R.string.desktop_appearance_auto),
-        LIGHT(R.string.desktop_appearance_light),
-        DARK(R.string.desktop_appearance_dark)
-    }
+    enum class Theme { AUTO, LIGHT, DARK }
 
     enum class ColorSource { MANUAL, MONOCHROME, WALLPAPER }
 
