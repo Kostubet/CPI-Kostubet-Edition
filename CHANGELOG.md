@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 460
+
+- Добавлен каталог конфигов с поиском, предпросмотром и применением настроек. Для публикации нужен аккаунт CPI с подтверждённой почтой и публичным ником.
+- Добавлена серверная часть каталога. Общий каталог доступен после подключения сервера к сборке.
+
 ### Сборка 459
 
 - Центр управления переиспользует кадр фона ползунков во время открытия. В центре управления и шторке уведомлений отключённые эффекты больше не запускают лишние выборки фона в шейдере.
@@ -327,6 +332,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 460
+
+- Added a config catalog with search, previews, and settings import. Publishing requires a CPI account with a verified email and a public nickname.
+- Added the catalog backend. Shared access requires a configured server.
 
 ### Build 459
 

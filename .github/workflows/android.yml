@@ -36,6 +36,9 @@ jobs:
           log-accepted-android-sdk-licenses: 'false'
           packages: 'platforms;android-37.0 build-tools;36.0.0'
       - name: Run Gradle checks
+        env:
+          CPI_COMMUNITY_URL: ${{ vars.CPI_COMMUNITY_URL }}
+          CPI_COMMUNITY_KEY: ${{ vars.CPI_COMMUNITY_KEY }}
         run: ./gradlew --no-daemon --console=plain :app:assembleRelease :app:lintRelease :app:testDebugUnitTest
       - name: Test update feed publisher
         run: python3 -m unittest discover -s tools -p 'test_update_feed.py'

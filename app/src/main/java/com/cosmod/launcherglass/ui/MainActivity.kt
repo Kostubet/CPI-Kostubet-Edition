@@ -165,6 +165,7 @@ class MainActivity : AppCompatActivity() {
         MOTION(R.string.ui_ba31k_title, R.drawable.ic_catalog_motion, 0x55A4ED, R.string.ui_catalog_keywords_motion),
         CAMERA_ZOOM(R.string.camera_zoom_title, R.drawable.ic_cpi_camera, 0x6793F2, R.string.camera_zoom_keywords),
         PERFORMANCE(R.string.ui_performance, R.drawable.ic_catalog_speed, 0x31B881, R.string.ui_catalog_keywords_performance),
+        COMMUNITY(R.string.community_title, R.drawable.ic_catalog_folder, 0x498DFF, R.string.community_keywords),
         HAPTIC(R.string.ui_haptic_studio, R.drawable.ic_catalog_motion, 0x926DF5, R.string.ui_haptic_studio_keywords),
         TOOLS(R.string.ui_about_module, R.drawable.ic_cpi_module, 0, 0),
         SETTINGS(R.string.ui_cpi_settings, R.drawable.ic_settings, 0x969AA8, R.string.ui_catalog_keywords_tools),
@@ -1182,7 +1183,9 @@ class MainActivity : AppCompatActivity() {
                 query.match(index)?.let {item to it}
             }.sortedByDescending {it.second.score}.map {(item,match)->item to match.label}
             val transferMatches=(configRows.keys+R.string.ui_presets).filter {id->
-                translations(id).any {query.score(it)!=null}
+                val labels = translations(id) + if(id==R.string.community_title)
+                    translations(R.string.community_keywords) else emptyList()
+                labels.any {query.score(it)!=null}
             }
             if(transferMatches!=renderedTransfer){
                 transfer.removeAllViews()
@@ -1511,9 +1514,10 @@ class MainActivity : AppCompatActivity() {
             Screen.CAMERA_ZOOM->buildCameraZoom(body)
             Screen.PERFORMANCE->buildPerformance(body)
             Screen.SETTINGS->buildTools(body)
+            Screen.COMMUNITY->communityCatalogSection(body)
             else->return
         }
-        if(section !in setOf(Screen.SETTINGS,Screen.MOTION,Screen.SHADE,Screen.CAMERA_ZOOM))
+        if(section !in setOf(Screen.SETTINGS,Screen.MOTION,Screen.SHADE,Screen.CAMERA_ZOOM,Screen.COMMUNITY))
             addSavedSettings(common,position=savedPosition)
         if(separated){
             for(tab in listOf(general,colors,body))add(pageBody,tab)
@@ -2545,7 +2549,14 @@ class MainActivity : AppCompatActivity() {
         accordionCard(body,R.string.ui_page_indicator_glass,indicator)
     }
 
+    private fun communityCatalogSection(body: LinearLayout) {
+        add(body, CouiSlot(this, darkUi, primary) {
+            CommunityCatalog(snapshot = { SettingsTransfer.export(prefs) }, onPreview = { showConfigPreview(it) })
+        })
+    }
+
     private fun settingsTransferRows()=linkedMapOf(
+        R.string.community_title to preferenceLink(getString(R.string.community_title)) { openScreen(Screen.COMMUNITY) },
         R.string.ui_export_settings to dialogPreference(R.string.ui_export_settings){anchor,held->showConfigExport(anchor,holdTouch=held)},
         R.string.ui_import_settings to dialogPreference(R.string.ui_import_settings,::showConfigImport),
         R.string.ui_share_settings to dialogPreference(R.string.ui_share_settings){anchor,held->showConfigExport(anchor,holdTouch=held)}

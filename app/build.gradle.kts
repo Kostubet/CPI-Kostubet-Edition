@@ -1,6 +1,27 @@
+import java.net.URI
+
 plugins {
     id("com.android.application")
     alias(libs.plugins.kotlin.compose)
+}
+
+val communityUrl = providers.gradleProperty("CPI_COMMUNITY_URL")
+    .orElse(providers.environmentVariable("CPI_COMMUNITY_URL")).getOrElse("").trim()
+val communityKey = providers.gradleProperty("CPI_COMMUNITY_KEY")
+    .orElse(providers.environmentVariable("CPI_COMMUNITY_KEY")).getOrElse("").trim()
+require(communityUrl.isEmpty() == communityKey.isEmpty()) {
+    "Configure both CPI_COMMUNITY_URL and CPI_COMMUNITY_KEY."
+}
+if (communityUrl.isNotEmpty()) {
+    val origin = URI(communityUrl)
+    require(origin.scheme == "https" && origin.host != null && origin.userInfo == null &&
+        origin.path in listOf("", "/") && origin.query == null && origin.fragment == null &&
+        communityUrl.matches(Regex("https://[A-Za-z0-9.:-]+/?"))) {
+        "CPI_COMMUNITY_URL must be an HTTPS origin."
+    }
+    require(communityKey.matches(Regex("sb_publishable_[A-Za-z0-9_-]+"))) {
+        "CPI_COMMUNITY_KEY must be a Supabase publishable key."
+    }
 }
 
 android {
@@ -11,7 +32,9 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 459
+        versionCode = 460
+        buildConfigField("String", "CPI_COMMUNITY_URL", "\"$communityUrl\"")
+        buildConfigField("String", "CPI_COMMUNITY_KEY", "\"$communityKey\"")
         versionName = "0.3.2"
     }
 

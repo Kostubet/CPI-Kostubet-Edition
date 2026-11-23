@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="community_title">Config catalog</string>
+    <string name="community_keywords">Find configs search community public publish presets account</string>
+    <string name="community_unavailable">Catalog unavailable</string>
+    <string name="community_unavailable_hint">This build is not connected to the CPI catalog server.</string>
+    <string name="community_search">Title, description or nickname</string>
+    <string name="community_find">Search</string>
+    <string name="community_publish">Publish a config</string>
+    <string name="community_publish_action">Publish</string>
+    <string name="community_account">CPI account</string>
+    <string name="community_email_hint">Enter your email to sign in or create an account. It will stay private.</string>
+    <string name="community_email">Email</string>
+    <string name="community_send_code">Send a code</string>
+    <string name="community_code_hint">Enter the code sent to %1$s</string>
+    <string name="community_code">Verification code</string>
+    <string name="community_verify">Confirm email</string>
+    <string name="community_resend">Resend code</string>
+    <string name="community_sent">Code sent</string>
+    <string name="community_name">Public nickname</string>
+    <string name="community_name_hint">3–24 characters. Use Latin letters, digits or underscore.</string>
+    <string name="community_save_name">Save nickname</string>
+    <string name="community_saved">Nickname saved</string>
+    <string name="community_sign_out">Sign out</string>
+    <string name="community_sign_in_required">Sign in and choose a nickname to publish.</string>
+    <string name="community_publish_hint">Your current CPI settings will be visible to everyone under @%1$s.</string>
+    <string name="community_config_name">Config title</string>
+    <string name="community_description">Description</string>
+    <string name="community_back_to_catalog">Back to catalog</string>
+    <string name="community_mine">My publications</string>
+    <string name="community_browse_all">All configs</string>
+    <string name="community_remove">Remove publication</string>
+    <string name="community_remove_hint">Remove “%1$s” from the public catalog?</string>
+    <string name="community_remove_action">Remove</string>
+    <string name="community_more">Load more</string>
+    <string name="community_empty">No configs found</string>
+    <string name="community_working">Loading…</string>
+    <string name="community_published">Config published</string>
+    <string name="community_error">The request failed. Try again.</string>
+    <string name="community_invalid_code">The code is invalid or expired. Request a new one.</string>
+    <string name="community_name_taken">That nickname is already taken.</string>
+    <string name="community_rate_limited">Limit reached. Try again later.</string>
+    <string name="community_missing_entry">This config is no longer available.</string>
+</resources>
