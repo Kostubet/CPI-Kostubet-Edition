@@ -9,14 +9,11 @@
     <string name="community_publish">Опубликовать конфиг</string>
     <string name="community_publish_action">Опубликовать</string>
     <string name="community_account">Аккаунт CPI</string>
-    <string name="community_email_hint">Введи почту, чтобы войти или создать аккаунт. Другие пользователи её не увидят.</string>
-    <string name="community_email">Электронная почта</string>
-    <string name="community_send_code">Отправить код</string>
-    <string name="community_code_hint">Введи код из письма на %1$s</string>
-    <string name="community_code">Код подтверждения</string>
-    <string name="community_verify">Подтвердить почту</string>
-    <string name="community_resend">Отправить код ещё раз</string>
-    <string name="community_sent">Код отправлен</string>
+    <string name="community_github_hint">Войди через GitHub, чтобы создать или открыть аккаунт CPI. В каталоге будет виден только выбранный тобой ник CPI.</string>
+    <string name="community_github_sign_in">Войти через GitHub</string>
+    <string name="community_github_connected">Вход через GitHub выполнен</string>
+    <string name="community_github_cancelled">Вход через GitHub отменён.</string>
+    <string name="community_github_failed">Не удалось войти через GitHub. Попробуй ещё раз.</string>
     <string name="community_name">Публичный ник</string>
     <string name="community_name_hint">От 3 до 24 символов. Подойдут латинские буквы, цифры и знак подчёркивания.</string>
     <string name="community_save_name">Сохранить ник</string>
@@ -37,7 +34,6 @@
     <string name="community_working">Загрузка…</string>
     <string name="community_published">Конфиг опубликован</string>
     <string name="community_error">Запрос не удался. Попробуй ещё раз.</string>
-    <string name="community_invalid_code">Код неверный или истёк. Запроси новый.</string>
     <string name="community_name_taken">Этот ник уже занят.</string>
     <string name="community_rate_limited">Достигнут лимит. Попробуй позже.</string>
     <string name="community_missing_entry">Этот конфиг больше недоступен.</string>

@@ -23,6 +23,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.doOnLayout
 import androidx.core.view.doOnPreDraw
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,8 @@ import io.github.suqi8.coui.kmp.basic.DropdownDefaults
 import io.github.suqi8.coui.kmp.theme.defaultTextStyles
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
+import com.cosmod.launcherglass.community.CommunityAccount
+import com.cosmod.launcherglass.community.CommunityOAuth
 import com.cosmod.launcherglass.util.SuUtil
 import com.cosmod.launcherglass.util.LsposedScopeStatus
 import com.cosmod.launcherglass.util.FolderPreviewKind
@@ -57,6 +60,9 @@ import com.cosmod.launcherglass.util.CatalogSearchGeometry
 import com.cosmod.launcherglass.util.IconPalette
 import com.cosmod.launcherglass.util.SurfacePreviewKind
 import com.cosmod.launcherglass.util.WidgetPreviewKind
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
@@ -67,6 +73,7 @@ class MainActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val previewExecutor = Executors.newSingleThreadExecutor { task -> Thread(task,"CPI-Preview") }
     private var pendingConfigExport:String?=null
+    private val communitySignIn = mutableStateOf<CommunityOAuth.Result?>(null)
     private data class ImportRequest(val anchor:View,val dialog:CouiAnchoredDialog)
     private var pendingConfigImport:ImportRequest?=null
     private val exportSettings = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -311,6 +318,25 @@ class MainActivity : AppCompatActivity() {
                 } else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         })
+        handleCommunitySignIn(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleCommunitySignIn(intent)
+    }
+
+    private fun handleCommunitySignIn(intent: Intent) {
+        if (intent.action != Intent.ACTION_VIEW || !CommunityAccount.configured) return
+        val callback = intent.dataString?.let(CommunityOAuth::callback) ?: return
+        intent.data = null
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                CommunityAccount.get(this@MainActivity).finishGitHubSignIn(callback)
+            } ?: return@launch
+            if (screen != Screen.COMMUNITY) openScreen(Screen.COMMUNITY)
+            communitySignIn.value = result
+        }
     }
 
     override fun onResume() {
@@ -2551,7 +2577,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun communityCatalogSection(body: LinearLayout) {
         add(body, CouiSlot(this, darkUi, primary) {
-            CommunityCatalog(snapshot = { SettingsTransfer.export(prefs) }, onPreview = { showConfigPreview(it) })
+            CommunityCatalog(
+                snapshot = { SettingsTransfer.export(prefs) },
+                onPreview = { showConfigPreview(it) },
+                signInResult = communitySignIn.value,
+                onSignInHandled = { communitySignIn.value = null },
+            )
         })
     }
 

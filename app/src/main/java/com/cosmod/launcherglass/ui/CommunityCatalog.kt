@@ -1,12 +1,12 @@
 package com.cosmod.launcherglass.ui
 
-import android.util.Patterns
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -18,12 +18,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.community.CommunityAccount
 import com.cosmod.launcherglass.community.CommunityApi
+import com.cosmod.launcherglass.community.CommunityOAuth
 import io.github.suqi8.coui.kmp.basic.BasicComponent
 import io.github.suqi8.coui.kmp.basic.Card
 import io.github.suqi8.coui.kmp.basic.Text
@@ -34,12 +34,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class CatalogMode { BROWSE, ACCOUNT, VERIFY, PUBLISH }
+private enum class CatalogMode { BROWSE, ACCOUNT, PUBLISH }
 
 @Composable
 internal fun CommunityCatalog(
     snapshot: () -> String,
     onPreview: (SettingsTransfer.Document) -> Unit,
+    signInResult: CommunityOAuth.Result?,
+    onSignInHandled: () -> Unit,
 ) {
     if (!CommunityAccount.configured) {
         Card(Modifier.fillMaxWidth()) {
@@ -57,8 +59,6 @@ internal fun CommunityCatalog(
     var status by remember { mutableStateOf(0) }
     var email by remember { mutableStateOf<String?>(null) }
     var nickname by remember { mutableStateOf<String?>(null) }
-    var emailInput by remember { mutableStateOf(TextFieldValue()) }
-    var codeInput by remember { mutableStateOf(TextFieldValue()) }
     var nicknameInput by remember { mutableStateOf(TextFieldValue()) }
     var titleInput by remember { mutableStateOf(TextFieldValue()) }
     var descriptionInput by remember { mutableStateOf(TextFieldValue()) }
@@ -87,7 +87,6 @@ internal fun CommunityCatalog(
                 throw cancelled
             } catch (error: CommunityApi.Failure) {
                 status = when {
-                    error.code in setOf("otp_expired", "invalid_otp") -> R.string.community_invalid_code
                     error.code == "23505" -> R.string.community_name_taken
                     error.status == 429 -> R.string.community_rate_limited
                     error.status == 401 || error.status == 403 -> R.string.community_sign_in_required
@@ -128,7 +127,7 @@ internal fun CommunityCatalog(
     fun openAccount(publish: Boolean) {
         focus.clearFocus()
         request({
-            val signedInEmail = this.email
+            val signedInEmail = identity
             signedInEmail to if (signedInEmail != null) name() else null
         }) { (signedInEmail, publicName) ->
             email = signedInEmail
@@ -136,6 +135,17 @@ internal fun CommunityCatalog(
             nicknameInput = TextFieldValue(publicName.orEmpty())
             mode = if (publish && publicName != null) CatalogMode.PUBLISH else CatalogMode.ACCOUNT
             if (publish && publicName == null) status = R.string.community_sign_in_required
+        }
+    }
+
+    LaunchedEffect(signInResult, busy) {
+        if (busy || signInResult == null) return@LaunchedEffect
+        onSignInHandled()
+        mode = CatalogMode.ACCOUNT
+        when (signInResult) {
+            CommunityOAuth.Result.SIGNED_IN -> openAccount(publish = false)
+            CommunityOAuth.Result.CANCELLED -> status = R.string.community_github_cancelled
+            CommunityOAuth.Result.FAILED -> status = R.string.community_github_failed
         }
     }
 
@@ -162,19 +172,15 @@ internal fun CommunityCatalog(
                     CatalogMode.ACCOUNT -> {
                         val currentEmail = email
                         if (currentEmail == null) {
-                            Text(stringResource(R.string.community_email_hint))
-                            CatalogField(emailInput, { emailInput = it }, R.string.community_email, 254, KeyboardType.Email)
-                            val address = emailInput.text.trim()
-                            CouiAction(stringResource(R.string.community_send_code), true, {
+                            Text(stringResource(R.string.community_github_hint))
+                            CouiAction(stringResource(R.string.community_github_sign_in), true, {
                                 focus.clearFocus()
-                                request({ sendCode(address) }) {
-                                    codeInput = TextFieldValue()
-                                    mode = CatalogMode.VERIFY
+                                request({ beginGitHubSignIn() }) { url ->
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }
-                            }, Modifier.fillMaxWidth(),
-                                enabled = !busy && Patterns.EMAIL_ADDRESS.matcher(address).matches())
+                            }, Modifier.fillMaxWidth(), enabled = !busy)
                         } else {
-                            Text(currentEmail)
+                            Text(currentEmail.ifBlank { stringResource(R.string.community_github_connected) })
                             CatalogField(nicknameInput, { nicknameInput = it }, R.string.community_name, 24)
                             Text(stringResource(R.string.community_name_hint))
                             val name = nicknameInput.text.trim()
@@ -189,8 +195,6 @@ internal fun CommunityCatalog(
                                 request({ signOut() }) {
                                     email = null
                                     nickname = null
-                                    emailInput = TextFieldValue()
-                                    codeInput = TextFieldValue()
                                     mine = false
                                     appliedQuery = ""
                                     query = TextFieldValue()
@@ -202,24 +206,6 @@ internal fun CommunityCatalog(
                                 }
                             }, Modifier.fillMaxWidth(), enabled = !busy)
                         }
-                    }
-
-                    CatalogMode.VERIFY -> {
-                        val address = emailInput.text.trim()
-                        Text(stringResource(R.string.community_code_hint, address))
-                        CatalogField(codeInput, { codeInput = it }, R.string.community_code, 8, KeyboardType.Number)
-                        CouiAction(stringResource(R.string.community_verify), true, {
-                            focus.clearFocus()
-                            request({ signIn(address, codeInput.text.trim()) }) {
-                                email = it
-                                codeInput = TextFieldValue()
-                                mode = CatalogMode.ACCOUNT
-                            }
-                        }, Modifier.fillMaxWidth(),
-                            enabled = !busy && codeInput.text.length in 6..8 && codeInput.text.all { it in '0'..'9' })
-                        CouiAction(stringResource(R.string.community_resend), false, {
-                            request({ sendCode(address) }) { status = R.string.community_sent }
-                        }, Modifier.fillMaxWidth(), enabled = !busy)
                     }
 
                     CatalogMode.PUBLISH -> {
@@ -315,11 +301,10 @@ private fun CatalogField(
     onChange: (TextFieldValue) -> Unit,
     label: Int,
     limit: Int,
-    keyboard: KeyboardType = KeyboardType.Text,
     multiline: Boolean = false,
 ) {
     TextField(value = value, onValueChange = { if (it.text.length <= limit) onChange(it) },
         modifier = Modifier.fillMaxWidth(), backgroundMode = TextFieldMode.Rectangle,
         cornerRadius = 16.dp, label = stringResource(label), singleLine = !multiline,
-        maxLines = if (multiline) 4 else 1, keyboardOptions = KeyboardOptions(keyboardType = keyboard))
+        maxLines = if (multiline) 4 else 1)
 }

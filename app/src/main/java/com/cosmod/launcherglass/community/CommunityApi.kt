@@ -31,13 +31,11 @@ internal class CommunityApi(url: String, private val key: String) {
     data class Entry(val id: String, val title: String, val description: String, val author: String,
         val createdAt: String)
 
-    fun sendCode(email: String) {
-        request("/auth/v1/otp", JSONObject().put("email", email).put("create_user", true))
-    }
+    fun githubSignInUrl(verifier: String): String = CommunityOAuth.authorizeUrl(base, verifier)
 
-    fun verify(email: String, code: String): Session =
-        session(request("/auth/v1/verify", JSONObject().put("email", email)
-            .put("token", code).put("type", "email")), email)
+    fun exchangeCode(code: String, verifier: String): Session =
+        session(request("/auth/v1/token?grant_type=pkce",
+            JSONObject().put("auth_code", code).put("code_verifier", verifier)), "")
 
     fun refresh(previous: Session): Session =
         session(request("/auth/v1/token?grant_type=refresh_token",

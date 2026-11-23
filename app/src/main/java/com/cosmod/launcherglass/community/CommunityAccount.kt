@@ -16,20 +16,47 @@ import javax.crypto.spec.GCMParameterSpec
 /** Accessed from the background. The lock serializes refresh-token rotation and logouts. */
 internal class CommunityAccount private constructor(context: Context) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "community_session"))
+    private val pendingAuth = AtomicFile(File(context.noBackupFilesDir, "community_github_auth"))
     private val api = CommunityApi(BuildConfig.CPI_COMMUNITY_URL, BuildConfig.CPI_COMMUNITY_KEY)
     private val binding = BuildConfig.CPI_COMMUNITY_URL.toByteArray(Charsets.UTF_8)
+    private val authBinding = binding + "/github-auth".toByteArray(Charsets.UTF_8)
     private var session = load()
-    val email: String? @Synchronized get() = current()?.email
+    val identity: String? @Synchronized get() = current()?.email
 
     @Synchronized
-    fun sendCode(email: String) = api.sendCode(email)
+    fun beginGitHubSignIn(): String {
+        val verifier = CommunityOAuth.newVerifier()
+        writeProtected(pendingAuth, authBinding, JSONObject().put("verifier", verifier)
+            .put("started_at", System.currentTimeMillis()))
+        return api.githubSignInUrl(verifier)
+    }
 
     @Synchronized
-    fun signIn(email: String, code: String): String = save(api.verify(email, code)).email
+    fun finishGitHubSignIn(callback: CommunityOAuth.Callback): CommunityOAuth.Result? {
+        val pending = readProtected(pendingAuth, authBinding) ?: return null
+        if (System.currentTimeMillis() - pending.optLong("started_at") !in 0..CommunityOAuth.LIFETIME_MS) {
+            pendingAuth.delete()
+            return CommunityOAuth.Result.FAILED
+        }
+        return when (callback) {
+            is CommunityOAuth.Callback.Code -> {
+                try {
+                    save(api.exchangeCode(callback.value, pending.getString("verifier")))
+                    pendingAuth.delete()
+                    CommunityOAuth.Result.SIGNED_IN
+                } catch (_: Exception) {
+                    CommunityOAuth.Result.FAILED
+                }
+            }
+            CommunityOAuth.Callback.Cancelled -> CommunityOAuth.Result.CANCELLED
+            CommunityOAuth.Callback.Failed -> CommunityOAuth.Result.FAILED
+        }
+    }
 
     @Synchronized
     fun signOut() {
         val old = session
+        pendingAuth.delete()
         file.delete()
         session = null
         if (old != null) runCatching { api.signOut(old.access) }
@@ -80,31 +107,39 @@ internal class CommunityAccount private constructor(context: Context) {
         }.generateKey()
     }
 
-    private fun load(): CommunityApi.Session? = runCatching {
-        val bytes = file.readFully()
+    private fun load(): CommunityApi.Session? = readProtected(file, binding)?.let {
+        runCatching { CommunityApi.Session.read(it) }.getOrNull()
+    }
+
+    private fun readProtected(source: AtomicFile, associatedData: ByteArray): JSONObject? = runCatching {
+        val bytes = source.readFully()
         require(bytes.size in 29..16384)
         val cipher = Cipher.getInstance(CIPHER)
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
-        cipher.updateAAD(binding)
-        CommunityApi.Session.read(JSONObject(cipher.doFinal(bytes, 12, bytes.size - 12).toString(Charsets.UTF_8)))
+        cipher.updateAAD(associatedData)
+        JSONObject(cipher.doFinal(bytes, 12, bytes.size - 12).toString(Charsets.UTF_8))
     }.getOrNull()
 
     private fun save(value: CommunityApi.Session): CommunityApi.Session {
+        writeProtected(file, binding, value.json())
+        session = value
+        return value
+    }
+
+    private fun writeProtected(target: AtomicFile, associatedData: ByteArray, value: JSONObject) {
         val cipher = Cipher.getInstance(CIPHER)
         cipher.init(Cipher.ENCRYPT_MODE, key())
         require(cipher.iv.size == 12)
-        cipher.updateAAD(binding)
-        val bytes = cipher.iv + cipher.doFinal(value.json().toString().toByteArray(Charsets.UTF_8))
-        val out = file.startWrite()
+        cipher.updateAAD(associatedData)
+        val bytes = cipher.iv + cipher.doFinal(value.toString().toByteArray(Charsets.UTF_8))
+        val out = target.startWrite()
         try {
             out.write(bytes)
-            file.finishWrite(out)
+            target.finishWrite(out)
         } catch (error: Exception) {
-            file.failWrite(out)
+            target.failWrite(out)
             throw error
         }
-        session = value
-        return value
     }
 
     companion object {

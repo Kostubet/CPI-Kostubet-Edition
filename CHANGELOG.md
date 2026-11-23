@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 462
+
+- Для входа в аккаунт CPI используется GitHub. Публикации подписываются выбранным в CPI ником.
+
 ### Сборка 461
 
 - Подключена база общего каталога конфигов CPI. Для публичной регистрации требуется настроить доставку кодов по почте.
@@ -336,6 +340,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 462
+
+- CPI accounts use GitHub sign-in. Configs are published under the nickname chosen in CPI.
 
 ### Build 461
 
