@@ -1,12 +1,12 @@
 {
   "format": 1,
-  "tag": "v0.3.2",
-  "version": "0.3.2",
-  "build": 450,
+  "tag": "v0.3.3",
+  "version": "0.3.3",
+  "build": 466,
   "apk": {
-    "name": "CPI-Kostubet-Edition-0.3.2-build450.apk",
-    "url": "https://github.com/Kostubet/CPI-Kostubet-Edition/releases/download/v0.3.2/CPI-Kostubet-Edition-0.3.2-build450.apk",
-    "size": 33933951,
-    "sha256": "59bbb170c1c10d7d923966c948a2ecb6de38a225cf3b1432d11ef19ea6a377a4"
+    "name": "CPI-Kostubet-Edition-0.3.3-build466.apk",
+    "url": "https://github.com/Kostubet/CPI-Kostubet-Edition/releases/download/v0.3.3/CPI-Kostubet-Edition-0.3.3-build466.apk",
+    "size": 34172435,
+    "sha256": "e2977fa923c1de22d3b5bacae855835e0170bb32b7da47a8cbb3bb2104251614"
   }
 }
