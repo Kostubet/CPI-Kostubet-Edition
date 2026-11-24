@@ -185,7 +185,9 @@ internal object PhotoWidgetMaterial {
         return progress*progress*(3f-2f*progress)
     }
     fun onBackdropChanged(){
-        for(view in hosts.keys.weakSnapshot())if(hosts[view]==true)view.postInvalidateOnAnimation()
+        for (view in hosts.keys.weakSnapshot()) {
+            if (hosts[view] == true && !IconGlassHook.isAppearanceRedrawPending(view)) view.postInvalidateOnAnimation()
+        }
     }
     fun onLauncherFocused() {
         synchronized(returns) {
@@ -195,9 +197,17 @@ internal object PhotoWidgetMaterial {
             }
         }
     }
-    fun onSettingsChanged(){
+    internal fun invalidateAppearanceHost(host: View) {
+        content(host).invalidate()
+        host.invalidate()
+    }
+
+    fun onSettingsChanged(deferRedraw: Boolean = false){
         PhotoFade.clear()
-        hosts.keys.weakSnapshot().forEach {host->content(host).invalidate();host.postInvalidateOnAnimation()}
+        if (!deferRedraw) hosts.keys.weakSnapshot().forEach { host ->
+            content(host).invalidate()
+            host.postInvalidateOnAnimation()
+        }
         if(!PrefsHelper.enabled || !PrefsHelper.widgetGlassEnabled){
             launchHost = null
             returns.clear()
@@ -310,7 +320,8 @@ internal object PhotoWidgetMaterial {
         val listener=android.view.ViewTreeObserver.OnPreDrawListener {
             val current=weak.get()
             if(current!=null && PrefsHelper.enabled && PrefsHelper.widgetGlassEnabled)for(host in hosts.keys.weakSnapshot()){
-                if(hosts[host]!=true || host is AppWidgetHostView || host.rootView!==current || !host.isShown)continue
+                if (hosts[host] != true || host is AppWidgetHostView || host.rootView !== current ||
+                    !host.isShown || IconGlassHook.isAppearanceRedrawPending(host)) continue
                 val child=content(host)
                 transform(host, child, matrix).getValues(values)
                 val stamp=31*(31*values.contentHashCode()+child.width)+child.height

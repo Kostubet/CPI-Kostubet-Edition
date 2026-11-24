@@ -251,14 +251,14 @@ internal object FolderMaterialHook {
                 val context=state.context.get() ?: continue
                 val activity=state.activity.get() ?: continue
                 XposedHelpers.callMethod(background,"initBgDrawable",context,view,activity)
-                view.invalidate()
+                if (!IconGlassHook.isAppearanceRedrawPending(view)) view.invalidate()
                 GlassLogger.i("FolderMaterial",if(enabled())"Native folder blur disabled" else "Native folder blur restored")
             }catch(t:Throwable){GlassLogger.e("FolderMaterial","Folder producer switch failed",t)}
         }
         for((view,original) in panels.strongSnapshot()){
             if(enabled() && view.background !is Material)view.background=Material(WeakReference(view),null,original)
             else if(!enabled() && view.background is Material)view.background=original
-            view.invalidate()
+            if (!IconGlassHook.isAppearanceRedrawPending(view)) view.invalidate()
         }
     }
     fun install(loader:ClassLoader){

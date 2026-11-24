@@ -59,7 +59,7 @@ internal object MultiIconMaterialHook {
         if(!enabled()){
             for((view,plate) in grids.strongSnapshot()){
                 if(NativeIconAccess.field(view,"mBackDrawable")===plate)XposedHelpers.setObjectField(view,"mBackDrawable",plate.native)
-                view.invalidate()
+                if (!IconGlassHook.isAppearanceRedrawPending(view)) view.invalidate()
             }
             grids.clear()
         }
@@ -67,7 +67,7 @@ internal object MultiIconMaterialHook {
             if(enabled())try {FolderMaterialHook.attachShortcut(view)}catch(t:Throwable){
                 if(failures.add(t.javaClass.name+":"+t.message))GlassLogger.e("MultiIcons","Native shortcut material unavailable",t)
             }
-            view.invalidate()
+            if (!IconGlassHook.isAppearanceRedrawPending(view)) view.invalidate()
         }
     }
     private fun prepare(view:View){

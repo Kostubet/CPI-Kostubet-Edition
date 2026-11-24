@@ -7,6 +7,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
+import android.view.Choreographer
 import android.view.View
 import android.view.ViewTreeObserver
 import com.cosmod.launcherglass.util.*
@@ -125,6 +126,8 @@ object IconGlassHook {
         for(reference in registeredViews())reference.get()?.invalidate()
         liveViews.clear();liveSnapshot=emptyList();liveSnapshotDirty=true
         pendingIconBackdrops.clear()
+        pendingAppearanceItems.clear()
+        appearanceRefresh++
         ForeignDraw.reset()
         IconMaterialRenderer.clear();DynamicIconForeground.clear()
     }
@@ -135,7 +138,7 @@ object IconGlassHook {
         val visible=Rect()
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
-            if(view.rootView!==root || !view.isAttachedToWindow || !view.isShown)continue
+            if(view.rootView!==root || !view.isAttachedToWindow || !view.isShown || isAppearanceRedrawPending(view))continue
             if(LiveBlurEngine.drawerOccludesWorkspace && !isDrawerIcon(view))continue
             val restored=IconMaterialRenderer.restoreDiscardedSamples(view)
             if(recoverIconBackdrop(view,wallpaper,visible) || restored){view.invalidate();recovered++}
@@ -236,6 +239,74 @@ object IconGlassHook {
     }
     fun invalidateFolderPreviews(){revision++}
     fun invalidateShaders(){IconMaterialRenderer.clear();GlyphMaterialRenderer.clear();revision++}
+
+    private val appearanceHandler by lazy { Handler(Looper.getMainLooper()) }
+    private var appearanceRefresh = 0
+    private val pendingAppearanceItems = LinkedHashMap<View, Boolean>()
+
+    internal fun isAppearanceRedrawPending(view: View) = pendingAppearanceItems.containsKey(view)
+
+    internal fun invalidateAppearanceItems(redrawIcons: Boolean, redrawWidgets: Boolean, onRedrawn: (() -> Unit)?) {
+        val refresh = ++appearanceRefresh
+        val visible = Rect()
+        // An interrupted transition may still have items that have never drawn
+        // the previous selection, even if the newest change only affects widgets.
+        if (redrawIcons) for (reference in registeredViews()) {
+            val view = reference.get() ?: continue
+            if (view.isAttachedToWindow && view.isShown && !NativeSurfaceLive.ownsSource(view) &&
+                view.getGlobalVisibleRect(visible)) pendingAppearanceItems.putIfAbsent(view, false)
+        }
+        if (redrawWidgets) for (widget in PhotoWidgetMaterial.appearanceHosts()) {
+            if (widget.isAttachedToWindow && widget.isShown && widget.getGlobalVisibleRect(visible)) {
+                pendingAppearanceItems[widget] = true
+            } else {
+                PhotoWidgetMaterial.invalidateAppearanceHost(widget)
+            }
+        }
+
+        fun redraw(view: View, widget: Boolean) {
+            if (widget) PhotoWidgetMaterial.invalidateAppearanceHost(view) else view.invalidate()
+        }
+        if (pendingAppearanceItems.isEmpty()) {
+            onRedrawn?.invoke()
+            return
+        }
+
+        // The wallpaper pre-draw pass can run during this transition. Give it
+        // the current set of pending views so it cannot repaint the whole queue.
+        val refreshRate = pendingAppearanceItems.keys.first().display?.refreshRate ?: 60f
+        val budget = if (refreshRate > 90f) 2 else 3
+        val frames = Choreographer.getInstance()
+        frames.postFrameCallback(object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (refresh != appearanceRefresh || !PrefsHelper.enabled) return
+                android.os.Trace.beginSection("CherryPick.appearanceRedrawBatch")
+                try {
+                    val items = pendingAppearanceItems.iterator()
+                    var remaining = budget
+                    while (items.hasNext() && remaining > 0) {
+                        val (view, widget) = items.next()
+                        val name = view.javaClass.name
+                        val cost = if (widget || name.endsWith("FolderIcon") ||
+                            name.endsWith("ShortcutContainer") || name.endsWith("GridRecyclerView")) budget else 1
+                        if (cost > remaining) break
+                        items.remove()
+                        if (view.isAttachedToWindow) {
+                            redraw(view, widget)
+                            remaining -= cost
+                        }
+                    }
+                } finally {
+                    android.os.Trace.endSection()
+                }
+                if (pendingAppearanceItems.isNotEmpty()) frames.postFrameCallback(this)
+                else if (onRedrawn != null) {
+                    appearanceHandler.postDelayed({ if (refresh == appearanceRefresh) onRedrawn() }, 24L)
+                }
+            }
+        })
+    }
+
     private data class RepaintStamp(val x:Int,val y:Int,val w:Int,val h:Int,val scroll:Int,val wallpaper:Bitmap?,val revision:Long)
     private val repaintStamps=WeakHashMap<View,RepaintStamp>()
     fun onNativeIconReturned(view:View?) {
@@ -267,7 +338,7 @@ object IconGlassHook {
         val roots=LinkedHashSet<View>()
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
-            if(beforeDraw!=null && view.rootView!==beforeDraw)continue
+            if (isAppearanceRedrawPending(view) || (beforeDraw != null && view.rootView !== beforeDraw)) continue
             if(NativeSurfaceLive.ownsSource(view) || !view.isAttachedToWindow || !view.isShown)continue
             if(onlyChangedDrawerSamples && LiveBlurEngine.drawerOccludesWorkspace && !isDrawerIcon(view))continue
             world.reset()
@@ -468,14 +539,26 @@ object IconGlassHook {
             val bg=XposedHelpers.getObjectField(drawable,"mBgPaint") as? Paint
             val foreground=XposedHelpers.getObjectField(drawable,"mMonoPaint") as? Paint
             if(mono!=null && mask!=null && !mono.isRecycled && !mask.isRecycled){
-                val palette=PrefsHelper.iconPalette
-                val output=Bitmap.createBitmap(mono.width,mono.height,Bitmap.Config.ARGB_8888)
-                val paint=Paint(foreground ?: Paint()).apply {
-                    alpha=255
-                    if(palette.custom || palette.whiteGlyph)colorFilter=palette.filter
+                val palette = PrefsHelper.iconPalette
+                val color = if (palette.custom) palette.background else bg?.color ?: Color.TRANSPARENT
+                val tint = palette.filter.takeIf { palette.custom || palette.whiteGlyph }
+                val density = appContext?.resources?.displayMetrics?.densityDpi
+                if (tint != null && (mono.density == Bitmap.DENSITY_NONE || mono.density == density) &&
+                    foreground?.shader == null && foreground?.xfermode == null &&
+                    foreground?.maskFilter == null) {
+                    // A source-in tint only needs the native logo alpha. Keeping
+                    // the source lets the material cache reuse it across palettes.
+                    val shape = WallpaperHelper.forSoftwareCanvas(mask)
+                    if (shape != null) return ProcessedIcon(mono, shape, color, glyphTint = tint)
                 }
-                Canvas(output).drawBitmap(WallpaperHelper.forCanvas(mono,Canvas(output)),0f,0f,paint)
-                return ProcessedIcon(output,WallpaperHelper.forCanvas(mask,Canvas(output)),if(palette.custom)palette.background else bg?.color ?: Color.TRANSPARENT)
+                val output = Bitmap.createBitmap(mono.width, mono.height, Bitmap.Config.ARGB_8888)
+                val paint = Paint(foreground ?: Paint()).apply {
+                    alpha = 255
+                    if (tint != null) colorFilter = tint
+                }
+                val target = Canvas(output)
+                target.drawBitmap(WallpaperHelper.forCanvas(mono, target), 0f, 0f, paint)
+                return ProcessedIcon(output, WallpaperHelper.forCanvas(mask, target), color)
             }
         }catch(_:Throwable){}
         Oxygen16IconSupport.background(drawable)?.let {return it}
@@ -543,7 +626,8 @@ object IconGlassHook {
             com.cosmod.launcherglass.util.PerformancePolicy.lightDrawer
         IconMaterialRenderer.draw(canvas,bounds,plateMask,parts.glyphBitmap,plateColor,
             plateOpacity*255/100,false,compatible,source,binding,
-            style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height)){target,local,blurred ->
+            style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height),
+            glyphTint=parts.glyphTint){target,local,blurred ->
             if(!blurred){
                 val save=target.saveLayer(RectF(local),null)
                 val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (plateColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
@@ -562,7 +646,7 @@ object IconGlassHook {
         }
     }
     private fun drawIconGlyph(canvas: Canvas, bounds: Rect, parts: ProcessedIcon) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { colorFilter = parts.glyphTint }
         val glyph = WallpaperHelper.forCanvas(parts.glyphBitmap, canvas)
         if (parts.artwork) canvas.drawBitmap(glyph, null, bounds, paint)
         else GlyphMaterialRenderer.draw(canvas, bounds, glyph, paint)
@@ -581,7 +665,10 @@ object IconGlassHook {
             GlassLogger.i("MaterialEngine","No material layers for animation: ${original.javaClass.name}, raw=${raw(original)?.width}")
             return null
         }
-        val parts=if(backgroundOnly)complete.copy(glyphBitmap=Bitmap.createBitmap(complete.glyphBitmap.width,complete.glyphBitmap.height,Bitmap.Config.ARGB_8888))else complete
+        val parts = if (backgroundOnly) complete.copy(
+            glyphBitmap = Bitmap.createBitmap(complete.glyphBitmap.width, complete.glyphBitmap.height, Bitmap.Config.ARGB_8888),
+            glyphTint = null,
+        ) else complete
         val bitmap=raw(original)
         val owner=explicitHost ?: host(original)
         val bounds=Rect(0,0,bitmap?.width ?: 210,bitmap?.height ?: 210)

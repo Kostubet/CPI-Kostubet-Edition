@@ -12,8 +12,6 @@ import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.TextView
-import com.cosmod.launcherglass.BuildConfig
-import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.LiveBlurEngine
 import de.robv.android.xposed.XC_MethodHook
@@ -140,7 +138,7 @@ internal object DesktopAppearanceToolbar {
         params.marginStart = dp(context, 6)
         params.marginEnd = dp(context, 6)
 
-        val title = context.createPackageContext(BuildConfig.APPLICATION_ID, 0).getString(R.string.desktop_appearance_title)
+        val title = DesktopAppearanceResources(context).text("title")
         copy.apply {
             id = appearanceButtonId
             text = title

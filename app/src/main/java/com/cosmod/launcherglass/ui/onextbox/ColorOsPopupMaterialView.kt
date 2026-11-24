@@ -73,6 +73,16 @@ internal class ColorOsPopupMaterialView(
     private val nativeShadow: Boolean = false,
 ) : View(context) {
     private val density = resources.displayMetrics.density
+    private val outlineBounds = Rect()
+    private val nativeOutline by lazy {
+        runCatching {
+            val adapter = Class.forName("com.oplus.graphics.OplusOutlineAdapter")
+            val constructor = adapter.getConstructor(AndroidOutline::class.java, Int::class.javaPrimitiveType)
+            val setRoundRect = adapter.getMethod("setSmoothRoundRect",
+                Rect::class.java, Float::class.javaPrimitiveType, Float::class.javaPrimitiveType)
+            constructor to setRoundRect
+        }.getOrNull()
+    }
     private var transitionAlpha = 1f
     private var transitionScale = 1f
     private var blurCornerUpdater: ((Float) -> Unit)? = null
@@ -96,20 +106,13 @@ internal class ColorOsPopupMaterialView(
         outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: AndroidOutline) {
                 val radius = cornerRadiusDp * density
-                val applied = runCatching {
-                    val adapterClass = Class.forName("com.oplus.graphics.OplusOutlineAdapter")
-                    val adapter = adapterClass
-                        .getConstructor(AndroidOutline::class.java, Int::class.javaPrimitiveType)
-                        .newInstance(outline, 1)
-                    val bounds = Rect(0, 0, view.width, view.height)
-                    adapterClass.getMethod(
-                        "setSmoothRoundRect",
-                        Rect::class.java,
-                        Float::class.javaPrimitiveType,
-                        Float::class.javaPrimitiveType,
-                    ).invoke(adapter, bounds, radius, 2.5f)
-                    true
-                }.getOrDefault(false)
+                val applied = nativeOutline?.let { (constructor, setRoundRect) ->
+                    runCatching {
+                        outlineBounds.set(0, 0, view.width, view.height)
+                        setRoundRect.invoke(constructor.newInstance(outline, 1), outlineBounds, radius, 2.5f)
+                        true
+                    }.getOrDefault(false)
+                } ?: false
                 if (!applied) {
                     outline.setRoundRect(0, 0, view.width, view.height, radius)
                 }

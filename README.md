@@ -56,6 +56,12 @@
 
 Настройки материала сгруппированы по размытию, качеству и частоте обновления, а также оптике. Уровень размытия нового движка регулируется до 200%. Яркость фона можно менять отдельно от размытия и непрозрачности стекла.
 
+### Каталог конфигов
+
+Откройте **Функции → Каталог конфигов**. Ищите по названию, описанию или нику автора. Нажмите на конфиг, чтобы открыть предпросмотр на своих обоях. Поверхности в предпросмотре сгруппированы по типу стекла. Для публикации войдите через GitHub в **О модуле → Аккаунт CPI**, выберите публичный ник и нажмите «+» внизу каталога. Свои конфиги можно удалить из каталога через «Мои публикации». Лайки и избранное привязаны к аккаунту CPI. Их счётчики видны всем.
+
+Для включения каталога в сборке подключите [сервер каталога](supabase/README.md).
+
 ### Сборка и публикация
 
 Понадобятся JDK 21 и Android SDK API 37. Укажите SDK через `ANDROID_HOME` или `local.properties`. Интерфейс настроек использует официальные библиотеки COUI 2.0.0 из Maven Central. [Исходники COUI](https://github.com/suqi8/coui/tree/v2.0.0)
@@ -116,6 +122,12 @@ Open **About → Updates** to check releases, receive update notifications, and 
 Starting with build 426, checks use a public release manifest and a fallback mirror, with the GitHub API as a backup. Release publication refreshes the manifest automatically. If an older build cannot discover updates because of the API quota, install the new APK manually once. Background checks run roughly every eight hours subject to Android scheduling; the check button requests fresh data immediately.
 
 On a compatible ColorOS 17 launcher, enter home screen edit mode and tap **Appearance**. Default restores the stock icon and widget appearance. Select **Use manual settings** in Icons or Widgets to reapply your saved CPI settings.
+
+### Config catalog
+
+Open **Features → Config catalog**. Search by title, description, or the author’s nickname. Open a result to preview it with your wallpaper. Preview surfaces are grouped by glass material. To publish, sign in with GitHub under **About → CPI account**, choose a public nickname, and tap “+” at the bottom of the catalog. You can remove your configs under “My publications.” Like and favorite configs with your CPI account. Both counts are public.
+
+To enable the catalog in a build, connect the [catalog backend](supabase/README.md).
 
 ### Build and release
 

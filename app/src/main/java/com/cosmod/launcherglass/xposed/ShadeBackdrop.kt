@@ -21,7 +21,7 @@ import kotlin.math.ceil
 /** Main-thread lifecycle, one shared frame and one compositor request in flight. */
 internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> Unit,
     private val onIdle: () -> Unit, private val onFailure: (Throwable) -> Unit) {
-    private class Reader(val visible: (View) -> Boolean) {
+    private class Reader(val visible: (View) -> Boolean, val controlTrack: Boolean) {
         val bounds = RectF()
         var padding = 0
     }
@@ -40,19 +40,32 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
     private var queued = false
     private var busy = false
     private var retryAt = 0L
+    private var movingTrackUntil = 0L
     private val clock = SampleFrameClock()
     private var captures = 0
     private var consecutiveFailures = 0
 
     fun diagnostics() = "frames=$captures, readers=${readers.size}, busy=$busy, misses=$consecutiveFailures"
 
-    fun frameFor(view: View, bounds: RectF, padding: Int, visible: (View) -> Boolean): Frame? {
-        if (view.display?.displayId != Display.DEFAULT_DISPLAY) return null
-        val reader = readers[view]?.takeIf { it.visible === visible } ?: Reader(visible).also { readers[view] = it }
+    fun frameFor(view: View, bounds: RectF, padding: Int, visible: (View) -> Boolean, controlTrack: Boolean): Frame? {
+        val display = view.display ?: return null
+        if (display.displayId != Display.DEFAULT_DISPLAY) return null
+        val reader = readers[view]?.takeIf { it.visible === visible && it.controlTrack == controlTrack }
+            ?: Reader(visible, controlTrack).also { readers[view] = it }
+        if (controlTrack && reader.bounds != bounds) {
+            movingTrackUntil = SystemClock.uptimeMillis() + 90L
+        }
         reader.padding = padding
         reader.bounds.set(bounds)
         schedule()
-        return frame?.takeIf { rotation == view.display?.rotation }
+        return frame?.takeIf { rotation == display.rotation }
+    }
+
+    // The legacy sliders can reuse their existing backdrop while their live
+    // position and shape animate at display rate.
+    private fun captureFps(now: Long): Int {
+        val fps = PerformancePolicy.captureFps()
+        return if (now < movingTrackUntil && readers.values.all { it.controlTrack }) minOf(fps, 30) else fps
     }
 
     fun clear() {
@@ -64,6 +77,7 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
         frame = null
         rotation = -1
         retryAt = 0L
+        movingTrackUntil = 0L
         clock.reset()
         consecutiveFailures = 0
         onIdle()
@@ -73,9 +87,10 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
     private fun schedule() {
         if (queued || busy || readers.isEmpty()) return
         queued = true
-        val remaining = clock.remainingNs(System.nanoTime(), PerformancePolicy.captureFps())
+        val now = SystemClock.uptimeMillis()
+        val remaining = clock.remainingNs(System.nanoTime(), captureFps(now))
         val delay = (remaining + 999_999L) / 1_000_000L
-        main.postAtTime(tick, maxOf(SystemClock.uptimeMillis() + delay, retryAt))
+        main.postAtTime(tick, maxOf(now + delay, retryAt))
     }
 
     private fun isVisible(view: View): Boolean {
@@ -108,6 +123,12 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
             clear()
             return
         }
+        val now = SystemClock.uptimeMillis()
+        val fps = captureFps(now)
+        if (clock.remainingNs(System.nanoTime(), fps) > 0L) {
+            schedule()
+            return
+        }
         val first = readers.keys.firstOrNull() ?: return
         val display = first.display ?: return
         display.getRealMetrics(metrics)
@@ -136,7 +157,7 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
             return
         }
         val token = epoch
-        clock.record(System.nanoTime(), PerformancePolicy.captureFps())
+        clock.record(System.nanoTime(), fps)
         busy = true
         worker.execute {
             val result = runCatching { AlertBackdrop.capture(area,minOf(1f,width.toFloat()/area.width()),layers) }

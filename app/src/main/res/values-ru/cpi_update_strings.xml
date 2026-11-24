@@ -7,6 +7,8 @@
     <string name="cpi_updates_check">Проверить обновления</string>
     <string name="cpi_updates_checking">Проверяем GitHub…</string>
     <string name="cpi_updates_notifications">Уведомлять о новых сборках</string>
+    <string name="cpi_updates_notification_settings">Настройки уведомлений</string>
+    <string name="cpi_updates_notifications_blocked">Разрешите уведомления CPI и включите канал «Обновления» в настройках Android.</string>
     <string name="cpi_updates_current_latest">Установлена последняя доступная сборка</string>
     <string name="cpi_updates_check_error">Не удалось проверить обновления</string>
     <string name="cpi_updates_install">Установить</string>

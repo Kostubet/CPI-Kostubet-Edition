@@ -97,7 +97,9 @@ private data class DialogPresentation(
     val title: String?,
     val summary: String?,
     val negativeText: String,
-    val positiveText: String,
+    val positiveText: String?,
+    val positiveEnabled: Boolean,
+    val negativeEnabled: Boolean,
     val content: (@Composable () -> Unit)?,
 )
 
@@ -119,16 +121,20 @@ internal fun ColorOs17ConfirmDialog(
     title: String?,
     summary: String?,
     negativeText: String,
-    positiveText: String,
+    positiveText: String?,
     onDismissRequest: () -> Unit,
     onNegative: () -> Unit,
     onPositive: () -> Unit,
     onDismissFinished: (() -> Unit)?,
     content: (@Composable () -> Unit)?,
+    positiveEnabled: Boolean,
+    negativeEnabled: Boolean,
 ) {
     val darkTheme = COUITheme.colorScheme.background.luminance() < 0.5f
     val density = LocalDensity.current
-    val currentPresentation = DialogPresentation(title, summary, negativeText, positiveText, content)
+    val currentPresentation = DialogPresentation(
+        title, summary, negativeText, positiveText, positiveEnabled, negativeEnabled, content,
+    )
     var lastVisiblePresentation by remember { mutableStateOf(currentPresentation) }
     SideEffect {
         if (show) lastVisiblePresentation = currentPresentation
@@ -222,7 +228,13 @@ private fun ColorOsDialogButtonBar(
             bottom = DialogSpacing.ButtonInset,
         ),
     ) {
-        val labelWidths = listOf(presentation.negativeText, presentation.positiveText).map {
+        val positiveText = presentation.positiveText
+        if (positiveText == null) {
+            ColorOs17Button(presentation.negativeText, false, darkTheme, onNegative, Modifier.fillMaxWidth(),
+                enabled = presentation.negativeEnabled)
+            return@BoxWithConstraints
+        }
+        val labelWidths = listOf(presentation.negativeText, positiveText).map {
             textMeasurer.measure(it, style, softWrap = false).size.width
         }
         val horizontalTextWidth = with(density) { ((maxWidth - DialogSpacing.ButtonGap) / 2 - 24.dp).roundToPx() }
@@ -230,18 +242,22 @@ private fun ColorOsDialogButtonBar(
             val fullTextWidth = with(density) { (maxWidth - 24.dp).roundToPx() }
             Column(verticalArrangement = Arrangement.spacedBy(DialogSpacing.ButtonGap)) {
                 ColorOs17Button(
-                    presentation.positiveText, true, darkTheme, onPositive, Modifier.fillMaxWidth(),
+                    positiveText, true, darkTheme, onPositive, Modifier.fillMaxWidth(),
                     if (labelWidths[1] > fullTextWidth) DialogSpacing.MultilineButtonHeight else DialogSpacing.ButtonHeight,
+                    enabled = presentation.positiveEnabled,
                 )
                 ColorOs17Button(
                     presentation.negativeText, false, darkTheme, onNegative, Modifier.fillMaxWidth(),
                     if (labelWidths[0] > fullTextWidth) DialogSpacing.MultilineButtonHeight else DialogSpacing.ButtonHeight,
+                    enabled = presentation.negativeEnabled,
                 )
             }
         } else {
             Row(horizontalArrangement = Arrangement.spacedBy(DialogSpacing.ButtonGap)) {
-                ColorOs17Button(presentation.negativeText, false, darkTheme, onNegative, Modifier.weight(1f))
-                ColorOs17Button(presentation.positiveText, true, darkTheme, onPositive, Modifier.weight(1f))
+                ColorOs17Button(presentation.negativeText, false, darkTheme, onNegative, Modifier.weight(1f),
+                    enabled = presentation.negativeEnabled)
+                ColorOs17Button(positiveText, true, darkTheme, onPositive, Modifier.weight(1f),
+                    enabled = presentation.positiveEnabled)
             }
         }
     }

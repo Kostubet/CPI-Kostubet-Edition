@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import kotlin.math.abs
 import com.cosmod.launcherglass.util.GlassLogger
@@ -18,6 +19,7 @@ data class ProcessedIcon(
     val plateMaskBitmap: Bitmap,
     val bgColor: Int,
     val artwork: Boolean = false,
+    val glyphTint: PorterDuffColorFilter? = null,
 )
 
 internal fun shadedIconGlyph(color: Int, depth: Float): ColorMatrixColorFilter {

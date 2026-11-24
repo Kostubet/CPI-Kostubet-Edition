@@ -1,8 +1,84 @@
-# CPI Kostubet Edition 0.3.2
+# CPI Kostubet Edition 0.3.3
 
 [Русский](#русский) · [English](#english)
 
 ## Русский
+
+### Сборка 466 — релиз 0.3.3
+
+- Добавлен каталог конфигов CPI с поиском, предпросмотром по типу стекла и применением настроек. Для публикации и реакций используется аккаунт CPI со входом через GitHub.
+- В каталоге появились лайки и избранное с публичными счётчиками, а администратор может закреплять публикации.
+- «Оформление» рабочего стола переключает стили плавнее. Карточку можно опустить, чтобы увидеть иконки. Исправлены перепутанные подписи и значки после обновления.
+- Снижена нагрузка стекла при открытии центра управления, шторки уведомлений и клавиатуры PIN, а также при сворачивании уведомлений в капсулу.
+- Экран обновлений переведён на COUI 17. CPI проверяет новые релизы при запуске и в фоне.
+
+### Сборка 465
+
+- Кнопка публикации в каталоге использует круглый «+» со свечением COUI. Форма публикации использует диалог COUI с действиями в нижней панели.
+- Исправлены перепутанные подписи и значки в «Оформлении» рабочего стола, когда лаунчер продолжает работать после обновления CPI.
+
+### Сборка 464
+
+- Аккаунт CPI перенесён в «О модуле». В каталоге появился отдельный поиск COUI и кнопка публикации внизу справа.
+- В диалоге COUI образец показывается над метаданными. Поверхности сгруппированы по типу стекла, а для загрузки используется круговой индикатор COUI.
+- Добавлены лайки, избранное с публичными счётчиками и закрепление конфигов главным администратором каталога.
+
+### Сборка 462
+
+- Для входа в аккаунт CPI используется GitHub. Публикации подписываются выбранным в CPI ником.
+
+### Сборка 461
+
+- Подключена база общего каталога конфигов CPI. Для публичной регистрации требуется настроить доставку кодов по почте.
+
+### Сборка 460
+
+- Добавлен каталог конфигов с поиском, предпросмотром и применением настроек. Для публикации нужен аккаунт CPI с подтверждённой почтой и публичным ником.
+- Добавлена серверная часть каталога. Общий каталог доступен после подключения сервера к сборке.
+
+### Сборка 459
+
+- Центр управления переиспользует кадр фона ползунков во время открытия. В центре управления и шторке уведомлений отключённые эффекты больше не запускают лишние выборки фона в шейдере.
+- Кнопки PIN используют одну программу маски стекла. При сворачивании уведомлений в капсулу каждая поверхность рисует свой материал без промежуточных слоёв смешивания.
+
+### Сборка 458
+
+- «Оформление» распределяет тяжёлую перерисовку по кадрам даже при задержке снимка перехода. Переключение на «Авто» с тем же итоговым оформлением обходится без снимка.
+- При смене стиля переиспользуется готовое размытие статичных обоев для дока и индикатора страниц.
+
+### Сборка 457
+
+- При перекраске совместимых иконок Flux лаунчер переиспользует исходный слой логотипа. Стекло также сохраняет результат проверки сглаживания для каждой формы иконок.
+
+### Сборка 456
+
+- При переключении стилей «Оформление» распределяет обновление иконок и виджетов по кадрам. Когда новое размытие обоев готово, оно обновляет текстуры стекла без повторной перерисовки всего рабочего стола на GPU.
+
+### Сборка 455
+
+- При переключении стилей «Оформление» заранее измеряет ползунки и панель режимов. Анимация высоты карточки переиспользует этот расчёт.
+
+### Сборка 454
+
+- «Оформление» загружает обои высокого разрешения только при открытии пипетки.
+- При смене стиля лаунчер распределяет перерисовку виджетов и иконок по разным кадрам и по возможности переиспользует захваченные статичные обои.
+- При перетаскивании цветового ползунка переход на ручной цвет и новое значение применяются вместе.
+
+### Сборка 453
+
+- Облегчена смена стилей на рабочем столе. Стекло переиспользует кэш материалов, а затухание кадра обрабатывает аппаратный композитор.
+- Ползунки «Оформления» появляются и исчезают с размытием. Смягчён отскок ползунков и панели режимов.
+
+### Сборка 452
+
+- При смене стиля «Оформление» читает настройки в фоне, распределяет отрисовку иконок по кадрам и объединяет быстрые запросы на пересчёт размытия обоев.
+
+### Сборка 451
+
+- При быстрых переключениях стилей «Оформление» сохраняет плавную смену стекла на иконках и виджетах с меньшим числом захватов экрана.
+- Короткий свайп вниз опускает карточку «Оформление», чтобы открыть обзор рабочего стола. Свайп вверх возвращает её на место, длинный свайп вниз закрывает.
+- Ползунки цвета и панель «Светлые / Тёмные / Авто» плавно увеличиваются с лёгким отскоком.
+- Экран обновлений оформлен на COUI 17. CPI проверяет релизы при открытии приложения и в фоне, а при блокировке уведомлений показывает ссылку на системные настройки.
 
 ### Сборка 450 — релиз 0.3.2
 
@@ -283,6 +359,82 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 466 — release 0.3.3
+
+- Added the CPI config catalog with search, previews by glass style, and one-tap application. Publishing and reactions use a CPI account with GitHub sign-in.
+- Added likes and favorites with public counts, plus the ability for the catalog admin to pin configs.
+- Home screen Appearance switches styles more smoothly. The panel can be lowered to reveal more icons. Fixed mismatched labels and icons after updating.
+- Reduced the cost of glass when opening Control Center, the notification shade, or the PIN keypad, and when collapsing lock-screen notifications into the capsule.
+- Moved the Updates screen to COUI 17. CPI checks for releases at launch and in the background.
+
+### Build 465
+
+- The catalog uses a round COUI “+” button with a native glow. The publication form uses a COUI dialog with footer actions.
+- Fixed mismatched desktop Appearance labels and icons when the launcher stays open across a CPI update.
+
+### Build 464
+
+- Moved the CPI account to About. The catalog has a dedicated COUI search bar and a bottom-right publish button.
+- The COUI dialog shows the preview above config details, groups surfaces by glass material, and uses the COUI circular loading indicator.
+- Added likes, favorites with public counts, and catalog pinning for the owner.
+
+### Build 462
+
+- CPI accounts use GitHub sign-in. Configs are published under the nickname chosen in CPI.
+
+### Build 461
+
+- Connected the shared CPI config catalog database. Public registration requires email code delivery to be configured.
+
+### Build 460
+
+- Added a config catalog with search, previews, and settings import. Publishing requires a CPI account with a verified email and a public nickname.
+- Added the catalog backend. Shared access requires a configured server.
+
+### Build 459
+
+- The Control Center reuses the slider backdrop while opening. In both shades, disabled effects skip redundant backdrop samples in the shader.
+- PIN keys share a glass mask program. When notifications collapse into the capsule, each surface draws its own material without intermediate blending layers.
+
+### Build 458
+
+- Appearance spreads expensive redraws across frames even if the transition snapshot is delayed. Selecting Auto with the same effective theme skips the snapshot.
+- Reused the dock and page indicator blur from unchanged static wallpaper when switching appearance.
+
+### Build 457
+
+- Recoloring compatible Flux icons reuses their native logo layers. Glass also caches the antialiasing check for each icon shape.
+
+### Build 456
+
+- Desktop Appearance redraws icons and widgets across several frames when changing styles. When the new wallpaper blur is ready, GPU rendering updates the glass textures without forcing the entire workspace to redraw.
+
+### Build 455
+
+- Desktop Appearance measures the sliders and theme picker before changing styles. The card reuses that layout throughout its resize animation.
+
+### Build 454
+
+- Appearance loads the high-resolution wallpaper when the eyedropper opens.
+- Style changes spread widget and icon redraws across frames and reuse the static wallpaper capture when available.
+- Dragging a color slider applies the manual color source and its new value together.
+
+### Build 453
+
+- Desktop style changes reuse icon materials and let the hardware renderer fade the outgoing frame.
+- Appearance sliders blur as they enter and exit. The sliders and mode selector settle with a softer bounce.
+
+### Build 452
+
+- Appearance loads settings off the launcher UI thread, spreads icon redraws across frames, and coalesces wallpaper blur updates when switching styles quickly.
+
+### Build 451
+
+- Rapid style changes in Appearance reuse the active transition frame to cut screen captures while icons and widgets fade between styles.
+- A short downward swipe lowers the Appearance sheet to reveal more of the home screen. Swipe up to raise it again or swipe farther down to close it.
+- The color sliders and Light / Dark / Auto controls grow into place with a gentle bounce.
+- The Updates screen uses COUI 17. CPI checks for releases when you open it and in the background, and links to Android's settings when update notifications are blocked.
 
 ### Build 450 — version 0.3.2
 

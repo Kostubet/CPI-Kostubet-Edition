@@ -182,6 +182,23 @@ object WallpaperHelper {
     private var sourceRevision = 0L
 
     private var cachedRevision = -1L
+    private var appearanceReloadAt = 0L
+
+    private data class WallpaperInputKey(
+        val wallpaperId: Int, val width: Int, val height: Int, val scroll: Float, val systemEffect: Boolean,
+    )
+    private class WallpaperInput(val key: WallpaperInputKey, bitmap: Bitmap) {
+        private val image = WeakReference(bitmap)
+        private val generation = bitmap.generationId
+
+        fun reuse(key: WallpaperInputKey?): Bitmap? = image.get()?.takeIf {
+            this.key == key && !it.isRecycled && generation == it.generationId
+        }
+    }
+    private var wallpaperInput: WallpaperInput? = null
+    private val reloadAppearanceBackdrop = Runnable {
+        synchronized(this) { appContext?.let(::requestLoad) }
+    }
 
     private var retryAfterMs = 0L
 
@@ -243,9 +260,7 @@ object WallpaperHelper {
 
                 if (signature == null || signature != liveFrameSignature || cachedBlurRadius != radius || cachedRevision != revision) {
 
-                    val context = appContext
-
-                    val candidate = if (context != null) loadAndBlurWallpaper(context, radius, frame) else null
+                    val candidate = if (appContext != null) loadAndBlurWallpaper(radius, frame, live = true) else null
 
                     if (candidate != null) synchronized(this) {
 
@@ -353,6 +368,7 @@ object WallpaperHelper {
                 widgetWallpaper=null
                 systemSnapshot=null
                 snapshotTimeMs=0L
+                wallpaperInput=null
             }
             synchronized(softwareSnapshots){softwareSnapshots.clear()}
             loader.execute { GpuWallpaperBlur.close() }
@@ -374,9 +390,24 @@ object WallpaperHelper {
         sourceRevision++
 
         retryAfterMs = 0L
+        appearanceReloadAt = 0L
+        wallpaperInput = null
+        mainHandler.removeCallbacks(reloadAppearanceBackdrop)
 
         appContext?.let { requestLoad(it) }
 
+    }
+
+
+
+    @Synchronized
+    fun invalidateForAppearance() {
+        // Keep the currently published blur available during a burst of style changes.
+        sourceRevision++
+        retryAfterMs = 0L
+        appearanceReloadAt = SystemClock.uptimeMillis() + 96L
+        mainHandler.removeCallbacks(reloadAppearanceBackdrop)
+        mainHandler.postAtTime(reloadAppearanceBackdrop, appearanceReloadAt)
     }
 
 
@@ -529,7 +560,7 @@ object WallpaperHelper {
 
         val radius = PrefsHelper.blurRadius.coerceIn(0, 50)
 
-        if (isReloading || SystemClock.uptimeMillis() < retryAfterMs ||
+        if (isReloading || SystemClock.uptimeMillis() < maxOf(retryAfterMs, appearanceReloadAt) ||
 
             (cachedRevision == sourceRevision && cachedBlurRadius == radius && hasBackdropForActiveEffects())) return
 
@@ -538,12 +569,27 @@ object WallpaperHelper {
         val revision = sourceRevision
 
         val liveSerial=livePublishSerial
+        val appearanceReload = appearanceReloadAt != 0L
+        val previousInput = wallpaperInput.takeIf { appearanceReload }
+        val scroll = LiveBlurEngine.wallpaperScrollRatio
 
         val ctx = context.applicationContext ?: context
 
         loader.execute {
-
-            val candidate = loadAndBlurWallpaper(ctx, radius)
+            val systemEffect = hasSystemWallpaperEffect(ctx)
+            val key = staticWallpaperInputKey(ctx, scroll, systemEffect)
+            // ColorOS enables the effect flag for static depth wallpapers too. After
+            // a fresh wallpaper frame or while the desktop is moving, recapture it.
+            val retained = previousInput?.reuse(key)?.takeIf {
+                !systemEffect || it === systemSnapshot && !LiveBlurEngine.hasRecentMotion
+            }
+            val raw = retained ?: runCatching { loadRawWallpaper(ctx, systemEffect) }
+                .onFailure { GlassLogger.limited("WallpaperHelper", "wallpaper-input") { "Wallpaper capture failed: $it" } }
+                .getOrNull()
+            // A rapid style change can supersede this request during wallpaper capture.
+            val current = synchronized(this) { revision == sourceRevision && liveSerial == livePublishSerial }
+            val candidate = if (raw != null && current) loadAndBlurWallpaper(radius, raw, live = false,
+                reuseStatic = key != null) else null
 
             var published = false
 
@@ -557,6 +603,8 @@ object WallpaperHelper {
                     if (candidate != null) {
 
                         publishBackdrops(candidate)
+                        wallpaperInput = if (key != null && raw != null) WallpaperInput(key, raw) else null
+                        appearanceReloadAt = 0L
                         retryAfterMs=if(hasBackdropForActiveEffects())0L else SystemClock.uptimeMillis()+2000L
 
                         cachedBlurRadius = radius
@@ -583,10 +631,16 @@ object WallpaperHelper {
 
             if (published) mainHandler.post {
 
-                if (PrefsHelper.enabled && ((LiveBlurEngine.isResumed && !LiveBlurEngine.isAppLaunchInProgress) || com.cosmod.launcherglass.xposed.NativeSurfaceLive.active)) {
-
-                    LiveBlurEngine.invalidate()
-
+                val streaming = com.cosmod.launcherglass.xposed.NativeSurfaceLive.active
+                if (PrefsHelper.enabled && ((LiveBlurEngine.isResumed && !LiveBlurEngine.isAppLaunchInProgress) || streaming)) {
+                    if (appearanceReload && PrefsHelper.gpuEffects && !streaming &&
+                        !LiveBlurEngine.deferWorkspaceSampling) {
+                        // Refresh the sampler textures after a style change without forcing all
+                        // launcher items to re-record their display lists again.
+                        LiveBlurEngine.onWallpaperFrameReady()
+                    } else {
+                        LiveBlurEngine.invalidate()
+                    }
                 }
 
             }
@@ -679,37 +733,29 @@ object WallpaperHelper {
 
 
 
-    private fun loadAndBlurWallpaper(context: Context, radius: Int, frame: Bitmap? = null): Backdrops? {
+    private fun staticWallpaperInputKey(
+        context: Context, scroll: Float, systemEffect: Boolean,
+    ): WallpaperInputKey? = runCatching {
+        val manager = WallpaperManager.getInstance(context)
+        val id = manager.getWallpaperId(WallpaperManager.FLAG_SYSTEM)
+        if (id <= 0 || manager.wallpaperInfo != null) return null
+        val metrics = context.resources.displayMetrics
+        WallpaperInputKey(id, metrics.widthPixels, metrics.heightPixels, scroll, systemEffect)
+    }.getOrNull()
+
+    private fun loadAndBlurWallpaper(radius: Int, rawBitmap: Bitmap, live: Boolean, reuseStatic: Boolean = false): Backdrops? {
 
         try {
 
-            val rawBitmap = frame ?: loadRawWallpaper(context)
-
-            if (rawBitmap == null) {
-
-                if (logCount < 3) {
-
-                    GlassLogger.i("WallpaperHelper", "Raw wallpaper could not be loaded")
-
-                    logCount++
-
-                }
-
-                return null
-
-            }
-
-
-
             val heightLimit=when {
-                frame==null->Int.MAX_VALUE
+                !live->Int.MAX_VALUE
                 PerformancePolicy.economy->(PerformancePolicy.sourceHeight*.70f).roundToInt().coerceAtLeast(360)
                 else->PerformancePolicy.sourceHeight
             }
             val widgets=runCatching {widgetBackdrop(rawBitmap,PrefsHelper.widgets,heightLimit)}.onFailure {
                 GlassLogger.limited("PhotoWidget","backdrop") {"Widget wallpaper processing failed: $it"}
             }.getOrNull()
-            val neutral=NeutralBackdrop.prepare(rawBitmap,heightLimit)
+            val neutral=NeutralBackdrop.prepare(rawBitmap,heightLimit,reuseStatic)
             if(!PrefsHelper.blurEnabled)return Backdrops(null,null,widgets,null,neutral).takeIf {
                 widgets!=null || neutral.indicator!=null || neutral.dock!=null
             }
@@ -824,12 +870,12 @@ object WallpaperHelper {
 
     // Wallpaper access uses the hooked launcher's permissions; denied fallback calls are caught.
     @android.annotation.SuppressLint("MissingPermission")
-    private fun loadRawWallpaper(context: Context): Bitmap? {
+    private fun loadRawWallpaper(context: Context, systemEffect: Boolean = hasSystemWallpaperEffect(context)): Bitmap? {
 
         // A screen-sized screenshot has already discarded the sides that
         // become visible during a page swipe. Keep the full crop when the
         // static wallpaper file still contains that horizontal travel.
-        if(!hasSystemWallpaperEffect(context)){
+        if(!systemEffect){
             val manager=WallpaperManager.getInstance(context)
             val metrics=context.resources.displayMetrics
             val dimensions=BitmapFactory.Options().apply {inJustDecodeBounds=true}
@@ -873,7 +919,7 @@ object WallpaperHelper {
 
         }
 
-        if (hasSystemWallpaperEffect(context)) {
+        if (systemEffect) {
 
             // If we already have a valid blurred wallpaper, retain it and retry the screenshot.
 

@@ -236,9 +236,10 @@ internal object SoftGlassShader {
             if (showMaterial < .001) return stock;
             float3 color = capture.rgb/max(.001,capture.a);
             bool diffused = onbPanelSurface.x > .5 || widget;
-            if (diffused || onbOptics.y > 1.0) {
+            float diffusion = diffused ? onbOptics.y : onbOptics.y-1.0;
+            if (diffusion > 0.0) {
                 float radius = widget ? 12.0 : (onbPanelSurface.x == 2.0 || volumeMore ? 23.0 : (onbPanelSurface.x == 4.0 ? 26.0 : 17.0));
-                float spread = min(.28*shortSide,radius*density)*(diffused ? onbOptics.y : onbOptics.y-1.0);
+                float spread = min(.28*shortSide,radius*density)*diffusion;
                 float2 axis = float2(.895,.447)*spread;
                 float2 across = float2(-axis.y,axis.x);
                 color = .20*(color + onbSample(uv,scale,axis,color) + onbSample(uv,scale,-axis,color)
@@ -253,7 +254,7 @@ internal object SoftGlassShader {
             float shine = 0.0;
             float stockShine = 0.0;
             if (rounded && uEnableMetaBall == 0 && inset >= 0.0 && inset < edge &&
-                u_commonArray[6] > 0.0) {
+                u_commonArray[6] > 0.0 && (onbLauncher || onbToneControls.x > 0.0 || onbOptics.w > 0.0)) {
                 float2 halfSize = max(float2(u_commonArray[4],u_commonArray[5]),float2(1.0));
                 float radius = min(u_commonArray[6],min(halfSize.x,halfSize.y));
                 float2 pos = p-float2(u_commonArray[2],u_size.y-u_commonArray[3]);
@@ -264,16 +265,16 @@ internal object SoftGlassShader {
                 float depth = onbHeight(inset/edge,3.8);
                 float slope = .5*edge*(onbHeight((inset+1.0)/edge,3.8)-onbHeight((inset-1.0)/edge,3.8));
                 float3 normal = normalize(float3(direction*sign(pos)*slope,1.0));
-                float2 ray = refract(float3(0,0,-1),normal,slider||workspace ? .3333:.25).xy;
-                float2 transmit = ray*2.0*mix(max(thickness-edge,0.0),thickness,depth);
                 float2 reflectAt = normal.xy*(2.0*normal.z) * min((workspace?175.0:266.7)*density,2.25*shortSide)*(1.0-depth);
                 float3 reflection = onbSample(uv,scale,reflectAt,original);
-                float reflectionWeight = pow(max(1.0-depth,0.0),1.0/3.8);
-                // Keep the same diffused base on both sides of the rim. At zero displacement
-                // the optical correction must vanish, even on a high-contrast backdrop.
-                float3 centerSample = capture.rgb/max(.001,capture.a);
-                float3 refracted = onbSample(uv,scale,transmit,centerSample);
-                color += onbToneControls.x*(mix(refracted,reflection,(workspace?.38:.68)*reflectionWeight) - centerSample);
+                if (onbToneControls.x > 0.0) {
+                    float2 ray = refract(float3(0,0,-1),normal,slider||workspace ? .3333:.25).xy;
+                    float2 transmit = ray*2.0*mix(max(thickness-edge,0.0),thickness,depth);
+                    float reflectionWeight = pow(max(1.0-depth,0.0),1.0/3.8);
+                    float3 centerSample = capture.rgb/max(.001,capture.a);
+                    float3 refracted = onbSample(uv,scale,transmit,centerSample);
+                    color += onbToneControls.x*(mix(refracted,reflection,(workspace?.38:.68)*reflectionWeight) - centerSample);
+                }
                 color = clamp(color,0.0,1.0);
                 color += onbOptics.w * reflection * ((workspace?.13:.21)*(1.0-depth)) *
                     (.3+.7*clamp(1.9-2.15*dot(color,float3(.2126,.7152,.0722)),0.0,1.0));

@@ -8,7 +8,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
@@ -111,7 +110,6 @@ internal object LockscreenGlass {
     private val main=Handler(Looper.getMainLooper())
     private class Target(val surface:Surface) {
         val material=LockscreenMaterial()
-        var transitionMaterial:LockscreenMaterial?=null
         var pinKeys:Array<LockscreenMaterial?>?=null
         var glyph:ClockGlyphGlass?=null
         val widgetBackgrounds=ArrayList<WeakReference<View>>()
@@ -133,7 +131,6 @@ internal object LockscreenGlass {
 
         fun discard(){
             material.discard()
-            transitionMaterial?.discard()
             pinKeys?.forEach {it?.discard()}
             if(android.os.Build.VERSION.SDK_INT>=33){glyph?.discard();glyph=null}
         }
@@ -176,7 +173,6 @@ internal object LockscreenGlass {
     private var positionRefreshPending=false
     private val capsuleMotion=WeakHashMap<View,CapsuleMotion>()
     private val rowMotion=WeakHashMap<View,CapsuleMotion>()
-    private val transitionAdd=Paint().apply {blendMode=BlendMode.PLUS}
     private val widgetBackgrounds=WeakHashMap<View,WeakReference<ViewGroup>>()
     private val nativeWidgetEffects=WeakHashMap<View,RenderEffect>()
     private val suppressedWidgetEffects=WeakHashMap<View,Boolean>()
@@ -842,7 +838,9 @@ internal object LockscreenGlass {
             if(LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.NOTIFICATIONS))!=true)return
             val actual=NativeIconAccess.call(view,"getActualHeight") as? Int ?: view.height
             if(actual<=0)return
-            updateNotificationCorners(view,row,profile.corner,actual)
+            val transition=rowMotion[row]?.progress ?: 0f
+            if(transition>=.999f)return
+            if(transition<=0f)updateNotificationCorners(view,row,profile.corner,actual)
             fun inset(clip:String,overlap:String)=maxOf((NativeIconAccess.field(view,clip) as? Int ?: 0),
                 (NativeIconAccess.field(view,overlap) as? Int ?: 0),0)
             val top=inset("mClipTopAmount","mTopOverlap")
@@ -851,8 +849,6 @@ internal object LockscreenGlass {
             if(bottom<=top)return
             val width=(NativeIconAccess.call(view,"getActualWidth") as? Int ?: view.width).coerceIn(1,view.width)
             val left=if(NativeIconAccess.call(view,"isAlignedToRight")==true)view.width-width else 0
-            val transition=rowMotion[row]?.progress ?: 0f
-            if(transition>=.999f)return
             val base=if(NativeIconAccess.field(view,"mBottomIsRounded")==true &&
                 NativeIconAccess.field(view,"mBottomAmountClips")==true)bottom else actual
             p.setObjectExtra("cpiLockNotificationLayer",NotificationLayer(left,width,base,top,bottom,transition))
@@ -899,28 +895,12 @@ internal object LockscreenGlass {
         }
     }
 
-    private fun drawHandoff(canvas:Canvas,view:View,bounds:RectF,radius:Float,progress:Float,
-        onCapsule:Boolean,path:Path?){
-        val notes=profiles[Surface.NOTIFICATIONS] ?: return
-        val capsule=profiles[Surface.CAPSULE] ?: return
-        val frame=LockscreenBackdrop.frame ?: return
-        val target=target(view,if(onCapsule)Surface.CAPSULE else Surface.NOTIFICATIONS)
-        val second=target.transitionMaterial ?: LockscreenMaterial().also {target.transitionMaterial=it}
+    private fun notificationAmount(surface:Surface,progress:Float):Float {
+        if(Surface.NOTIFICATIONS !in profiles || Surface.CAPSULE !in profiles)return surfaceAmount
         val mix=progress*progress*(3f-2f*progress)
-        // Native row and capsule can both be visible during the morph. Their
-        // combined module contribution stays at one plate throughout.
-        val visibility=(if(onCapsule)mix else 1f-mix)*surfaceAmount
-        if(visibility<=0f)return
-        val save=canvas.saveLayerAlpha(bounds,(visibility*255).toInt())
-        try {
-            target.material.draw(canvas,view,Surface.NOTIFICATIONS,notes,frame,bounds=bounds,amount=1f-mix,
-                nativeRadius=radius,useNativeMask=false,drawRim=false,exactPath=path,maskOnly=!onCapsule && path==null)
-            val add=canvas.saveLayer(bounds,transitionAdd)
-            try {
-                second.draw(canvas,view,Surface.CAPSULE,capsule,frame,bounds=bounds,amount=mix,nativeRadius=radius,
-                    drawRim=false,exactPath=path,maskOnly=!onCapsule && path==null)
-            }finally {canvas.restoreToCount(add)}
-        }finally {canvas.restoreToCount(save)}
+        // ColorOS animates both shapes. Fade each shape's own material while
+        // the stock animator moves it, so neither needs an intermediate layer.
+        return surfaceAmount*(if(surface==Surface.CAPSULE)mix else 1f-mix)
     }
 
     private val notificationPath=Path()
@@ -973,11 +953,9 @@ internal object LockscreenGlass {
             else notificationPath.addRoundRect(notificationBounds,notificationRadii,Path.Direction.CW)
             // The OEM contour is already rounded. Use it as the single alpha
             // boundary instead of multiplying it by another rounded mask.
-            if(layer.progress>0f && layer.progress<1f && Surface.CAPSULE in profiles){
-                drawHandoff(canvas,view,notificationBounds,radius,layer.progress,onCapsule=false,path=notificationPath)
-            }else target(view,Surface.NOTIFICATIONS).material.draw(canvas,view,Surface.NOTIFICATIONS,profile,frame,
+            target(view,Surface.NOTIFICATIONS).material.draw(canvas,view,Surface.NOTIFICATIONS,profile,frame,
                 bounds=notificationBounds,nativeRadius=radius,useNativeMask=false,drawRim=false,
-                exactPath=notificationPath,amount=surfaceAmount)
+                exactPath=notificationPath,amount=notificationAmount(Surface.NOTIFICATIONS,layer.progress))
             rendered.add(Surface.NOTIFICATIONS)
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","notification") {"Native notification kept: "+t.javaClass.simpleName}
@@ -985,38 +963,30 @@ internal object LockscreenGlass {
     }
 
     private fun drawCapsule(p:XC_MethodHook.MethodHookParam){
-        if(!visible || surfaceAmount<=0f || p.hasThrowable() || Surface.CAPSULE !in profiles)return
+        if(!visible || surfaceAmount<=0f || p.hasThrowable())return
+        val profile=profiles[Surface.CAPSULE] ?: return
         val view=p.thisObject as View
         val item=view.parent as? View ?: return
         if(item.javaClass.name!=CAPSULE_ITEM)return
         val canvas=p.args[0] as Canvas
         if(!renderable(view,canvas))return
         try {
-            val progress=capsuleMotion[item]?.progress ?: 1f
+            val motion=capsuleMotion[item]
+            val progress=motion?.progress ?: 1f
             val bound=NativeIconAccess.call(item,"isBindToStackView")==true
-            if(bound && (progress<=0f || capsuleMotion[item]==null))return
+            if(bound && (progress<=0f || motion==null))return
             val container=NativeIconAccess.call(item,"getCapsuleContainer") ?: return
             if(NativeIconAccess.call(container,"getBaseCard")!==item &&
                 (capsuleTitleId==View.NO_ID || item.findViewById<View>(capsuleTitleId)==null))return
-            target(view,Surface.CAPSULE)
             val provider=NativeIconAccess.call(item,"getPathProvider") ?: return
             val bounds=NativeIconAccess.call(provider,"getClipRect") as? Rect ?: return
             if(bounds.isEmpty)return
             capsuleBounds.set(bounds)
             val radius=NativeIconAccess.call(item,"getActualRadius") as? Float
             val path=NativeIconAccess.call(provider,"getClipPath") as? Path
-            val clip=canvas.save()
-            try {
-                if(path!=null && !path.isEmpty)canvas.clipPath(path)
-                if(progress>0f && progress<1f && Surface.NOTIFICATIONS in profiles){
-                    val r=radius ?: minOf(bounds.width(),bounds.height())*.5f
-                    drawHandoff(canvas,view,capsuleBounds,r,progress,onCapsule=true,path=path)
-                }else {
-                    val profile=profiles[Surface.CAPSULE] ?: return
-                    target(view,Surface.CAPSULE).material.draw(canvas,view,Surface.CAPSULE,profile,LockscreenBackdrop.frame,
-                        bounds=capsuleBounds,nativeRadius=radius,exactPath=path,amount=surfaceAmount)
-                }
-            }finally {canvas.restoreToCount(clip)}
+            target(view,Surface.CAPSULE).material.draw(canvas,view,Surface.CAPSULE,profile,LockscreenBackdrop.frame,
+                bounds=capsuleBounds,nativeRadius=radius,exactPath=path?.takeUnless {it.isEmpty},
+                amount=if(progress>0f)notificationAmount(Surface.CAPSULE,progress) else surfaceAmount)
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","capsule") {"Native capsule kept: "+t.javaClass.simpleName}
         }
