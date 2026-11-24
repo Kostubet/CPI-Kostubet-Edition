@@ -3,6 +3,7 @@ package com.cosmod.launcherglass.xposed
 import android.graphics.*
 import android.os.Build
 import android.view.View
+import androidx.annotation.RequiresApi
 import com.cosmod.launcherglass.ui.LockscreenSettings.Profile
 import com.cosmod.launcherglass.ui.LockscreenSettings.Surface
 import kotlin.math.roundToInt
@@ -41,11 +42,11 @@ internal class LockscreenMaterial {
     private var fallbackImage:Bitmap?=null
     private var fallbackShader:BitmapShader?=null
 
-    private companion object {
+    @RequiresApi(33)
+    private object LensMask {
         // RenderEffect snapshots the shader state on the UI thread. Reuse the
         // mask program across key caps and cards with the same geometry.
-        private val mask by lazy(LazyThreadSafetyMode.NONE) {
-            RuntimeShader("""
+        private val shader=RuntimeShader("""
                 uniform float2 size;
                 uniform float radius;
                 half4 main(float2 p) {
@@ -54,10 +55,20 @@ internal class LockscreenMaterial {
                     return half4(1.0-smoothstep(-.85,.45,d));
                 }
             """)
-        }
         private var maskWidth=0
         private var maskHeight=0
         private var maskCorner=0f
+
+        fun forGeometry(width:Int,height:Int,corner:Float):RuntimeShader {
+            if(maskWidth!=width || maskHeight!=height || maskCorner!=corner){
+                shader.setFloatUniform("size",width.toFloat(),height.toFloat())
+                shader.setFloatUniform("radius",corner)
+                maskWidth=width
+                maskHeight=height
+                maskCorner=corner
+            }
+            return shader
+        }
     }
 
     fun discard(){
@@ -196,24 +207,16 @@ internal class LockscreenMaterial {
         }finally {canvas.restoreToCount(save)}
     }
 
-    @androidx.annotation.RequiresApi(33)
+    @RequiresApi(33)
     private fun lens(image:Bitmap,profile:Profile,corner:Float,width:Int,height:Int,glyphs:Boolean,neutral:Boolean,filter:ColorMatrixColorFilter?,clipped:Boolean):Boolean {
         val newEngine=profile.engine!=null
         if(current?.let {it.image===image && it.source==source && it.width==width && it.height==height &&
                 it.corner==corner && it.profile==profile && it.glyphs==glyphs && it.neutral==neutral &&
                 it.clipped==clipped && it.newEngine==newEngine}==true && node.hasDisplayList())return true
         val lens=LiquidGlassShader.shared() ?: return false
-        val mask=Companion.mask
         // Exact paths already clip the lens output. Keep the native radius
         // for refraction, but leave the inner mask rectangular.
-        val maskRadius=if(clipped)0f else corner
-        if(maskWidth!=width || maskHeight!=height || maskCorner!=maskRadius){
-            mask.setFloatUniform("size",width.toFloat(),height.toFloat())
-            mask.setFloatUniform("radius",maskRadius)
-            maskWidth=width
-            maskHeight=height
-            maskCorner=maskRadius
-        }
+        val mask=LensMask.forGeometry(width,height,if(clipped)0f else corner)
         // A thin digit cannot use the displacement of a plate the size of its bounding box.
         val strength=if(glyphs)(profile.distortion*.30f).roundToInt() else profile.distortion
         val dispersion=if(glyphs)(profile.dispersion*.12f).roundToInt() else profile.dispersion
