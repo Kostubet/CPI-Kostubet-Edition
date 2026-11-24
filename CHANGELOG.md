@@ -1,8 +1,16 @@
-# CPI Kostubet Edition 0.3.2
+# CPI Kostubet Edition 0.3.3
 
 [Русский](#русский) · [English](#english)
 
 ## Русский
+
+### Сборка 466 — релиз 0.3.3
+
+- Добавлен каталог конфигов CPI с поиском, предпросмотром по типу стекла и применением настроек. Для публикации и реакций используется аккаунт CPI со входом через GitHub.
+- В каталоге появились лайки и избранное с публичными счётчиками, а администратор может закреплять публикации.
+- «Оформление» рабочего стола переключает стили плавнее. Карточку можно опустить, чтобы увидеть иконки. Исправлены перепутанные подписи и значки после обновления.
+- Снижена нагрузка стекла при открытии центра управления, шторки уведомлений и клавиатуры PIN, а также при сворачивании уведомлений в капсулу.
+- Экран обновлений переведён на COUI 17. CPI проверяет новые релизы при запуске и в фоне.
 
 ### Сборка 465
 
@@ -351,6 +359,14 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 466 — release 0.3.3
+
+- Added the CPI config catalog with search, previews by glass style, and one-tap application. Publishing and reactions use a CPI account with GitHub sign-in.
+- Added likes and favorites with public counts, plus the ability for the catalog admin to pin configs.
+- Home screen Appearance switches styles more smoothly. The panel can be lowered to reveal more icons. Fixed mismatched labels and icons after updating.
+- Reduced the cost of glass when opening Control Center, the notification shade, or the PIN keypad, and when collapsing lock-screen notifications into the capsule.
+- Moved the Updates screen to COUI 17. CPI checks for releases at launch and in the background.
 
 ### Build 465
 
