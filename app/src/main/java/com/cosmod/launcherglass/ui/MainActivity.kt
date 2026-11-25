@@ -2589,12 +2589,30 @@ class MainActivity : AppCompatActivity() {
 
     private fun appMenuSection(body: LinearLayout) {
         val material = column()
-        add(material, slider(getString(R.string.ui_blur_radius), "app_menu_glass_blur", 0,
-            OpticalSettings.maximum("app_menu_glass_blur"), " dp"))
-        divider(material)
+        val scope = GlassEngineSettings.APP_MENU
+        glassTypeChoice(material, "app_menu_glass_style", scope, allowed = ::master) {
+            addGlassBlur(it, "app_menu_glass_blur", GlassEngineSettings.blurOpacityKey(scope),
+                OpticalSettings.maximum("app_menu_glass_blur"), ::master)
+        }
+        val refraction = column()
+        for ((label, key) in listOf(
+            R.string.ui_liquid_width to "app_menu_glass_width",
+            R.string.ui_liquid_distortion to "app_menu_glass_distortion",
+            R.string.ui_glass_dispersion to "app_menu_glass_dispersion",
+        )) {
+            add(refraction, slider(getString(label), key, 0, OpticalSettings.maximum(key), "%"))
+        }
+        val refractionVisible = {
+            number("app_menu_glass_style") == 1 && !bool(scope) && !bool(GlassEngineSettings.softKey(scope))
+        }
+        refraction.visibility = if (refractionVisible()) View.VISIBLE else View.GONE
+        refreshers.add { reveal(refraction, refractionVisible()) }
+        add(material, refraction)
         add(material, slider(getString(R.string.island_opacity), "app_menu_glass_opacity", 0, 100, "%"))
         gate(material, ::master)
         accordionCard(body, R.string.ui_app_menu_material, material)
+        add(body, card(switchRow(getString(R.string.ui_app_menu_background_blur), "app_menu_background_blur",
+            getString(R.string.ui_app_menu_background_blur_hint)).also { gate(it, ::master) }))
     }
 
     private fun communityCatalogSection(layer:FrameLayout) {

@@ -56,8 +56,12 @@ class FeatureSearchTest {
     @Test fun appMenuIndexesItsGlassControls() {
         val labels = FeatureSearch.labels("APP_MENU")
         assertTrue(R.string.ui_app_menu_material in labels)
-        assertTrue(R.string.ui_blur_radius in labels)
+        assertTrue(R.string.ui_blur_style in labels)
+        assertTrue(R.string.glass_blur_group in labels)
+        assertTrue(R.string.shade_glass_blur_opacity in labels)
         assertTrue(R.string.island_opacity in labels)
+        assertTrue(R.string.glass_lens_height in labels)
+        assertTrue(R.string.ui_app_menu_background_blur in labels)
     }
 
     @Test fun shadeSearchIndexesBothPanelsAndMaterialOptions(){

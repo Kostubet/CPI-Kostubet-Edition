@@ -3,7 +3,7 @@ package com.cosmod.launcherglass.ui
 object OpticalSettings {
     val booleans=mapOf("indicator_keep_visible" to true,"edge_light_enabled" to true,"edge_light_motion" to true,"island_glass_enabled" to false,"volume_glass_enabled" to false,
         "banner_glass_enabled" to false,"banner_glass_motion" to true,"banner_plate_enabled" to false,
-        "performance_light_drawer" to false,"performance_live_transition_glass" to false,
+        "app_menu_background_blur" to true,"performance_light_drawer" to false,"performance_live_transition_glass" to false,
         "performance_adaptive_alerts" to true,"coloros_ui_effects" to true,"performance_ltpo_idle" to true,
         "performance_high_refresh_pacing" to false,"performance_glass_120fps" to false,
         "banner_motion_soft" to false,
@@ -24,6 +24,8 @@ object OpticalSettings {
         "indicator_glass_style" to 0,"indicator_glass_blur" to 12,"indicator_glass_opacity" to 26,
         "indicator_glass_corner" to 50,"indicator_glass_width" to 42,"indicator_glass_distortion" to 80,
         "indicator_glass_dispersion" to 0,"app_menu_glass_blur" to 26,"app_menu_glass_opacity" to 30,
+        "app_menu_glass_style" to 1,"app_menu_glass_width" to 42,"app_menu_glass_distortion" to 90,
+        "app_menu_glass_dispersion" to 0,
         "volume_glass_blur" to 14,"volume_glass_style" to 1,
         "volume_glass_brightness" to 0,"volume_glass_rim" to 100,"volume_glass_height" to 100,"volume_glass_width" to 42,"volume_glass_distortion" to 90,"volume_glass_opacity" to 18,"volume_glass_dispersion" to 0,
         "launcher_icon_size" to 100,"dock_width_percent" to 112,"dock_height_percent" to 105,"dock_backdrop_saturation" to 100,"dock_backdrop_darkness" to 0,
@@ -51,8 +53,8 @@ object OpticalSettings {
         "volume_glass_height"->160
         "volume_glass_blur"->32
         "app_menu_glass_blur"->60
-        "volume_glass_style"->1
-        "volume_glass_distortion"->300
+        "app_menu_glass_style","volume_glass_style"->1
+        "app_menu_glass_distortion","volume_glass_distortion"->300
         "island_glass_distortion","banner_glass_distortion","large_folder_glass_strength","indicator_glass_distortion"->300
         "large_folder_glass_style",WidgetSettings.SCOPE->1
         in EdgeSettings.directionKeys->360

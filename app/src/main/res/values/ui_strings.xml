@@ -521,4 +521,6 @@
     <string name="ui_app_menu_title">App icon menu</string>
     <string name="ui_app_menu_keywords">launcher long press shortcuts popup other functions context menu</string>
     <string name="ui_app_menu_material">Menu glass</string>
+    <string name="ui_app_menu_background_blur">Blur behind the menu</string>
+    <string name="ui_app_menu_background_blur_hint">Blurs the workspace behind the menu. The menu glass has its own blur settings.</string>
 </resources>

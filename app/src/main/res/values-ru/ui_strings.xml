@@ -523,4 +523,6 @@
     <string name="ui_app_menu_title">Меню иконок</string>
     <string name="ui_app_menu_keywords">лаунчер долгое нажатие ярлыки контекстное меню другие функции</string>
     <string name="ui_app_menu_material">Стекло меню</string>
+    <string name="ui_app_menu_background_blur">Размытие за меню</string>
+    <string name="ui_app_menu_background_blur_hint">Размывает рабочий стол за меню. Размытие стекла настраивается отдельно.</string>
 </resources>
