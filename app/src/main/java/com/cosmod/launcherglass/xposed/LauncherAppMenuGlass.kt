@@ -22,6 +22,7 @@ import android.view.PixelCopy
 import android.view.View
 import android.widget.PopupWindow
 import android.view.ViewGroup
+import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.ui.FeatureSections
 import com.cosmod.launcherglass.ui.GlassEngineSettings
 import com.cosmod.launcherglass.ui.OpticalSettings
@@ -83,7 +84,7 @@ internal object LauncherAppMenuGlass {
             check(PopupWindow::class.java.isAssignableFrom(getWindow.returnType))
             check(Activity::class.java.isAssignableFrom(getLauncher.returnType))
             val frameType = loader.loadClass("com.coui.appcompat.poplist.RoundFrameLayout")
-            val radius = frameType.getDeclaredMethod("getSmoothRadiusAndWeight")
+            val radius = frameType.getDeclaredMethod("getSmoothRadiusAndWeight").apply { isAccessible = true }
             val blurBuilder = frameType.getDeclaredField("w").type
             val builderTarget = blurBuilder.getDeclaredField("b").apply { isAccessible = true }
             check(builderTarget.type == View::class.java)
@@ -99,9 +100,13 @@ internal object LauncherAppMenuGlass {
                     val settings = material ?: return
                     param.setObjectExtra(CLEAR_BACKGROUND_SCOPE, clearBackground.get())
                     clearBackground.set(!settings.backgroundBlur)
-                    val popup = getWindow.invoke(param.thisObject) as? PopupWindow ?: return
-                    val root = popup.contentView ?: return
-                    val launcher = getLauncher.invoke(param.thisObject) as? Activity ?: return
+                    val popup = getWindow.invoke(param.thisObject) as? PopupWindow
+                    val root = popup?.contentView
+                    val launcher = getLauncher.invoke(param.thisObject) as? Activity
+                    if (root == null || launcher == null) {
+                        GlassLogger.limited(TAG, "menu-content-missing") { "App menu window has no content or launcher" }
+                        return
+                    }
                     menus[root]?.release(root)
                     val frames = popupFrames(root, frameType)
                     if (frames.isEmpty()) {
@@ -109,12 +114,14 @@ internal object LauncherAppMenuGlass {
                         return
                     }
                     val menu = Menu(frames) { view ->
-                        (radius.invoke(view) as? FloatArray)?.firstOrNull()
-                            ?.takeIf { it.isFinite() && it > 0f } ?: 24f * view.resources.displayMetrics.density
+                        runCatching { (radius.invoke(view) as? FloatArray)?.firstOrNull() }
+                            .getOrNull()?.takeIf { it.isFinite() && it > 0f }
+                            ?: 24f * view.resources.displayMetrics.density
                     }
                     menus[root] = menu
                     frames.forEach { bindings[it] = menu }
                     root.addOnAttachStateChangeListener(menu)
+                    GlassLogger.limited(TAG, "menu-frames-bound") { "Found ${frames.size} COUI material frames" }
                     menu.capture(launcher, root)
                 }
 
@@ -150,9 +157,10 @@ internal object LauncherAppMenuGlass {
             // Give it its own drawable during both calls so it never caches the CPI wrapper.
             ModuleHooks.hookMethod(applyBlur, retainMaterial)
             ModuleHooks.hookMethod(refreshBlur, retainMaterial)
+            GlassLogger.i(TAG, "App menu material available in CPI build ${BuildConfig.VERSION_CODE}")
         }.onFailure {
             GlassLogger.limited(TAG, "menu-compatibility") {
-                "Using stock app menu material: ${it.javaClass.simpleName}"
+                "Using stock app menu material: ${it.javaClass.simpleName}: ${it.message}"
             }
         }
     }
@@ -196,7 +204,10 @@ internal object LauncherAppMenuGlass {
             val decor = launcher.window.decorView
             val width = decor.width
             val height = decor.height
-            if (width <= 0 || height <= 0 || !decor.isAttachedToWindow) return
+            if (width <= 0 || height <= 0 || !decor.isAttachedToWindow) {
+                GlassLogger.limited(TAG, "menu-workspace-unavailable") { "Launcher window is not ready to copy" }
+                return
+            }
             val location = IntArray(2).also(decor::getLocationOnScreen)
             val area = Rect(location[0], location[1], location[0] + width, location[1] + height)
             val scale = minOf(1f, 800f / width, 1560f / height)

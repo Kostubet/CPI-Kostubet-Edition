@@ -32,7 +32,7 @@ android {
         applicationId = "com.kostubet.cpi"
         minSdk = 31
         targetSdk = 35
-        versionCode = 470
+        versionCode = 471
         buildConfigField("String", "CPI_COMMUNITY_URL", "\"$communityUrl\"")
         buildConfigField("String", "CPI_COMMUNITY_KEY", "\"$communityKey\"")
         versionName = "0.3.3"
