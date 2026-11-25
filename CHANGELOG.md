@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 469
+
+- Исправлено применение материалов к меню иконок и подменю «Другие функции» после обновления штатного оформления ColorOS.
+
 ### Сборка 468
 
 - В меню иконок и подменю «Другие функции» доступны Frosted, Liquid Glass, новый движок и «Мягкий свет» с настройками материала. Штатное размытие рабочего стола за меню отключается отдельно.
@@ -368,6 +372,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 469
+
+- Fixed launcher icon and More functions menu materials being replaced when ColorOS refreshed its popup background.
 
 ### Build 468
 

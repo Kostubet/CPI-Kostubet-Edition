@@ -22,6 +22,7 @@ import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
 import android.widget.PopupWindow
+import android.view.ViewGroup
 import com.cosmod.launcherglass.ui.FeatureSections
 import com.cosmod.launcherglass.ui.GlassEngineSettings
 import com.cosmod.launcherglass.ui.OpticalSettings
@@ -30,23 +31,23 @@ import com.cosmod.launcherglass.util.WallpaperHelper
 import de.robv.android.xposed.XC_MethodHook
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
 /** Materials for the stock COUI app shortcut menu and its submenu. */
 internal object LauncherAppMenuGlass {
+    private const val TAG = "LauncherAppMenuGlass"
     private const val CLEAR_BACKGROUND_SCOPE = "cpiClearAppMenuBackground"
+    private const val BOUND_FRAME = "cpiAppMenuFrame"
 
     private data class Material(val style: GlassStyle, val backgroundBlur: Boolean)
     private data class Frame(val bitmap: Bitmap, val area: Rect)
 
     @Volatile private var material: Material? = null
     private val main = Handler(Looper.getMainLooper())
-    private val captures = ThreadPoolExecutor(0, 1, 15, TimeUnit.SECONDS, ArrayBlockingQueue(1),
-        ThreadPoolExecutor.DiscardOldestPolicy())
+    private val captures = Executors.newSingleThreadExecutor { Thread(it, "CPI app menu backdrop") }
     private val menus = WeakHashMap<View, Menu>()
+    private val bindings = WeakHashMap<View, Menu>()
     private val clearBackground = ThreadLocal<Boolean>()
 
     fun update(settings: Bundle, moduleEnabled: Boolean) {
@@ -83,9 +84,13 @@ internal object LauncherAppMenuGlass {
             check(PopupWindow::class.java.isAssignableFrom(getWindow.returnType))
             check(Activity::class.java.isAssignableFrom(getLauncher.returnType))
             val frameType = loader.loadClass("com.coui.appcompat.poplist.RoundFrameLayout")
-            val draw = frameType.getDeclaredMethod("draw", Canvas::class.java)
             val radius = frameType.getDeclaredMethod("getSmoothRadiusAndWeight")
-            val detach = frameType.getDeclaredMethod("onDetachedFromWindow")
+            val blurBuilder = frameType.getDeclaredField("w").type
+            val builderTarget = blurBuilder.getDeclaredField("b").apply { isAccessible = true }
+            check(builderTarget.type == View::class.java)
+            val applyBlur = blurBuilder.getDeclaredMethod("a")
+            val refreshBlur = blurBuilder.getDeclaredMethod("e", String::class.java)
+            check(applyBlur.returnType == Void.TYPE && refreshBlur.returnType == Void.TYPE)
             val dragLayer = loader.loadClass("com.android.launcher3.OplusDragLayer")
             val blurFactory = loader.loadClass("com.android.launcher3.popup.PopupBlurView\$Companion")
                 .getDeclaredMethod("getPopBlurView", Context::class.java, dragLayer)
@@ -98,9 +103,18 @@ internal object LauncherAppMenuGlass {
                     val popup = getWindow.invoke(param.thisObject) as? PopupWindow ?: return
                     val root = popup.contentView ?: return
                     val launcher = getLauncher.invoke(param.thisObject) as? Activity ?: return
-                    menus.remove(root)?.let(root::removeOnAttachStateChangeListener)
-                    val menu = Menu()
+                    menus[root]?.release(root)
+                    val frames = popupFrames(root, frameType)
+                    if (frames.isEmpty()) {
+                        GlassLogger.limited(TAG, "menu-frames-missing") { "COUI popup has no material frames" }
+                        return
+                    }
+                    val menu = Menu(frames) { view ->
+                        (radius.invoke(view) as? FloatArray)?.firstOrNull()
+                            ?.takeIf { it.isFinite() && it > 0f } ?: 24f * view.resources.displayMetrics.density
+                    }
                     menus[root] = menu
+                    frames.forEach { bindings[it] = menu }
                     root.addOnAttachStateChangeListener(menu)
                     menu.capture(launcher, root)
                 }
@@ -118,43 +132,66 @@ internal object LauncherAppMenuGlass {
                 }
             })
 
-            ModuleHooks.hookMethod(draw, object : XC_MethodHook() {
+            val retainMaterial = object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (menus.isEmpty()) return
-                    val frame = param.thisObject as View
-                    val menu = generateSequence(frame) { it.parent as? View }
-                        .firstNotNullOfOrNull(menus::get) ?: return
-                    val background = frame.background ?: return
-                    if (background is GlassBackground && background.menu === menu) return
-                    menu.frames[frame] = true
-                    // Wait for the backdrop before taking over the OEM drawable.
-                    if (menu.frame == null) return
-                    val original = (background as? GlassBackground)?.original ?: background
-                    val nativeRadius = (radius.invoke(frame) as? FloatArray)?.firstOrNull()
-                        ?.takeIf { it.isFinite() && it > 0f } ?: 24f * frame.resources.displayMetrics.density
-                    frame.background = GlassBackground(frame, menu, original, nativeRadius)
+                    if (bindings.isEmpty()) return
+                    val view = builderTarget.get(param.thisObject) as? View ?: return
+                    val menu = bindings[view] ?: return
+                    if (menu.frame == null || material == null) return
+                    param.setObjectExtra(BOUND_FRAME, view)
+                    menu.restoreBackground(view)
                 }
-            })
 
-            ModuleHooks.hookMethod(detach, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val frame = param.thisObject as View
-                    val background = frame.background as? GlassBackground ?: return
-                    frame.background = background.original
-                    AlertGlassLens.forget(frame)
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val view = param.getObjectExtra(BOUND_FRAME) as? View ?: return
+                    if (!param.hasThrowable()) bindings[view]?.applyBackground(view)
                 }
-            })
+            }
+            // The native builder can replace the drawable during menu morphs or theme refreshes.
+            // Give it its own drawable during both calls so it never caches the CPI wrapper.
+            ModuleHooks.hookMethod(applyBlur, retainMaterial)
+            ModuleHooks.hookMethod(refreshBlur, retainMaterial)
         }.onFailure {
-            GlassLogger.limited("LauncherAppMenuGlass", "compatibility") {
+            GlassLogger.limited(TAG, "menu-compatibility") {
                 "Using stock app menu material: ${it.javaClass.simpleName}"
             }
         }
     }
 
-    private class Menu : View.OnAttachStateChangeListener {
-        val frames = WeakHashMap<View, Boolean>()
+    private fun popupFrames(root: View, frameType: Class<*>): List<View> = buildList {
+        fun collect(view: View) {
+            if (frameType.isInstance(view)) {
+                add(view)
+            } else if (view is ViewGroup) {
+                for (index in 0 until view.childCount) collect(view.getChildAt(index))
+            }
+        }
+        collect(root)
+    }
+
+    private class Menu(frames: List<View>, private val radius: (View) -> Float) : View.OnAttachStateChangeListener {
+        private val frames = frames.map { WeakReference(it) }
+        private val backgrounds = WeakHashMap<View, GlassBackground>()
         var frame: Frame? = null
             private set
+        @Volatile private var released = false
+        var loggedDraw = false
+
+        fun applyBackground(view: View) {
+            if (released || frame == null || material == null || !view.isAttachedToWindow) return
+            val current = view.background
+            val previous = backgrounds[view]
+            if (current === previous && previous != null) return
+            val drawable = if (previous != null && previous.original === current) previous
+                else GlassBackground(view, this, current, radius(view))
+            backgrounds[view] = drawable
+            view.background = drawable
+        }
+
+        fun restoreBackground(view: View) {
+            val drawable = backgrounds[view] ?: return
+            if (view.background === drawable) view.background = drawable.original
+        }
 
         fun capture(launcher: Activity, root: View) {
             val decor = launcher.window.decorView
@@ -171,11 +208,22 @@ internal object LauncherAppMenuGlass {
             val workspace = Bitmap.createBitmap(captureWidth, captureHeight, Bitmap.Config.ARGB_8888)
             fun submit(workspaceFrame: Bitmap?) {
                 captures.execute {
+                    if (released) {
+                        workspaceFrame?.recycle()
+                        return@execute
+                    }
                     val bitmap = runCatching {
                         composeBackdrop(context, area, captureWidth, captureHeight, workspaceFrame)
-                    }.getOrNull()
+                    }.onFailure { error ->
+                        GlassLogger.limited(TAG, "menu-backdrop-composite") {
+                            "Could not combine wallpaper and launcher window: ${error.javaClass.simpleName}"
+                        }
+                    }.getOrNull() ?: workspaceFrame
                     if (bitmap !== workspaceFrame) workspaceFrame?.recycle()
-                    if (bitmap == null) return@execute
+                    if (bitmap == null) {
+                        GlassLogger.limited(TAG, "menu-backdrop-missing") { "No backdrop for the app menu" }
+                        return@execute
+                    }
                     bitmap.prepareToDraw()
                     main.post {
                         val target = rootReference.get()
@@ -183,7 +231,7 @@ internal object LauncherAppMenuGlass {
                             bitmap.recycle()
                         } else {
                             frame = Frame(bitmap, area)
-                            frames.keys.forEach(View::invalidate)
+                            frames.forEach { reference -> reference.get()?.let(::applyBackground) }
                             target.invalidate()
                         }
                     }
@@ -206,20 +254,36 @@ internal object LauncherAppMenuGlass {
             }
         }
 
-        override fun onViewAttachedToWindow(view: View) = Unit
+        override fun onViewAttachedToWindow(view: View) {
+            // The root attaches before its children and their native blur builders.
+            view.post { frames.forEach { reference -> reference.get()?.let(::applyBackground) } }
+        }
 
-        override fun onViewDetachedFromWindow(view: View) {
-            if (menus[view] === this) menus.remove(view)
-            view.removeOnAttachStateChangeListener(this)
+        override fun onViewDetachedFromWindow(view: View) = release(view)
+
+        fun release(root: View) {
+            released = true
+            if (menus[root] === this) menus.remove(root)
+            root.removeOnAttachStateChangeListener(this)
+            frames.forEach { reference ->
+                val view = reference.get() ?: return@forEach
+                restoreBackground(view)
+                if (bindings[view] === this) bindings.remove(view)
+                AlertGlassLens.forget(view)
+            }
+            backgrounds.clear()
             frame = null
-            frames.clear()
         }
     }
 
     private fun composeBackdrop(context: Context, area: Rect, width: Int, height: Int, workspace: Bitmap?): Bitmap? {
-        val wallpaper = WallpaperHelper.readSystemSnapshot(context, maxSide = 1560)
+        val snapshot = WallpaperHelper.readSystemSnapshot(context, maxSide = 1560)
             ?: return workspace
+        var wallpaper = snapshot
         try {
+            if (snapshot.config == Bitmap.Config.HARDWARE) {
+                wallpaper = snapshot.copy(Bitmap.Config.ARGB_8888, false) ?: return workspace
+            }
             val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(result)
             val dest = RectF(0f, 0f, width.toFloat(), height.toFloat())
@@ -238,21 +302,22 @@ internal object LauncherAppMenuGlass {
             workspace?.let { canvas.drawBitmap(it, null, dest, paint) }
             return result
         } finally {
-            wallpaper.recycle()
+            if (wallpaper !== snapshot) wallpaper.recycle()
+            snapshot.recycle()
         }
     }
 
     private class GlassBackground(
         view: View,
-        val menu: Menu,
-        val original: Drawable,
+        private val menu: Menu,
+        val original: Drawable?,
         private val radius: Float,
     ) : Drawable() {
         private val owner = WeakReference(view)
         private val rect = RectF()
         private val path = Path()
         private val tint = Paint(Paint.ANTI_ALIAS_FLAG)
-        private var opacity = original.alpha
+        private var opacity = 255
 
         override fun draw(canvas: Canvas) {
             val view = owner.get()
@@ -264,8 +329,24 @@ internal object LauncherAppMenuGlass {
                 val corner = radius.coerceAtMost(minOf(rect.width(), rect.height()) * .5f)
                 val drawn = runCatching {
                     AlertGlassLens.renderMenu(canvas, view, frame.bitmap, frame.area, rect, corner, opacity, style)
+                }.onFailure { error ->
+                    GlassLogger.limited(TAG, "menu-render-error") {
+                        "App menu glass render failed: ${error.javaClass.simpleName}: ${error.message}"
+                    }
                 }.getOrDefault(false)
                 if (drawn) {
+                    if (!menu.loggedDraw) {
+                        menu.loggedDraw = true
+                        GlassLogger.limited(TAG, "menu-rendered", 25) {
+                            val engine = when {
+                                !style.liquid -> "Frosted"
+                                style.newEngine -> "New Engine"
+                                style.engineOptics.softWidth != null -> "Soft Light"
+                                else -> "Liquid Glass"
+                            }
+                            "Rendered $engine with ${style.radius} dp blur"
+                        }
+                    }
                     if (style.opacity > 0) {
                         val dark = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
                             Configuration.UI_MODE_NIGHT_YES
@@ -278,26 +359,31 @@ internal object LauncherAppMenuGlass {
                     return
                 }
             }
-            original.bounds = bounds
-            original.draw(canvas)
+            original?.let {
+                it.bounds = bounds
+                it.draw(canvas)
+            }
         }
 
         override fun setAlpha(alpha: Int) {
             opacity = alpha
-            original.alpha = alpha
             invalidateSelf()
         }
         override fun getAlpha() = opacity
         override fun setColorFilter(colorFilter: ColorFilter?) {
-            original.colorFilter = colorFilter
+            original?.colorFilter = colorFilter
             invalidateSelf()
         }
         @Suppress("DEPRECATION")
         override fun getOpacity() = PixelFormat.TRANSLUCENT
         override fun getOutline(outline: Outline) {
-            original.bounds = bounds
-            original.getOutline(outline)
+            if (original != null) {
+                original.bounds = bounds
+                original.getOutline(outline)
+            } else {
+                outline.setRoundRect(bounds, radius)
+            }
         }
-        override fun getPadding(padding: Rect) = original.getPadding(padding)
+        override fun getPadding(padding: Rect) = original?.getPadding(padding) ?: false
     }
 }
