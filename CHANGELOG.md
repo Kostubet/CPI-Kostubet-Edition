@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 472
+
+- Стекло привязывается к двум штатным панелям COUI до их добавления в окно. Материал применяется и к подменю «Другие функции», когда оно открывается.
+
 ### Сборка 471
 
 - Исправлено чтение скругления меню иконок на ColorOS 17. Если штатный радиус недоступен, материал рисуется с запасным скруглением.
@@ -380,6 +384,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 472
+
+- Glass binds to the two stock COUI panels before they are attached. The material also applies when the More functions submenu opens.
 
 ### Build 471
 

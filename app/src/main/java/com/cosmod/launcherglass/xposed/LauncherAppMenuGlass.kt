@@ -21,7 +21,6 @@ import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
 import android.widget.PopupWindow
-import android.view.ViewGroup
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.ui.FeatureSections
 import com.cosmod.launcherglass.ui.GlassEngineSettings
@@ -30,6 +29,7 @@ import com.cosmod.launcherglass.util.GlassLogger
 import com.cosmod.launcherglass.util.WallpaperHelper
 import de.robv.android.xposed.XC_MethodHook
 import java.lang.ref.WeakReference
+import java.lang.reflect.Modifier
 import java.util.WeakHashMap
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
@@ -84,6 +84,13 @@ internal object LauncherAppMenuGlass {
             check(PopupWindow::class.java.isAssignableFrom(getWindow.returnType))
             check(Activity::class.java.isAssignableFrom(getLauncher.returnType))
             val frameType = loader.loadClass("com.coui.appcompat.poplist.RoundFrameLayout")
+            // COUI inflates both frames with attachToRoot=false and inserts them
+            // into the popup content separately as the two menus open.
+            val frameFields = generateSequence(getWindow.returnType) { it.superclass }
+                .flatMap { it.declaredFields.asSequence() }
+                .filter { it.type == frameType && !Modifier.isStatic(it.modifiers) }
+                .map { it.apply { isAccessible = true } }
+                .toList()
             val radius = frameType.getDeclaredMethod("getSmoothRadiusAndWeight").apply { isAccessible = true }
             val blurBuilder = frameType.getDeclaredField("w").type
             val builderTarget = blurBuilder.getDeclaredField("b").apply { isAccessible = true }
@@ -108,7 +115,7 @@ internal object LauncherAppMenuGlass {
                         return
                     }
                     menus[root]?.release(root)
-                    val frames = popupFrames(root, frameType)
+                    val frames = frameFields.mapNotNull { it.get(popup) as? View }.distinct()
                     if (frames.isEmpty()) {
                         GlassLogger.limited(TAG, "menu-frames-missing") { "COUI popup has no material frames" }
                         return
@@ -119,7 +126,10 @@ internal object LauncherAppMenuGlass {
                             ?: 24f * view.resources.displayMetrics.density
                     }
                     menus[root] = menu
-                    frames.forEach { bindings[it] = menu }
+                    frames.forEach {
+                        bindings[it] = menu
+                        it.addOnAttachStateChangeListener(menu)
+                    }
                     root.addOnAttachStateChangeListener(menu)
                     GlassLogger.limited(TAG, "menu-frames-bound") { "Found ${frames.size} COUI material frames" }
                     menu.capture(launcher, root)
@@ -165,24 +175,27 @@ internal object LauncherAppMenuGlass {
         }
     }
 
-    private fun popupFrames(root: View, frameType: Class<*>): List<View> = buildList {
-        fun collect(view: View) {
-            if (frameType.isInstance(view)) {
-                add(view)
-            } else if (view is ViewGroup) {
-                for (index in 0 until view.childCount) collect(view.getChildAt(index))
-            }
-        }
-        collect(root)
-    }
-
     private class Menu(frames: List<View>, private val radius: (View) -> Float) : View.OnAttachStateChangeListener {
         private val frames = frames.map { WeakReference(it) }
         private val backgrounds = WeakHashMap<View, GlassBackground>()
+        private val rendered = WeakHashMap<View, Boolean>()
         var frame: Frame? = null
             private set
         @Volatile private var released = false
-        var loggedDraw = false
+
+        fun reportDraw(view: View, style: GlassStyle) {
+            if (rendered.put(view, true) != null) return
+            val engine = when {
+                !style.liquid -> "Frosted"
+                style.newEngine -> "New Engine"
+                style.engineOptics.softWidth != null -> "Soft Light"
+                else -> "Liquid Glass"
+            }
+            val panel = frames.indexOfFirst { it.get() === view } + 1
+            GlassLogger.limited(TAG, "menu-rendered", 25) {
+                "Rendered $engine on COUI panel $panel with ${style.radius} dp blur"
+            }
+        }
 
         fun applyBackground(view: View) {
             if (released || frame == null || material == null || !view.isAttachedToWindow) return
@@ -265,11 +278,18 @@ internal object LauncherAppMenuGlass {
         }
 
         override fun onViewAttachedToWindow(view: View) {
-            // The root attaches before its children and their native blur builders.
-            view.post { frames.forEach { reference -> reference.get()?.let(::applyBackground) } }
+            if (bindings[view] === this) view.post { applyBackground(view) }
         }
 
-        override fun onViewDetachedFromWindow(view: View) = release(view)
+        override fun onViewDetachedFromWindow(view: View) {
+            if (menus[view] === this) {
+                release(view)
+            } else if (bindings[view] === this) {
+                restoreBackground(view)
+                backgrounds.remove(view)
+                AlertGlassLens.forget(view)
+            }
+        }
 
         fun release(root: View) {
             released = true
@@ -277,6 +297,7 @@ internal object LauncherAppMenuGlass {
             root.removeOnAttachStateChangeListener(this)
             frames.forEach { reference ->
                 val view = reference.get() ?: return@forEach
+                view.removeOnAttachStateChangeListener(this)
                 restoreBackground(view)
                 if (bindings[view] === this) bindings.remove(view)
                 AlertGlassLens.forget(view)
@@ -371,18 +392,7 @@ internal object LauncherAppMenuGlass {
                     }
                 }.getOrDefault(false)
                 if (drawn) {
-                    if (!menu.loggedDraw) {
-                        menu.loggedDraw = true
-                        GlassLogger.limited(TAG, "menu-rendered", 25) {
-                            val engine = when {
-                                !style.liquid -> "Frosted"
-                                style.newEngine -> "New Engine"
-                                style.engineOptics.softWidth != null -> "Soft Light"
-                                else -> "Liquid Glass"
-                            }
-                            "Rendered $engine with ${style.radius} dp blur"
-                        }
-                    }
+                    menu.reportDraw(view, style)
                     return
                 }
             }
