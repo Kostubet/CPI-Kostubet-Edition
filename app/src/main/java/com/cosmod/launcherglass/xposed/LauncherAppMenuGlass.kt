@@ -5,12 +5,11 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.ColorFilter
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Outline
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
@@ -181,7 +180,7 @@ internal object LauncherAppMenuGlass {
             if (released || frame == null || material == null || !view.isAttachedToWindow) return
             val current = view.background
             val previous = backgrounds[view]
-            if (current === previous && previous != null) return
+            if (previous != null && current === previous) return
             val drawable = if (previous != null && previous.original === current) previous
                 else GlassBackground(view, this, current, radius(view))
             backgrounds[view] = drawable
@@ -315,9 +314,32 @@ internal object LauncherAppMenuGlass {
     ) : Drawable() {
         private val owner = WeakReference(view)
         private val rect = RectF()
-        private val path = Path()
-        private val tint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var inputStyle: GlassStyle? = null
+        private var themedStyle: GlassStyle? = null
+        private var nightMode = false
         private var opacity = 255
+
+        private fun withDarkening(style: GlassStyle, dark: Boolean): GlassStyle {
+            if (style.opacity == 0) return style
+            val cached = themedStyle
+            if (cached != null && inputStyle === style && nightMode == dark) return cached
+            // Shade the sampled backdrop before the lens adds reflections. Keep
+            // some backdrop detail readable through the glass at 100% darkening.
+            val amount = style.opacity * .0075f
+            val gain = 1f - amount
+            val bias = amount * if (dark) 18f else 252f
+            val filter = ColorMatrixColorFilter(floatArrayOf(
+                gain, 0f, 0f, 0f, bias,
+                0f, gain, 0f, 0f, bias,
+                0f, 0f, gain, 0f, bias,
+                0f, 0f, 0f, 1f, 0f,
+            ))
+            return style.copy(filter = filter).also {
+                inputStyle = style
+                themedStyle = it
+                nightMode = dark
+            }
+        }
 
         override fun draw(canvas: Canvas) {
             val view = owner.get()
@@ -327,8 +349,11 @@ internal object LauncherAppMenuGlass {
                 canvas.isHardwareAccelerated && !bounds.isEmpty) {
                 rect.set(bounds)
                 val corner = radius.coerceAtMost(minOf(rect.width(), rect.height()) * .5f)
+                val dark = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+                    Configuration.UI_MODE_NIGHT_YES
                 val drawn = runCatching {
-                    AlertGlassLens.renderMenu(canvas, view, frame.bitmap, frame.area, rect, corner, opacity, style)
+                    AlertGlassLens.renderMenu(canvas, view, frame.bitmap, frame.area, rect, corner, opacity,
+                        withDarkening(style, dark))
                 }.onFailure { error ->
                     GlassLogger.limited(TAG, "menu-render-error") {
                         "App menu glass render failed: ${error.javaClass.simpleName}: ${error.message}"
@@ -346,15 +371,6 @@ internal object LauncherAppMenuGlass {
                             }
                             "Rendered $engine with ${style.radius} dp blur"
                         }
-                    }
-                    if (style.opacity > 0) {
-                        val dark = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-                            Configuration.UI_MODE_NIGHT_YES
-                        val tone = if (dark) 18 else 252
-                        tint.color = Color.argb((style.opacity * opacity * .01f).roundToInt(), tone, tone, tone)
-                        path.rewind()
-                        path.addRoundRect(rect, corner, corner, Path.Direction.CW)
-                        canvas.drawPath(path, tint)
                     }
                     return
                 }
