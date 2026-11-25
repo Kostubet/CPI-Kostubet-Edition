@@ -10,6 +10,7 @@ import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Outline
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
@@ -20,6 +21,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.PixelCopy
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.PopupWindow
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.ui.FeatureSections
@@ -39,6 +41,8 @@ internal object LauncherAppMenuGlass {
     private const val TAG = "LauncherAppMenuGlass"
     private const val CLEAR_BACKGROUND_SCOPE = "cpiClearAppMenuBackground"
     private const val BOUND_FRAME = "cpiAppMenuFrame"
+    private const val MENU_ROOT = "cpiAppMenuRoot"
+    private const val STOCK_EDGE = "cpiAppMenuStockEdge"
 
     private data class Material(val style: GlassStyle, val backgroundBlur: Boolean)
     private data class Frame(val bitmap: Bitmap, val area: Rect)
@@ -49,6 +53,9 @@ internal object LauncherAppMenuGlass {
     private val menus = WeakHashMap<View, Menu>()
     private val bindings = WeakHashMap<View, Menu>()
     private val clearBackground = ThreadLocal<Boolean>()
+    private val outlinePath by lazy {
+        runCatching { Outline::class.java.getDeclaredField("mPath").apply { isAccessible = true } }.getOrNull()
+    }
 
     fun update(settings: Bundle, moduleEnabled: Boolean) {
         material = if (moduleEnabled && settings.getBoolean(FeatureSections.key("APP_MENU"))) {
@@ -120,7 +127,7 @@ internal object LauncherAppMenuGlass {
                         GlassLogger.limited(TAG, "menu-frames-missing") { "COUI popup has no material frames" }
                         return
                     }
-                    val menu = Menu(frames) { view ->
+                    val menu = Menu(frames, DockMaterial.holdMenuGeometry(launcher.window.decorView)) { view ->
                         runCatching { (radius.invoke(view) as? FloatArray)?.firstOrNull() }
                             .getOrNull()?.takeIf { it.isFinite() && it > 0f }
                             ?: 24f * view.resources.displayMetrics.density
@@ -130,7 +137,9 @@ internal object LauncherAppMenuGlass {
                         bindings[it] = menu
                         it.addOnAttachStateChangeListener(menu)
                     }
+                    param.setObjectExtra(MENU_ROOT, root)
                     root.addOnAttachStateChangeListener(menu)
+                    if (root.isAttachedToWindow) menu.onViewAttachedToWindow(root)
                     GlassLogger.limited(TAG, "menu-frames-bound") { "Found ${frames.size} COUI material frames" }
                     menu.capture(launcher, root)
                 }
@@ -138,6 +147,15 @@ internal object LauncherAppMenuGlass {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val previous = param.getObjectExtra(CLEAR_BACKGROUND_SCOPE) as? Boolean
                     if (previous == null) clearBackground.remove() else clearBackground.set(previous)
+                    val root = param.getObjectExtra(MENU_ROOT) as? View ?: return
+                    val menu = menus[root] ?: return
+                    if (param.hasThrowable()) {
+                        menu.release(root)
+                    } else if (!root.isAttachedToWindow) {
+                        main.postDelayed({
+                            if (!root.isAttachedToWindow && menus[root] === menu) menu.release(root)
+                        }, 1000L)
+                    }
                 }
             })
 
@@ -167,6 +185,26 @@ internal object LauncherAppMenuGlass {
             // Give it its own drawable during both calls so it never caches the CPI wrapper.
             ModuleHooks.hookMethod(applyBlur, retainMaterial)
             ModuleHooks.hookMethod(refreshBlur, retainMaterial)
+            runCatching {
+                val edge = frameType.getDeclaredField("A").apply { isAccessible = true }
+                check(edge.type == Boolean::class.javaPrimitiveType)
+                val draw = frameType.getDeclaredMethod("onDraw", Canvas::class.java)
+                ModuleHooks.hookMethod(draw, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val view = param.thisObject as? View ?: return
+                        if ((view.background as? GlassBackground)?.drawn != true || !edge.getBoolean(view)) return
+                        // CPI already draws the optical rim. Keep the native touch spotlight.
+                        edge.setBoolean(view, false)
+                        param.setObjectExtra(STOCK_EDGE, true)
+                    }
+
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (param.getObjectExtra(STOCK_EDGE) == true) edge.setBoolean(param.thisObject, true)
+                    }
+                })
+            }.onFailure {
+                GlassLogger.limited(TAG, "menu-native-edge") { "Stock popup edge hook unavailable" }
+            }
             GlassLogger.i(TAG, "App menu material available in CPI build ${BuildConfig.VERSION_CODE}")
         }.onFailure {
             GlassLogger.limited(TAG, "menu-compatibility") {
@@ -175,10 +213,15 @@ internal object LauncherAppMenuGlass {
         }
     }
 
-    private class Menu(frames: List<View>, private val radius: (View) -> Float) : View.OnAttachStateChangeListener {
+    private class Menu(
+        frames: List<View>,
+        private val releaseDock: () -> Unit,
+        private val radius: (View) -> Float,
+    ) : View.OnAttachStateChangeListener, ViewTreeObserver.OnPreDrawListener {
         private val frames = frames.map { WeakReference(it) }
         private val backgrounds = WeakHashMap<View, GlassBackground>()
         private val rendered = WeakHashMap<View, Boolean>()
+        private var observer: ViewTreeObserver? = null
         var frame: Frame? = null
             private set
         @Volatile private var released = false
@@ -278,7 +321,18 @@ internal object LauncherAppMenuGlass {
         }
 
         override fun onViewAttachedToWindow(view: View) {
-            if (bindings[view] === this) view.post { applyBackground(view) }
+            if (menus[view] === this) {
+                observer = view.viewTreeObserver.also { it.addOnPreDrawListener(this) }
+            } else if (bindings[view] === this) {
+                view.post { applyBackground(view) }
+            }
+        }
+
+        override fun onPreDraw(): Boolean {
+            backgrounds.forEach { (view, background) ->
+                if (view.background === background && background.updateTransform(view)) view.invalidate()
+            }
+            return true
         }
 
         override fun onViewDetachedFromWindow(view: View) {
@@ -293,6 +347,9 @@ internal object LauncherAppMenuGlass {
 
         fun release(root: View) {
             released = true
+            releaseDock()
+            observer?.takeIf { it.isAlive }?.removeOnPreDrawListener(this)
+            observer = null
             if (menus[root] === this) menus.remove(root)
             root.removeOnAttachStateChangeListener(this)
             frames.forEach { reference ->
@@ -345,11 +402,58 @@ internal object LauncherAppMenuGlass {
         private val radius: Float,
     ) : Drawable() {
         private val owner = WeakReference(view)
-        private val rect = RectF()
+        private val shape = AlertContour.Shape()
+        private val previousBounds = Rect()
+        private val nativeOutline = Outline()
+        private val outlineBounds = Rect()
+        private val transform = Matrix()
+        private val previousTransform = Matrix()
+        private val windowLocation = IntArray(2)
+        private var windowX = Int.MIN_VALUE
+        private var windowY = Int.MIN_VALUE
         private var inputStyle: GlassStyle? = null
         private var themedStyle: GlassStyle? = null
         private var nightMode = false
         private var opacity = 255
+        var drawn = false
+            private set
+
+        fun updateTransform(view: View): Boolean {
+            // Scale and translation can change on the RenderNode alone while the
+            // background display list keeps sampling its first screen position.
+            transform.reset()
+            view.transformMatrixToGlobal(transform)
+            view.getLocationOnScreen(windowLocation)
+            if (transform == previousTransform && windowX == windowLocation[0] && windowY == windowLocation[1]) return false
+            previousTransform.set(transform)
+            windowX = windowLocation[0]
+            windowY = windowLocation[1]
+            return true
+        }
+
+        private fun contour(view: View): AlertContour.Shape {
+            if (previousBounds == bounds) return shape
+            previousBounds.set(bounds)
+            nativeOutline.setEmpty()
+            view.outlineProvider?.getOutline(view, nativeOutline)
+            shape.radius = radius
+            shape.bounds.set(bounds)
+            shape.path.rewind()
+            if (nativeOutline.getRect(outlineBounds) && !outlineBounds.isEmpty) {
+                shape.bounds.set(outlineBounds)
+                if (nativeOutline.radius > 0f) shape.radius = nativeOutline.radius
+            } else {
+                val path = runCatching { outlinePath?.get(nativeOutline) as? Path }.getOrNull()
+                if (path != null && !path.isEmpty) {
+                    path.computeBounds(shape.bounds, true)
+                    shape.path.set(path)
+                }
+            }
+            shape.radius = shape.radius.coerceAtMost(minOf(shape.bounds.width(), shape.bounds.height()) * .5f)
+            if (shape.path.isEmpty) shape.path.addRoundRect(shape.bounds, shape.radius, shape.radius, Path.Direction.CW)
+            shape.revision++
+            return shape
+        }
 
         private fun withDarkening(style: GlassStyle, dark: Boolean): GlassStyle {
             if (style.opacity == 0) return style
@@ -374,17 +478,16 @@ internal object LauncherAppMenuGlass {
         }
 
         override fun draw(canvas: Canvas) {
+            drawn = false
             val view = owner.get()
             val frame = menu.frame
             val style = material?.style
             if (Build.VERSION.SDK_INT >= 33 && view != null && frame != null && style != null &&
                 canvas.isHardwareAccelerated && !bounds.isEmpty) {
-                rect.set(bounds)
-                val corner = radius.coerceAtMost(minOf(rect.width(), rect.height()) * .5f)
                 val dark = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
                     Configuration.UI_MODE_NIGHT_YES
-                val drawn = runCatching {
-                    AlertGlassLens.renderMenu(canvas, view, frame.bitmap, frame.area, rect, corner, opacity,
+                drawn = runCatching {
+                    AlertGlassLens.renderMenu(canvas, view, frame.bitmap, frame.area, contour(view), opacity,
                         withDarkening(style, dark))
                 }.onFailure { error ->
                     GlassLogger.limited(TAG, "menu-render-error") {

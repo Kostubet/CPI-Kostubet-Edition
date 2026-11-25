@@ -50,6 +50,7 @@ internal object DockMaterial {
         }
         val identity=ColorDrawable(Color.TRANSPARENT)
         val bounds=Rect()
+        var menuBounds: Rect? = null
         var dirty=true
         var unlockHosted=false
         var drawing=false
@@ -256,6 +257,26 @@ internal object DockMaterial {
     private val resourceNames=HashMap<Int,String>()
     private val dockIds=setOf("hotseat","hotseat_layout","dockbar","dock_bar")
     fun onSettingsChanged(){surfaces.values.toList().forEach(Surface::refresh)}
+    fun holdMenuGeometry(workspace: View): () -> Unit {
+        // The popup temporarily hides the source icon while its copy animates.
+        // Keep the occupied dock footprint until the popup has closed.
+        val held = surfaces.strongSnapshot().mapNotNull { (view, state) ->
+            if (view.rootView !== workspace || state.bounds.isEmpty) return@mapNotNull null
+            val bounds = Rect(state.bounds)
+            state.menuBounds = bounds
+            state to bounds
+        }
+        return {
+            for ((state, bounds) in held) {
+                if (state.menuBounds !== bounds) continue
+                state.menuBounds = null
+                state.dirty = true
+                state.owner.get()?.invalidate()
+                state.hostView()?.invalidate()
+            }
+        }
+    }
+
     fun onBackdropChanged(){
         for((view,state) in surfaces.strongSnapshot()){
             if(!view.isShown)continue
@@ -373,7 +394,10 @@ internal object DockMaterial {
     private fun refreshGeometry(view:ViewGroup,state:Surface){
         val unlocking=com.cosmod.launcherglass.util.LiveBlurEngine.isUnlockMotion
         if(!state.dirty && state.unlockHosted==unlocking)return
-        if(unlocking && !state.bounds.isEmpty){
+        val menuBounds = state.menuBounds
+        if(menuBounds != null){
+            state.bounds.set(menuBounds)
+        }else if(unlocking && !state.bounds.isEmpty){
             val previous=Rect(state.bounds)
             footprint(view,state.bounds)
             if(state.bounds.isEmpty)state.bounds.set(previous)

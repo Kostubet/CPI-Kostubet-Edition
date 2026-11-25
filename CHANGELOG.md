@@ -4,6 +4,10 @@
 
 ## Русский
 
+### Сборка 473
+
+- Докбар сохраняет размер, когда меню по долгому нажатию поднимает выбранную иконку. Стекло меню повторяет штатное скругление COUI, а фон обновляется во время анимации открытия.
+
 ### Сборка 472
 
 - Стекло привязывается к двум штатным панелям COUI до их добавления в окно. Материал применяется и к подменю «Другие функции», когда оно открывается.
@@ -384,6 +388,10 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 473
+
+- The dock keeps its size when the long-press menu lifts the selected icon. Menu glass follows the native COUI corners, and its backdrop updates during the opening animation.
 
 ### Build 472
 

@@ -71,10 +71,10 @@ internal object AlertGlassLens {
 
     private val menuPrefs = Bundle.EMPTY
 
-    fun renderMenu(canvas: Canvas, view: View, image: Bitmap, area: Rect, bounds: RectF,
-        corner: Float, opacity: Int, style: GlassStyle): Boolean =
-        renderInternal(canvas, view, menuPrefs, image, area, bounds, corner, opacity,
-            null, image.generationId.toLong(), menuStyle = style)
+    fun renderMenu(canvas: Canvas, view: View, image: Bitmap, area: Rect, contour: AlertContour.Shape,
+        opacity: Int, style: GlassStyle): Boolean =
+        renderInternal(canvas, view, menuPrefs, image, area, contour.bounds, contour.radius, opacity,
+            contour, image.generationId.toLong(), menuStyle = style)
 
     private fun edgeFogRadius(prefs:Bundle,edge:Int):Float {
         val radius=prefs.getInt("wallpaper_glow_radius",55).coerceIn(0,100)
@@ -109,7 +109,7 @@ internal object AlertGlassLens {
         val radius=engine.radius(requested)
         val hue=menuStyle?.dispersion ?: com.cosmod.launcherglass.ui.GlassDispersionSettings.strength(prefs,com.cosmod.launcherglass.ui.GlassDispersionSettings.ALERTS)
         val frosted=menuStyle?.liquid==false
-        val warpReach=if(frosted)0f else edge*(if(shape!=null).25f
+        val warpReach=if(frosted)0f else edge*(if(shape!=null && menuStyle==null).25f
             else .22f*distortion.coerceIn(0,300)/50f)*maxOf(1f,hazeStyle.engineOptics.heightScale)
         // Blur support is three radii. The lens also needs room to bend the
         // source and sample its sharpness kernel without hitting the node edge.
@@ -121,7 +121,7 @@ internal object AlertGlassLens {
             plate.mask.setFloatUniform("size",w.toFloat(),h.toFloat());plate.mask.setFloatUniform("radius",corner*scale)
             val style=menuStyle ?: GlassStyle(true,lensWidth,distortion,0,0,null,extendedLens=true,dispersion=hue,
                 surfaceScope=scope,newEngine=hazeStyle.newEngine,engineOptics=hazeStyle.engineOptics)
-            val mask=if(shape==null)plate.mask else {
+            val mask=if(shape==null || frosted)plate.mask else {
                 val size=(w.toLong() shl 32) or h.toLong()
                 if(plate.shapeVersion!=shape.revision || plate.shapeSize!=size){
                     val bitmap=Bitmap.createBitmap(w*2,h*2,Bitmap.Config.ALPHA_8)
@@ -214,9 +214,12 @@ internal object AlertGlassLens {
         val save=canvas.save()
         try {
             if(frosted){
-                plate.clip.rewind()
-                plate.clip.addRoundRect(bounds,corner,corner,Path.Direction.CW)
-                canvas.clipPath(plate.clip)
+                if(shape!=null)canvas.clipPath(shape.path)
+                else {
+                    plate.clip.rewind()
+                    plate.clip.addRoundRect(bounds,corner,corner,Path.Direction.CW)
+                    canvas.clipPath(plate.clip)
+                }
             }
             canvas.translate(bounds.left,bounds.top)
             canvas.scale(bounds.width()/w,bounds.height()/h)
