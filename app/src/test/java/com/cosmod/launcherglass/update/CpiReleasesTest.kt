@@ -35,6 +35,15 @@ class CpiReleasesTest {
         assertEquals(426, CpiReleases.select(JSONArray().put(release()).put(release(426, "v0.3.1-build426")))?.build)
     }
 
+    @Test fun notesAreOptionalAndSelectedWithTheRelease() {
+        assertNull(CpiReleases.manifest(feed())?.notes)
+        assertNull(CpiReleases.manifest(feed().put("notes", JSONArray()))?.notes)
+        assertEquals("Published", CpiReleases.manifest(feed().put("notes", "Published"))?.notes)
+        val entries = JSONArray().put(release().put("body", "Old"))
+            .put(release(426, "v0.3.1-build426").put("body", "New"))
+        assertEquals("New", CpiReleases.select(entries)?.notes)
+    }
+
     @Test fun rejectsInconsistentOrForeignManifestAssets() {
         val invalid = listOf(
             feed().put("build", 424), feed().put("version", "0.3.0"), feed().put("format", 2),

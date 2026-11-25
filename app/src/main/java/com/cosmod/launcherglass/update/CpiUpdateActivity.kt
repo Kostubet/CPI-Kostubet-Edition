@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
 import com.cosmod.launcherglass.BuildConfig
 import com.cosmod.launcherglass.R
 import com.cosmod.launcherglass.ui.CouiAction
@@ -59,10 +60,17 @@ import io.github.suqi8.coui.kmp.preference.SwitchPreference
 import io.github.suqi8.coui.kmp.theme.COUITheme
 import io.github.suqi8.coui.kmp.theme.darkColorScheme
 import io.github.suqi8.coui.kmp.theme.lightColorScheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class CpiUpdateActivity : AppCompatActivity() {
     private var release by mutableStateOf<CpiReleases.Release?>(null)
     private var status by mutableStateOf("")
+    private var notesJob: Job? = null
+    private var notesRelease by mutableStateOf<CpiReleases.Release?>(null)
+    private var releaseNotes by mutableStateOf(emptyList<String>())
     private var busy by mutableStateOf(false)
     private var downloadProgress by mutableStateOf<Float?>(null)
     private var alerts by mutableStateOf(false)
@@ -141,6 +149,25 @@ class CpiUpdateActivity : AppCompatActivity() {
                                     } else {
                                         CouiAction(getString(R.string.cpi_updates_check), primary = false,
                                             onClick = ::check, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                                    }
+                                }
+                            }
+                            notesRelease?.takeIf { releaseNotes.isNotEmpty() }?.let { published ->
+                                CouiGroup {
+                                    Column(
+                                        Modifier.fillMaxWidth().padding(20.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        Text(getString(R.string.cpi_updates_notes_title),
+                                            style = COUITheme.textStyles.headlineS,
+                                            color = COUITheme.colorScheme.labelPrimary)
+                                        Text(getString(R.string.cpi_updates_notes_version, published.version, published.build),
+                                            style = COUITheme.textStyles.bodyM,
+                                            color = COUITheme.colorScheme.labelSecondary)
+                                        releaseNotes.forEach { line ->
+                                            Text(line, style = COUITheme.textStyles.bodyM,
+                                                color = COUITheme.colorScheme.labelPrimary)
+                                        }
                                     }
                                 }
                             }
@@ -233,11 +260,11 @@ class CpiUpdateActivity : AppCompatActivity() {
         downloadProgress = null
         status = getString(R.string.cpi_updates_checking)
         CpiUpdateInstaller.executor.execute {
-            val result = runCatching { CpiReleases.latest(fresh = true)?.takeIf { it.build > BuildConfig.VERSION_CODE } }
+            val result = runCatching { CpiReleases.latest(fresh = true) }
             result.exceptionOrNull()?.let { android.util.Log.w("CPI.Updates", "Release check failed", it) }
             show {
                 busy = false
-                release = result.getOrNull()
+                release = result.getOrNull()?.takeIf { it.build > BuildConfig.VERSION_CODE }
                 result.onSuccess { CpiUpdateService.onCheckCompleted(this, it) }
                 status = release?.let { getString(R.string.cpi_updates_version, it.version, it.build) }
                     ?: getString(when {
@@ -245,6 +272,21 @@ class CpiUpdateActivity : AppCompatActivity() {
                         (result.exceptionOrNull() as? CpiReleases.HttpFailure)?.status in listOf(403, 429) -> R.string.cpi_updates_rate_limit
                         else -> R.string.cpi_updates_check_error
                     })
+                result.getOrNull()?.let(::loadReleaseNotes)
+            }
+        }
+    }
+
+    private fun loadReleaseNotes(published: CpiReleases.Release) {
+        notesJob?.cancel()
+        val language = resources.configuration.locales[0].language
+        notesJob = lifecycleScope.launch {
+            val lines = withContext(Dispatchers.IO) {
+                runCatching { CpiReleases.releaseNotes(published, language) }.getOrDefault(emptyList())
+            }
+            if (lines.isNotEmpty() || notesRelease?.build != published.build) {
+                notesRelease = published
+                releaseNotes = lines
             }
         }
     }

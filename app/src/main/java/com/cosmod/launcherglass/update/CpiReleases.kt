@@ -24,7 +24,19 @@ internal object CpiReleases {
     private val digestPattern = Regex("[0-9a-fA-F]{64}")
 
     data class Release(val version: String, val build: Int, val size: Long, val url: String,
-        val digest: String?, val checksumUrl: String?)
+        val digest: String?, val checksumUrl: String?, val notes: String? = null)
+
+    fun releaseNotes(release: Release, language: String): List<String> {
+        ReleaseNotes.published(release.notes.orEmpty(), language).takeIf { it.isNotEmpty() }?.let { return it }
+        val tag = URI(release.url).path.substringAfter("/releases/download/").substringBefore('/')
+        if (!tagPattern.matches(tag)) return emptyList()
+        val markdown = bytes("https://raw.githubusercontent.com/$REPO/$tag/CHANGELOG.md", 256 * 1024)
+            .toString(Charsets.UTF_8)
+        return ReleaseNotes.fromChangelog(markdown, release.build, language)
+    }
+
+    private fun notes(entry: JSONObject, key: String): String? =
+        (entry.opt(key) as? String)?.trim()?.takeIf(String::isNotEmpty)?.take(6000)
 
     class HttpFailure(val status: Int) : IOException("Update server HTTP $status")
 
@@ -57,7 +69,7 @@ internal object CpiReleases {
         if (fileVersion != version || (taggedBuild.isNotEmpty() && taggedBuild != fileBuild) ||
             entry.optString("version") != version || entry.optLong("build") != build.toLong() ||
             apk.optString("url") != url) return null
-        return Release(version, build, size, url, digest.lowercase(), null)
+        return Release(version, build, size, url, digest.lowercase(), null, notes(entry, "notes"))
     }
 
     fun select(releases: JSONArray): Release? {
@@ -83,7 +95,7 @@ internal object CpiReleases {
                     assets.optJSONObject(it)?.optString("browser_download_url") == base + name + ".sha256"
                 }
                 if (digest != null || checksum) best = Release(version, build, size, base + name, digest,
-                    if (checksum) base + name + ".sha256" else null)
+                    if (checksum) base + name + ".sha256" else null, notes(entry, "body"))
             }
         }
         return best

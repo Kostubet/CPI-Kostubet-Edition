@@ -39,13 +39,16 @@ def select(releases):
             if best is None or build > best["build"]:
                 best = {"format": 1, "tag": tag, "version": version, "build": build,
                         "apk": {"name": name, "url": url, "size": size, "sha256": digest[7:].lower()}}
+                notes = release.get("body")
+                if isinstance(notes, str) and notes.strip():
+                    best["notes"] = notes.strip()[:6000]
     if best is None:
         raise ValueError("No published CPI APK with a valid SHA-256 digest")
     return best
 
 
 def encode(manifest):
-    return (json.dumps(manifest, indent=2) + "\n").encode()
+    return (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
 
 
 def api(path, payload=None):

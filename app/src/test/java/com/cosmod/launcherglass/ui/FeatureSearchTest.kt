@@ -53,6 +53,13 @@ class FeatureSearchTest {
         }
         assertFalse(R.string.ui_device_unknown in FeatureSearch.labels("CAMERA_ZOOM"))
     }
+    @Test fun appMenuIndexesItsGlassControls() {
+        val labels = FeatureSearch.labels("APP_MENU")
+        assertTrue(R.string.ui_app_menu_material in labels)
+        assertTrue(R.string.ui_blur_radius in labels)
+        assertTrue(R.string.island_opacity in labels)
+    }
+
     @Test fun shadeSearchIndexesBothPanelsAndMaterialOptions(){
         val labels=FeatureSearch.labels("SHADE")
         assertTrue(R.string.shade_glass_control in labels)

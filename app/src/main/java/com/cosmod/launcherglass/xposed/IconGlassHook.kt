@@ -893,6 +893,7 @@ object IconGlassHook {
         PhotoWidgetMaterial.install(loader)
         DockMaterial.install(loader)
         PageIndicatorGlass.install(loader)
+        LauncherAppMenuGlass.install(loader)
         // Carry the source view through native asynchronous icon preparation.
         // The anchor belongs to this load request, never to a global last click.
         val modernLoader=XposedHelpers.findClassIfExists("com.android.launcher3.anim.iconsurfacemanager.loader.IconDrawableLoader",loader)

@@ -16,4 +16,6 @@
     <string name="cpi_updates_installing">Устанавливаем обновление…</string>
     <string name="cpi_updates_install_error">Не удалось скачать, проверить или установить обновление</string>
     <string name="cpi_updates_confirm">Подтвердите обновление CPI</string>
+    <string name="cpi_updates_notes_title">Что нового</string>
+    <string name="cpi_updates_notes_version">Версия %1$s · Сборка %2$d</string>
 </resources>

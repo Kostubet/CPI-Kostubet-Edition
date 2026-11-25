@@ -5,10 +5,11 @@ import android.content.SharedPreferences
 
 /** Section switches mask runtime values; stored adjustments remain intact. */
 internal object FeatureSections {
-    val sections=setOf("ICONS","FOLDERS","PHOTO","DOCK","BANNERS","LIVE","VOLUME","SHADE","LOCKSCREEN","SIDEBAR","LIGHT","MOTION","PERFORMANCE")
+    val sections=setOf("ICONS","FOLDERS","PHOTO","DOCK","APP_MENU","BANNERS","LIVE","VOLUME","SHADE","LOCKSCREEN","SIDEBAR","LIGHT","MOTION","PERFORMANCE")
     fun key(section:String)="feature_section_${section.lowercase(java.util.Locale.ROOT)}"
-    val booleans=sections.associate {key(it) to true}
-    fun enabled(prefs:SharedPreferences,section:String)=section !in sections || prefs.getBoolean(key(section),true)
+    val booleans=sections.associate {key(it) to (it!="APP_MENU")}
+    fun enabled(prefs:SharedPreferences,section:String)=section !in sections ||
+        prefs.getBoolean(key(section),booleans.getValue(key(section)))
     fun apply(bundle:Bundle){
         fun off(section:String)=!bundle.getBoolean(key(section),true)
         fun disable(vararg keys:String){keys.forEach {bundle.putBoolean(it,false)}}

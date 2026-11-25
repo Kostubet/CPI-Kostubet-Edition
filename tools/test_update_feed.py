@@ -31,6 +31,14 @@ class UpdateFeedTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_feed.select(invalid)
 
+    def test_carries_only_the_selected_release_notes(self):
+        previous = release()
+        previous["body"] = "Previous"
+        latest = release(426, "v0.3.1-build426")
+        latest["body"] = "### Русский\nНовое"
+        self.assertEqual(update_feed.select([latest, previous])["notes"], latest["body"])
+        self.assertNotIn("notes", update_feed.select([release()]))
+
     def test_publisher_preserves_feed_when_rerun_or_older_release_edited(self):
         manifest = update_feed.select([release()])
         import base64

@@ -4,6 +4,11 @@
 
 ## Русский
 
+### Сборка 467
+
+- На экране «Обновления» появился список изменений последнего релиза на русском и английском.
+- В разделе «Меню иконок» можно включить стекло для меню по долгому нажатию и подменю «Другие функции» на совместимых сборках ColorOS 17. Настраиваются радиус размытия и непрозрачность стекла.
+
 ### Сборка 466 — релиз 0.3.3
 
 - Добавлен каталог конфигов CPI с поиском, предпросмотром по типу стекла и применением настроек. Для публикации и реакций используется аккаунт CPI со входом через GitHub.
@@ -359,6 +364,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 467
+
+- The Updates screen shows the latest release notes in English and Russian.
+- App icon menu settings add adjustable glass for the long-press menu and its shortcuts submenu on compatible ColorOS 17 builds. Blur radius and glass opacity can be adjusted independently.
 
 ### Build 466 — release 0.3.3
 

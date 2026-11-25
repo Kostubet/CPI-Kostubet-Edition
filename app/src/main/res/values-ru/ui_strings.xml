@@ -520,4 +520,7 @@
     <string name="ui_folder_icons_blur">Стекло иконок внутри папок</string>
     <string name="ui_haptic_studio">Haptic Studio</string>
     <string name="ui_haptic_studio_keywords">вибрация тактильный отклик паттерн рингтон</string>
+    <string name="ui_app_menu_title">Меню иконок</string>
+    <string name="ui_app_menu_keywords">лаунчер долгое нажатие ярлыки контекстное меню другие функции</string>
+    <string name="ui_app_menu_material">Стекло меню</string>
 </resources>

@@ -160,6 +160,7 @@ class MainActivity : AppCompatActivity() {
         FOLDERS(R.string.ui_surface_folders, R.drawable.ic_catalog_folder, 0xF49B46, R.string.ui_catalog_keywords_folders),
         PHOTO(R.string.ui_catalog_photo, R.drawable.ic_catalog_photo, 0xF46785, R.string.ui_catalog_keywords_photo),
         DOCK(R.string.ui_surface_dock, R.drawable.ic_catalog_dock, 0x6D85F4, R.string.ui_catalog_keywords_dock),
+        APP_MENU(R.string.ui_app_menu_title, R.drawable.ic_catalog_island, 0x927AF0, R.string.ui_app_menu_keywords),
         BANNERS(R.string.ui_catalog_banners, R.drawable.ic_catalog_bell, 0x49A0FF, R.string.ui_catalog_keywords_banners),
         LIVE(R.string.ui_catalog_live, R.drawable.ic_catalog_island, 0x926DF5, R.string.ui_catalog_keywords_live),
         VOLUME(R.string.ui_volume_glass, R.drawable.ic_catalog_bell, 0x628EF1, R.string.ui_volume_glass_hint),
@@ -1192,7 +1193,7 @@ class MainActivity : AppCompatActivity() {
         val entries=column()
         add(body,entries)
         val groups=listOf(
-            R.string.ui_catalog_launcher to listOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,
+            R.string.ui_catalog_launcher to listOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.APP_MENU,
                 Screen.MOTION),
             R.string.ui_catalog_systemui to listOf(Screen.LOCKSCREEN,Screen.SHADE,Screen.SIDEBAR,Screen.LIVE,Screen.BANNERS,Screen.VOLUME),
             R.string.camera_tab to listOf(Screen.CAMERA_ZOOM),
@@ -1539,6 +1540,7 @@ class MainActivity : AppCompatActivity() {
             Screen.FOLDERS->folderSection(body,general,colors)
             Screen.PHOTO->photoSection(body,general,colors)
             Screen.DOCK->dockSection(body,general,colors)
+            Screen.APP_MENU->appMenuSection(body)
             Screen.BANNERS->bannerSection(body,general,colors)
             Screen.LIVE->liveAlertSection(body,colors)
             Screen.VOLUME->volumeSection(body,general,colors)
@@ -2269,7 +2271,7 @@ class MainActivity : AppCompatActivity() {
             return listOf(smallIcon(R.drawable.ic_restart,label,chrome=true,action=::confirmSidebarRestart)
                 .apply { tooltipText = label })
         }
-        val launcher=screen in setOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.MOTION)
+        val launcher=screen in setOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.APP_MENU,Screen.MOTION)
         val systemUi=screen in setOf(Screen.BANNERS,Screen.LIVE,Screen.VOLUME,Screen.LOCKSCREEN,Screen.SHADE)
         if (!launcher && !systemUi) return emptyList()
         val actions = mutableListOf<View>()
@@ -2583,6 +2585,16 @@ class MainActivity : AppCompatActivity() {
         gate(indicatorLens){master() && number("indicator_glass_style")==2}
         add(indicator,indicatorLens)
         accordionCard(body,R.string.ui_page_indicator_glass,indicator)
+    }
+
+    private fun appMenuSection(body: LinearLayout) {
+        val material = column()
+        add(material, slider(getString(R.string.ui_blur_radius), "app_menu_glass_blur", 0,
+            OpticalSettings.maximum("app_menu_glass_blur"), " dp"))
+        divider(material)
+        add(material, slider(getString(R.string.island_opacity), "app_menu_glass_opacity", 0, 100, "%"))
+        gate(material, ::master)
+        accordionCard(body, R.string.ui_app_menu_material, material)
     }
 
     private fun communityCatalogSection(layer:FrameLayout) {
