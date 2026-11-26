@@ -97,8 +97,10 @@ object IconGlassHook {
             drawerBakeDeadline = 0L
             if(current!=null && PrefsHelper.enabled && PrefsHelper.wallpaperEffectsEnabled) {
                 val deferSampling=LiveBlurEngine.deferWorkspaceSampling
-                val liveSampling=!deferSampling && (!PrefsHelper.ltpoIdle || LiveBlurEngine.hasRecentMotion) &&
-                    (LiveBlurEngine.isWorkspaceScrolling || PrefsHelper.blurMode==com.cosmod.launcherglass.ui.SettingsProvider.BLUR_MODE_LIVE) &&
+                val drawerSampling=LiveBlurEngine.drawerOccludesWorkspace && PrefsHelper.drawerBlurEnabled
+                val liveSampling=!deferSampling && (drawerSampling ||
+                    (!PrefsHelper.ltpoIdle || LiveBlurEngine.hasRecentMotion) &&
+                    (LiveBlurEngine.isWorkspaceScrolling || PrefsHelper.blurMode==com.cosmod.launcherglass.ui.SettingsProvider.BLUR_MODE_LIVE)) &&
                     (LiveBlurEngine.isResumed || NativeSurfaceLive.active)
                 IconMaterialRenderer.beginFrame()
                 // The live pass already checks nested display lists.
@@ -139,7 +141,7 @@ object IconGlassHook {
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
             if(view.rootView!==root || !view.isAttachedToWindow || !view.isShown || isAppearanceRedrawPending(view))continue
-            if(LiveBlurEngine.drawerOccludesWorkspace && !isDrawerIcon(view))continue
+            if(LiveBlurEngine.drawerOccludesWorkspace && (!isDrawerIcon(view) || !view.getGlobalVisibleRect(visible)))continue
             val restored=IconMaterialRenderer.restoreDiscardedSamples(view)
             if(recoverIconBackdrop(view,wallpaper,visible) || restored){view.invalidate();recovered++}
         }
@@ -176,7 +178,7 @@ object IconGlassHook {
     private val viewLocations=WeakHashMap<View,Location>()
     private fun surfaceLocation(view:View):Location {
         val parent=view.parent
-        viewLocations[view]?.takeIf {it.parent.get()===parent}?.let {return it}
+        if(view.isAttachedToWindow)viewLocations[view]?.takeIf {it.parent.get()===parent}?.let {return it}
         var folder=false;var drawer=false;var openFolder=false;var node:View?=view
         while(node!=null){
             val name=node.javaClass.name
@@ -185,7 +187,7 @@ object IconGlassHook {
             if(name.contains("allapps.") || name.contains("AllApps"))drawer=true
             node=node.parent as? View
         }
-        return Location(WeakReference(parent),folder,drawer,openFolder).also {viewLocations[view]=it}
+        return Location(WeakReference(parent),folder,drawer,openFolder).also {if(view.isAttachedToWindow)viewLocations[view]=it}
     }
     private val openFolderContainers=setOf("com.android.launcher3.folder.Folder",
         "com.android.launcher3.folder.OplusFolder","com.android.launcher3.folder.FolderPagedView")
@@ -336,17 +338,18 @@ object IconGlassHook {
         val scroll=(LiveBlurEngine.wallpaperScrollRatio*10000).toInt()
         val paging=LiveBlurEngine.isWorkspaceScrolling
         val roots=LinkedHashSet<View>()
+        val drawerOnly=onlyChangedDrawerSamples && LiveBlurEngine.drawerOccludesWorkspace
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
             if (isAppearanceRedrawPending(view) || (beforeDraw != null && view.rootView !== beforeDraw)) continue
             if(NativeSurfaceLive.ownsSource(view) || !view.isAttachedToWindow || !view.isShown)continue
-            if(onlyChangedDrawerSamples && LiveBlurEngine.drawerOccludesWorkspace && !isDrawerIcon(view))continue
+            if(drawerOnly && (!isDrawerIcon(view) || !view.getGlobalVisibleRect(visible)))continue
             world.reset()
             view.transformMatrixToGlobal(world)
             full.set(0f,0f,view.width.toFloat(),view.height.toFloat());world.mapRect(full)
             val metrics=view.resources.displayMetrics
             val offscreen=full.right<=0f || full.bottom<=0f || full.left>=metrics.widthPixels || full.top>=metrics.heightPixels
-            val edge=view.javaClass.name.contains("BubbleTextView") &&
+            val edge=!drawerOnly && view.javaClass.name.contains("BubbleTextView") &&
                 (full.left<-.5f || full.top<-.5f || full.right>metrics.widthPixels+.5f || full.bottom>metrics.heightPixels+.5f)
             // Both update paths obey the edge optimization. The old switch only
             // removed forceEdge, leaving the ordinary sampler path running.
@@ -376,7 +379,7 @@ object IconGlassHook {
                 }
                 continue
             }
-            if(!view.getGlobalVisibleRect(visible)){
+            if(!drawerOnly && !view.getGlobalVisibleRect(visible)){
                 if(!forceEdge)continue
                 visible.set(0,0,view.width,view.height)
             }
@@ -581,7 +584,7 @@ object IconGlassHook {
         if(result!=null || !gpuDynamic)layerCache[drawable]=LayerCache(stamp,source,source?.generationId ?: 0,palette,result,drawable.bounds.width(),drawable.bounds.height(),compatibility,specialPackage)
         return result
     }
-    private fun sourceRect(bitmap:Bitmap,a:Anchor?,bounds:Rect):RectF {
+    private fun sourceRect(bitmap:Bitmap,a:Anchor?):RectF {
         if(a==null)return RectF(0f,0f,bitmap.width.toFloat(),bitmap.height.toFloat())
         val footprint=RectF(a.x,a.y,a.x+a.iconW,a.y+a.iconH)
         return WallpaperFootprint.source(bitmap,a.screenW,a.screenH,footprint,footprint)
@@ -611,8 +614,8 @@ object IconGlassHook {
         // Native surface capture enlarges a 210px icon to e.g. 1200px.
         // Material geometry scales, but the sampled wallpaper footprint must
         // stay the size of the original icon, not the offscreen surface.
-        val footprint=Rect(0,0,parts.plateMaskBitmap.width,parts.plateMaskBitmap.height)
-        val source=compatible?.let {sourceRect(it,a,footprint)}
+        val trackPosition=binding?.foreign==false && canvas.isHardwareAccelerated && PrefsHelper.gpuEffects
+        val source=if(trackPosition) null else compatible?.let {sourceRect(it,a)}
         val plateColor = when {
             PrefsHelper.desktopLightIconGlass -> Color.WHITE
             PrefsHelper.blurEnabled -> PrefsHelper.iconPlateColor(parts.bgColor)
@@ -652,9 +655,8 @@ object IconGlassHook {
         else GlyphMaterialRenderer.draw(canvas, bounds, glyph, paint)
     }
 
-    private fun samplesWallpaper(a:Anchor?):Boolean = PrefsHelper.blurEnabled &&
-        (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) &&
-        (a?.drawer!=true || PrefsHelper.drawerBlurEnabled) && a?.openFolder!=true
+    private fun samplesWallpaper(a:Anchor?):Boolean = if(a?.drawer==true) PrefsHelper.drawerBlurEnabled
+        else PrefsHelper.blurEnabled && (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) && a?.openFolder!=true
 
     private fun wallpaper(a:Anchor?):Bitmap? =
         if(samplesWallpaper(a))WallpaperHelper.getBlurredWallpaper(appContext)else null
@@ -823,7 +825,7 @@ object IconGlassHook {
                     val mini=MiniIconRefresh.isMini(preview,rect.width(),rect.height(),bounds.width(),bounds.height())
                     if(preview && PrefsHelper.optimizeMiniIcons && previewSizeLogs.add("${owner.javaClass.name}:${owner.width}x${owner.height}:$mini:${folderPreview.get()==true}"))
                         GlassLogger.i("MaterialEngine","Folder preview pacing: host=${owner.javaClass.simpleName}/${owner.width}x${owner.height}, local=${rect.width()}x${rect.height()}, native=${bounds.width()}x${bounds.height()}, mini=$mini, limit=${MiniIconRefresh.fps(PrefsHelper.liveFps,mini,PrefsHelper.optimizeMiniIcons)} FPS")
-                    IconMaterialRenderer.Binding(owner,identity,rect,a.screenW,a.screenH,mini,materialAlpha,foreign=foreign)
+                    IconMaterialRenderer.Binding(owner,identity,rect,a.screenW,a.screenH,mini,materialAlpha,lift=!drawer,foreign=foreign)
                 }else null
                 val layer=if(materialAlpha<255)canvas.saveLayerAlpha(RectF(bounds),materialAlpha)else canvas.save()
                 try {render(canvas,bounds,parts,a,wallpaper(a),binding)}finally{canvas.restoreToCount(layer)}

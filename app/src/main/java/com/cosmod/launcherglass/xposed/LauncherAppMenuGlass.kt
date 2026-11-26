@@ -1,10 +1,12 @@
 package com.cosmod.launcherglass.xposed
 
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
@@ -14,11 +16,14 @@ import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewTreeObserver
@@ -71,6 +76,7 @@ internal object LauncherAppMenuGlass {
                     opacity = number("app_menu_glass_opacity"),
                     filter = null,
                     extendedLens = true,
+                    surfaceScope = GlassSurface.APP_MENU,
                     dispersion = number("app_menu_glass_dispersion"),
                     newEngine = settings.getBoolean(scope) && !settings.getBoolean(GlassEngineSettings.softKey(scope)),
                     engineOptics = GlassEngineSettings.optics(settings, scope),
@@ -204,6 +210,25 @@ internal object LauncherAppMenuGlass {
                 })
             }.onFailure {
                 GlassLogger.limited(TAG, "menu-native-edge") { "Stock popup edge hook unavailable" }
+            }
+            runCatching {
+                val nativeSpotlight = frameType.getDeclaredField("d").apply { isAccessible = true }
+                val spotlightEnabled = frameType.getDeclaredField("z").apply { isAccessible = true }
+                val spotlightFollowsTouch = frameType.getDeclaredField("B").apply { isAccessible = true }
+                val dispatch = frameType.getDeclaredMethod("dispatchTouchEvent", MotionEvent::class.java)
+                ModuleHooks.hookMethod(dispatch, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val view = param.thisObject as? View ?: return
+                        val background = view.background as? GlassBackground ?: return
+                        if (!background.drawn) return
+                        // Use the COUI spotlight if the native frame already draws it.
+                        if (spotlightEnabled.getBoolean(view) && spotlightFollowsTouch.getBoolean(view) &&
+                            nativeSpotlight.get(view) != null) return
+                        (param.args[0] as? MotionEvent)?.let(background::onTouch)
+                    }
+                })
+            }.onFailure {
+                GlassLogger.limited(TAG, "menu-spotlight") { "Touch spotlight hook unavailable" }
             }
             GlassLogger.i(TAG, "App menu material available in CPI build ${BuildConfig.VERSION_CODE}")
         }.onFailure {
@@ -340,7 +365,7 @@ internal object LauncherAppMenuGlass {
                 release(view)
             } else if (bindings[view] === this) {
                 restoreBackground(view)
-                backgrounds.remove(view)
+                backgrounds.remove(view)?.stopSpotlight()
                 AlertGlassLens.forget(view)
             }
         }
@@ -359,6 +384,7 @@ internal object LauncherAppMenuGlass {
                 if (bindings[view] === this) bindings.remove(view)
                 AlertGlassLens.forget(view)
             }
+            backgrounds.values.forEach(GlassBackground::stopSpotlight)
             backgrounds.clear()
             frame = null
         }
@@ -415,6 +441,74 @@ internal object LauncherAppMenuGlass {
         private var themedStyle: GlassStyle? = null
         private var nightMode = false
         private var opacity = 255
+        private val spotlightPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private val spotlightMatrix = Matrix()
+        private val spotlight by lazy {
+            RadialGradient(0f, 0f, 1f, intArrayOf(Color.WHITE, 0x55ffffff, 0x00ffffff),
+                floatArrayOf(0f, .58f, 1f), Shader.TileMode.CLAMP)
+        }
+        private var spotlightAnimator: ValueAnimator? = null
+        private var spotlightAlpha = 0
+        private var pointer = MotionEvent.INVALID_POINTER_ID
+        private var spotlightX = 0f
+        private var spotlightY = 0f
+
+        fun onTouch(event: MotionEvent) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    spotlightX = event.x
+                    spotlightY = event.y
+                    pointer = event.getPointerId(0)
+                    fadeSpotlight(34, 95L)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val index = event.findPointerIndex(pointer)
+                    if (index < 0) return
+                    spotlightX = event.getX(index)
+                    spotlightY = event.getY(index)
+                    invalidateSelf()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> releaseSpotlight()
+                MotionEvent.ACTION_POINTER_UP -> {
+                    if (event.getPointerId(event.actionIndex) == pointer) releaseSpotlight()
+                }
+            }
+        }
+
+        private fun releaseSpotlight() {
+            pointer = MotionEvent.INVALID_POINTER_ID
+            fadeSpotlight(0, 190L)
+        }
+
+        private fun fadeSpotlight(alpha: Int, durationMs: Long) {
+            spotlightAnimator?.cancel()
+            spotlightAnimator = ValueAnimator.ofInt(spotlightAlpha, alpha).apply {
+                duration = durationMs
+                addUpdateListener {
+                    spotlightAlpha = it.animatedValue as Int
+                    invalidateSelf()
+                }
+                start()
+            }
+        }
+
+        fun stopSpotlight() {
+            spotlightAnimator?.cancel()
+            spotlightAnimator = null
+            pointer = MotionEvent.INVALID_POINTER_ID
+            spotlightAlpha = 0
+        }
+
+        private fun drawSpotlight(canvas: Canvas, shape: AlertContour.Shape) {
+            if (spotlightAlpha == 0) return
+            val reach = minOf(shape.bounds.width(), shape.bounds.height()) * .42f
+            spotlightMatrix.setScale(reach, reach)
+            spotlightMatrix.postTranslate(spotlightX, spotlightY)
+            spotlight.setLocalMatrix(spotlightMatrix)
+            spotlightPaint.shader = spotlight
+            spotlightPaint.alpha = spotlightAlpha * opacity / 255
+            canvas.drawPath(shape.path, spotlightPaint)
+        }
         var drawn = false
             private set
 
@@ -495,6 +589,7 @@ internal object LauncherAppMenuGlass {
                     }
                 }.getOrDefault(false)
                 if (drawn) {
+                    drawSpotlight(canvas, shape)
                     menu.reportDraw(view, style)
                     return
                 }

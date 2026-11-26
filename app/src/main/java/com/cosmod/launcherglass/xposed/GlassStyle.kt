@@ -14,6 +14,7 @@ internal object GlassSurface {
     const val PAGE_INDICATOR=12
     const val VOLUME=13
     const val LOCKSCREEN=14
+    const val APP_MENU=15
 }
 
 internal object BackdropBrightness {

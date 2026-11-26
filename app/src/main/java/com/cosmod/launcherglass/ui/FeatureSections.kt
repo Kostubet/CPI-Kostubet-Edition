@@ -30,7 +30,8 @@ internal object FeatureSections {
         }
         if(off("LIGHT")){
             disable(WallpaperGlowSettings.ENABLED,"edge_light_enabled")
-            for(surface in 0 until EdgeSettings.count)disable(EdgeSettings.key(surface,"enabled"),EdgeSettings.key(surface,"dark_enabled"))
+            // Black outlines are set per surface, including from the lock screen.
+            for(surface in 0 until EdgeSettings.count)disable(EdgeSettings.key(surface,"enabled"))
         }
         if(off("PERFORMANCE")){
             bundle.putInt("performance_profile",0);bundle.putInt("performance_resolution",100);bundle.putInt("performance_alert_rate",0)

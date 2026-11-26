@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 474
+
+- Стекло иконок работает на вкладках «Все» и «Категории». Рендерер пропускает элементы за пределами видимой области и переиспользует данные для выборки фона.
+- Сглажены полосы преломления в углах меню. Подсветка следует за пальцем и плавно гаснет.
+- Чёрные контуры настраиваются отдельно от выключателя краевого освещения. Тонкие линии сглаживаются по форме элемента, без ступенек от округления толщины до пикселей маски.
+
 ### Сборка 473
 
 - Докбар сохраняет размер, когда меню по долгому нажатию поднимает выбранную иконку. Стекло меню повторяет штатное скругление COUI, а фон обновляется во время анимации открытия.
@@ -388,6 +394,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 474
+
+- Icon glass now follows the icon settings in the All and Categories drawer tabs. The renderer skips clipped items and reuses backdrop sampling geometry.
+- Smoothed refraction seams at popup corners and added a touch-following spotlight that fades on release.
+- Per-surface black outlines work independently of the edge lighting switch. Thin outlines follow the surface shape with subpixel antialiasing.
 
 ### Build 473
 

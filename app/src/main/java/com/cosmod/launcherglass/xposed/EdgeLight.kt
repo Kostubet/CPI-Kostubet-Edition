@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.Resources
 import android.graphics.*
 import android.hardware.*
+import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.os.SystemClock
@@ -13,6 +14,7 @@ import android.util.LruCache
 import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import com.cosmod.launcherglass.ui.EdgeSettings
+import com.cosmod.launcherglass.util.ContourCoverage
 import com.cosmod.launcherglass.util.LiveBlurEngine
 import com.cosmod.launcherglass.util.PerformancePolicy
 import com.cosmod.launcherglass.util.WallpaperHelper
@@ -27,7 +29,7 @@ internal object EdgeLight:SensorEventListener {
         val softness:Int=0,val overlap:Boolean=true) {
         val widthDp get()=widthQuarters*.25f
     }
-    private data class DarkMaskKey(val contour:Any,val quarterPixels:Int,val softness:Int)
+    private data class DarkMaskKey(val contour:Any,val widthSixteenths:Int,val softness:Int)
     private var darkContours=List(EdgeSettings.count){DarkContour()}
     private val darkMasks=object:LruCache<DarkMaskKey,Bitmap>(2*1024*1024){
         override fun sizeOf(key:DarkMaskKey,value:Bitmap)=value.allocationByteCount
@@ -37,18 +39,18 @@ internal object EdgeLight:SensorEventListener {
     }
     private fun drawDark(canvas:Canvas,bounds:Rect,mask:Bitmap,contour:DarkContour,displayEdge:Float,density:Float){
         if(contour.opacity==0 || bounds.isEmpty)return
-        val width=maskWidthQuarters(contour,mask,displayEdge,density)
+        val width=(maskWidth(contour,mask,displayEdge,density)*16f).roundToInt().coerceAtLeast(1)
         val key=DarkMaskKey(GlassGeometry.contourKey(mask),width,contour.softness)
-        val ring=darkMasks[key] ?: makeDarkMask(mask,width*.25f,contour.softness).also {darkMasks.put(key,it)}
+        val ring=darkMasks[key] ?: makeDarkMask(mask,width/16f,contour.softness).also {darkMasks.put(key,it)}
         darkPaint.alpha=(contour.opacity*255+50)/100
         canvas.drawBitmap(ring,null,bounds,darkPaint)
     }
-    private fun maskWidthQuarters(contour:DarkContour,mask:Bitmap,displayEdge:Float,density:Float):Int {
+    private fun maskWidth(contour:DarkContour,mask:Bitmap,displayEdge:Float,density:Float):Float {
         val scale=minOf(mask.width,mask.height)/displayEdge.coerceAtLeast(1f)
-        return (contour.widthDp*density*scale*4f).roundToInt().coerceAtLeast(1)
+        return contour.widthDp*density*scale
     }
     private fun makeDarkMask(mask:Bitmap,width:Float,softness:Int):Bitmap{
-        val featherWidth=.85f+width*softness*.0082f
+        val featherWidth=width*softness*.0082f
         val field=GlassGeometry.lightField(mask)
         val ring=Bitmap.createBitmap(mask.width,mask.height,Bitmap.Config.ALPHA_8)
         val pixels=ByteArray(ring.byteCount)
@@ -57,9 +59,7 @@ internal object EdgeLight:SensorEventListener {
             val output=y*ring.rowBytes
             for(x in 0 until mask.width){
                 val coverage=field.alpha[row+x].toInt() and 255
-                val distance=(field.depth[row+x]-.5f).coerceAtLeast(0f)
-                val feather=((width-distance)/featherWidth).coerceIn(0f,1f)
-                pixels[output+x]=(coverage*feather*feather*(3f-2f*feather)).roundToInt().toByte()
+                pixels[output+x]=ContourCoverage.alpha(coverage,field.depth[row+x],width,featherWidth).toByte()
             }
         }
         ring.copyPixelsFromBuffer(ByteBuffer.wrap(pixels))
@@ -105,6 +105,15 @@ internal object EdgeLight:SensorEventListener {
     private val lightMatrix=Matrix()
     private val contourBand=Path()
     private val vectorPaint=Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG).apply {style=Paint.Style.STROKE}
+    private val darkPathStroke=Paint().apply {
+        style=Paint.Style.STROKE
+        strokeJoin=Paint.Join.ROUND
+    }
+    private val darkPathPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply { color=Color.BLACK }
+    private val darkPathStrokeArea=Path()
+    private data class DarkPathBand(val path:Path,val alpha:Int)
+    private data class DarkPath(val generation:Int,val width:Float,val contour:DarkContour,val bands:List<DarkPathBand>)
+    private val darkPaths=WeakHashMap<Path,DarkPath>()
 
     private fun lighting(x:Float,y:Float,profile:Profile):SweepGradient {
         // A tight specular peak with softer shoulders and a muted opposite reflection.
@@ -322,27 +331,42 @@ internal object EdgeLight:SensorEventListener {
 
     private fun drawDarkPath(canvas:Canvas,path:Path,contour:DarkContour,density:Float){
         if(contour.opacity==0)return
-        val saved=canvas.save()
-        try {
-            canvas.clipPath(path)
-            vectorPaint.shader=null
-            vectorPaint.color=Color.BLACK
-            val alpha=contour.opacity/100f
-            val width=2f*contour.widthDp*density
-            val feather=width*contour.softness*.0082f
-            fun stroke(size:Float,opacity:Float){
-                vectorPaint.strokeWidth=size
-                vectorPaint.alpha=(255f*opacity).roundToInt().coerceIn(0,255)
-                canvas.drawPath(path,vectorPaint)
+        val width=2f*contour.widthDp*density
+        val generation=if(Build.VERSION.SDK_INT>=34)path.generationId else null
+        val cached=darkPaths[path]
+        val bands=if(generation!=null && cached?.generation==generation && cached.width==width &&
+            cached.contour==contour) cached.bands else {
+            makeDarkPathBands(path,width,contour).also {
+                if(generation!=null)darkPaths[path]=DarkPath(generation,width,contour,it)
             }
-            if(feather>0f){
-                val outer=alpha*.22f
-                val middle=alpha*.55f
-                stroke(width,outer)
-                stroke(width-feather*.43f,(middle-outer)/(1f-outer))
-                stroke(width-feather,(alpha-middle)/(1f-middle))
-            }else stroke(width,alpha)
-        }finally {canvas.restoreToCount(saved)}
+        }
+        for(band in bands){
+            darkPathPaint.alpha=band.alpha
+            canvas.drawPath(band.path,darkPathPaint)
+        }
+    }
+
+    private fun makeDarkPathBands(path:Path,width:Float,contour:DarkContour):List<DarkPathBand> {
+        val alpha=contour.opacity/100f
+        val feather=width*contour.softness*.0082f
+        // Draw the intersected band as a single antialiased shape per pass.
+        // A canvas clip on the outer edge can cut the stroke at whole pixels.
+        fun band(strokeWidth:Float,opacity:Float):DarkPathBand? {
+            darkPathStroke.strokeWidth=strokeWidth
+            darkPathStrokeArea.rewind()
+            val innerBand=Path()
+            if(!darkPathStroke.getFillPath(path,darkPathStrokeArea) ||
+                !innerBand.op(darkPathStrokeArea,path,Path.Op.INTERSECT))return null
+            return DarkPathBand(innerBand,(opacity*255f).roundToInt())
+        }
+        if(feather==0f)return listOfNotNull(band(width,alpha))
+        val outer=alpha*.22f
+        val middle=alpha*.55f
+        return listOfNotNull(
+            band(width,outer),
+            band(width-feather*.43f,(middle-outer)/(1f-outer)),
+            band(width-feather,(alpha-middle)/(1f-middle))
+        )
     }
 
     @Synchronized fun draw(canvas:Canvas,bounds:Rect,mask:Bitmap,view:View?,liquid:Boolean,shareRim:Boolean=false,surface:Int=0,
@@ -352,7 +376,8 @@ internal object EdgeLight:SensorEventListener {
         val contour=darkContours[surface]
         if(contour.overlap)drawDark(canvas,bounds,mask,contour,displayEdge,density)
         if(profile.enabled && liquid && profile.strength>0){
-            val inset=if(contour.opacity>0 && !contour.overlap)maskWidthQuarters(contour,mask,displayEdge,density)else 0
+            val inset=if(contour.opacity>0 && !contour.overlap)
+                (maskWidth(contour,mask,displayEdge,density)*4f).roundToInt().coerceAtLeast(1) else 0
             drawHighlight(canvas,bounds,optics(mask,profile,inset,surface==0),view,shareRim)
         }
         if(!contour.overlap)drawDark(canvas,bounds,mask,contour,displayEdge,density)

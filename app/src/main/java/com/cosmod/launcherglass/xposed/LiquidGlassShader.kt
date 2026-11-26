@@ -62,6 +62,7 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
         shader.setFloatUniform("kyantEngine",if(style.newEngine)1f else 0f)
         val soft = style.engineOptics.softWidth
         shader.setFloatUniform("softOptics", if (style.liquid && soft != null) 1f else 0f, (soft ?: 0) * .01f)
+        shader.setFloatUniform("smoothCorners",if(style.surfaceScope==GlassSurface.APP_MENU)1f else 0f)
         shader.setFloatUniform("engineOptics",style.engineOptics.power*.01f,
             style.engineOptics.edgeWidth*.01f,style.engineOptics.edgeLight*.01f)
     }
@@ -117,12 +118,24 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
             uniform float kyantEngine;
             uniform float2 softOptics;
             uniform float3 engineOptics;
+            uniform float smoothCorners;
             uniform float4 rowR;
             uniform float4 rowG;
             uniform float4 rowB;
             uniform float3 bias;
         """
         private const val LENS=KyantGlassEngine.AGSL+SoftGlassShader.HEIGHT_PROFILE+"""
+            float2 smoothCornerNormal(float2 p,float2 halfSize,float radius) {
+                float2 q=abs(p)-halfSize+radius;
+                // Blend the normals of both edges near the corner bisector.
+                // Picking one side switches the sampling direction in a line.
+                float blend=max(1.0,min(radius*.22,min(halfSize.x,halfSize.y)*.07));
+                float2 weights=max(q,0.0)+blend*exp(clamp((q-max(q.x,q.y))/blend,-16.0,0.0));
+                return normalize(weights)*clamp(p/blend,-1.0,1.0);
+            }
+            float2 lensNormal(float2 p,float2 halfSize,float radius) {
+                return smoothCorners>.5 ? smoothCornerNormal(p,halfSize,radius) : kyantNormal(p,halfSize,radius);
+            }
             float2 kyantOffset(float2 xy,float radius) {
                 float2 halfSize=size*.5;
                 float2 p=xy-halfSize;
@@ -131,7 +144,7 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 float distance=-kyantSd(p,halfSize,radius);
                 if(distance>=bevel)return float2(0.0);
                 float roll=kyantCircularProfile(1.0-max(0.0,distance)/bevel);
-                float2 normal=kyantNormal(p,halfSize,min(radius*1.5,min(halfSize.x,halfSize.y)));
+                float2 normal=lensNormal(p,halfSize,min(radius*1.5,min(halfSize.x,halfSize.y)));
                 float2 depth=.28*p/max(length(p),.001);
                 float strength=.24*distortion*engineOptics.x;
                 float shift=strength/(1.0+.85*strength);
@@ -143,7 +156,7 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 float d=kyantSd(p,halfSize,radius);
                 float width=max(.7,min(size.x,size.y)*(.008+.055*engineOptics.y));
                 float edge=1.0-smoothstep(0.0,width,-d);
-                float2 normal=kyantNormal(p,halfSize,min(radius*1.5,min(halfSize.x,halfSize.y)));
+                float2 normal=lensNormal(p,halfSize,min(radius*1.5,min(halfSize.x,halfSize.y)));
                 float glint=kyantDirectionalHighlight(normal,1.36,1.25)*edge*engineOptics.z*.36;
                 return half4(min(pixel.rgb+half3(glint)*pixel.a,half3(pixel.a)),pixel.a);
             }
@@ -160,7 +173,7 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 float depth = onbHeight(inset / reach, 3.8);
                 float slope = .5 * reach * (onbHeight((inset + 1.0) / reach, 3.8)
                     - onbHeight((inset - 1.0) / reach, 3.8));
-                float3 normal = normalize(float3(kyantNormal(local, halfSize, radius) * slope, 1.0));
+                float3 normal = normalize(float3(lensNormal(local, halfSize, radius) * slope, 1.0));
                 float2 transmit = refract(float3(0.0, 0.0, -1.0), normal, .25).xy;
                 float magnitude = edge * min(distortion, 6.0);
                 if (reflected) {
@@ -178,7 +191,7 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
             half4 softGlassGlint(half4 pixel, float2 p, float radius) {
                 float reflection = softReflection(p, radius);
                 if (reflection <= 0.0) return pixel;
-                float2 normal = kyantNormal(p - size * .5, size * .5, radius);
+                float2 normal = lensNormal(p - size * .5, size * .5, radius);
                 half light = half(kyantDirectionalHighlight(normal, -2.16, 1.55) * reflection * .26);
                 return half4(min(pixel.rgb + light * pixel.a, half3(pixel.a)), pixel.a);
             }
@@ -194,8 +207,9 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 if(reach<=0.0)return float2(0.0);
                 float profile=1.0-smoothstep(0.0,reach,distance);
                 if(profile<.01)return float2(0.0);
-                float2 normal=outside+float2(q.x>=q.y ? .01 : 0.0,q.y>=q.x ? .01 : 0.0);
-                return normalize(normal)*sign(center)*profile*profile*dispersion*min(edge*.042,7.0);
+                float2 normal=smoothCorners>.5 ? smoothCornerNormal(center,size*.5,r) :
+                    normalize(outside+float2(q.x>=q.y ? .01 : 0.0,q.y>=q.x ? .01 : 0.0))*sign(center);
+                return normal*profile*profile*dispersion*min(edge*.042,7.0);
             }
             float2 lensSample(float2 xy) {
                 float edgeSize=min(size.x,size.y);
@@ -304,12 +318,12 @@ internal class LiquidGlassShader private constructor(private val shader:RuntimeS
                 // Shape refraction independently of the OEM silhouette mask.
                 float opticalRadius=rounding*extent;
                 float radius=nativeContour>.5
-                    ? clamp(contourRadius(p)+(rounding-.30)*extent,0.0,.5*extent)
+                    ? clamp(contourRadius(p)+(smoothCorners>.5 ? 0.0 : (rounding-.30)*extent),0.0,.5*extent)
                     : opticalRadius;
                 bool soft = softOptics.x > .5;
                 float2 lens = soft ? softGlassOffset(p, radius, false) :
                     (kyantEngine>.5 ? kyantOffset(p,radius) :
-                        (nativeContour>.5 ? softLens(p,radius,opticalRadius) : lensSample(p)));
+                        (nativeContour>.5 ? softLens(p,radius,smoothCorners>.5 ? radius : opticalRadius) : lensSample(p)));
                 float2 q=clamp(xy+lensHeight*lens,float2(.5),limit-float2(.5));
                 half4 pixel=backdrop.eval(q);
                 if(pixel.a<.999)pixel+=backdrop.eval(xy)*(half(1.0)-pixel.a);

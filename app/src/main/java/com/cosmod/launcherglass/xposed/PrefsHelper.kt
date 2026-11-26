@@ -66,7 +66,9 @@ object PrefsHelper {
     internal val shortcutGlassEnabled get() = enabled && blurEnabled && iconsFeatureEnabled
     val wallpaperEffectsEnabled get()=(blurEnabled && (iconsFeatureEnabled || folderBlurEnabled)) ||
         widgetGlassEnabled || dockGlassEnabled || PageIndicatorGlass.profile.mode>0
-    @Volatile var drawerBlurEnabled: Boolean = SettingsDefaults.boolean(SettingsProvider.KEY_DRAWER_BLUR_ENABLED)
+    // The app drawer uses the same material as home-screen icons. Older configs
+    // can still contain a hidden drawer switch that shipped off by default.
+    val drawerBlurEnabled get() = blurEnabled && iconsFeatureEnabled
     @Volatile var blurRadius: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_RADIUS)
     @Volatile var blurMode: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_MODE)
     @Volatile var blurStyle: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_STYLE)
@@ -242,7 +244,6 @@ object PrefsHelper {
             val locationBlurEnabled = bundle.getBoolean(SettingsProvider.KEY_BLUR_LOCATIONS_ENABLED,true)
             val newFolderBlurEnabled = bundle.getBoolean(SettingsProvider.KEY_FOLDER_BLUR_ENABLED, SettingsDefaults.boolean(SettingsProvider.KEY_FOLDER_BLUR_ENABLED))
             val newFolderIconsBlurEnabled=locationBlurEnabled && bundle.getBoolean(SettingsProvider.KEY_FOLDER_ICONS_BLUR_ENABLED,true)
-            val newDrawerBlurEnabled = locationBlurEnabled && bundle.getBoolean(SettingsProvider.KEY_DRAWER_BLUR_ENABLED, SettingsDefaults.boolean(SettingsProvider.KEY_DRAWER_BLUR_ENABLED))
             ltpoIdle=bundle.getBoolean("performance_ltpo_idle",true)
             val developer=bundle.getBoolean(SettingsProvider.KEY_DEVELOPER_MODE,false)
             val newGpuEffects=!developer || bundle.getBoolean(SettingsProvider.KEY_GPU_EFFECTS,true)
@@ -352,10 +353,9 @@ object PrefsHelper {
             val blurRadiusChanged=newBlurRadius!=blurRadius
             val blurModeChanged=newBlurMode!=blurMode
             val blurEnabledChanged=newBlurEnabled!=blurEnabled
-            val drawerChanged=newDrawerBlurEnabled!=drawerBlurEnabled
             val folderEnabledChanged=newFolderBlurEnabled!=folderBlurEnabled
             val materialChanged=iconsSectionChanged || classicChanged || iconPlateFinishChanged || accentChanged || edgeChanged || opticsChanged || glassEngineChanged || performanceChanged || backendChanged || newBgOpacity!=bgOpacity || newBlurEnabled!=blurEnabled ||
-                newFolderBlurEnabled!=folderBlurEnabled || newFolderIconsBlurEnabled!=folderIconsBlurEnabled || newDrawerBlurEnabled!=drawerBlurEnabled ||
+                newFolderBlurEnabled!=folderBlurEnabled || newFolderIconsBlurEnabled!=folderIconsBlurEnabled ||
                 newIconStroke != iconStroke || newStrokeOpacity != strokeOpacity ||
                 newGradientOpacity != gradientOpacity || glyphOutlineChanged || paletteChanged ||
                 blurColorsChanged || blurStyleChanged || blurRadiusChanged || geometryChanged || vibrancyChanged || widgetChanged || widgetElementsChanged || tintChanged || depthChanged || glowChanged || newDisableEdgeOptimization!=disableEdgeOptimization || newOptimizeMiniIcons!=optimizeMiniIcons || newLiftedBackdrop!=liftedBackdrop
@@ -379,7 +379,6 @@ object PrefsHelper {
             liftedBackdrop=newLiftedBackdrop
             folderBlurEnabled = newFolderBlurEnabled
             folderIconsBlurEnabled=newFolderIconsBlurEnabled
-            drawerBlurEnabled = newDrawerBlurEnabled
             val dockSaturation=bundle.getInt("dock_backdrop_saturation",100).coerceIn(0,200)
             val dockDarkness=bundle.getInt("dock_backdrop_darkness",0).coerceIn(0,100)
             if (lastDockSaturation != dockSaturation || lastDockDarkness != dockDarkness) {
@@ -459,7 +458,7 @@ object PrefsHelper {
                 ModuleHooks.setEnabled(true)
                 com.cosmod.launcherglass.util.LauncherWallpaperCapture.onModuleEnabled()
             }
-            if(!loaded || masterChanged || blurModeChanged || drawerChanged || performanceChanged ||
+            if(!loaded || masterChanged || blurModeChanged || iconsSectionChanged || blurEnabledChanged || performanceChanged ||
                 wallpaperEffectsEnabled!=previousWallpaperEffects)LiveBlurEngine.onPrefsChanged()
             NativeSurfaceLive.onSettingsChanged()
             if(masterChanged || iconsSectionChanged || folderEnabledChanged || materialChanged || folderChanged)FolderMaterialHook.onSettingsChanged()

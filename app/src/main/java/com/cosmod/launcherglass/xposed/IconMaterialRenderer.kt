@@ -374,6 +374,7 @@ object IconMaterialRenderer {
     }
     internal enum class SampleUpdate { RECORD, CHANGED, UNCHANGED }
     private val samplerFootprint = ThreadLocal.withInitial { RectF() }
+    private val sampleTransform = ThreadLocal.withInitial { Matrix() }
 
     @Synchronized internal fun updateSamplers(view:View,wallpaper:Bitmap?,transform:Matrix?=null,
         nowNs:Long=System.nanoTime()):SampleUpdate {
@@ -445,7 +446,8 @@ object IconMaterialRenderer {
         if (width <= 0 || height <= 0) return
         val folderSample = style.folderBackdrop && binding?.foreign == false && PrefsHelper.gpuEffects &&
             canvas.isHardwareAccelerated && android.os.Build.VERSION.SDK_INT >= 33
-        val blurred = folderSample || (wallpaper != null && source != null && !style.folderBackdrop)
+        val trackPosition = binding?.foreign == false && canvas.isHardwareAccelerated && PrefsHelper.gpuEffects
+        val blurred = folderSample || (wallpaper != null && (source != null || trackPosition) && !style.folderBackdrop)
         val surfaceTint=SurfaceTints.get(style.surfaceScope)
         val key = Key(mask, mask.generationId, glyph, glyph.generationId, glyphTint, width, height, surfaceTint?.color ?: color,
             surfaceTint?.let {it.opacity*255/100} ?: tintAlpha, hideGlyph, blurred,
@@ -560,10 +562,6 @@ object IconMaterialRenderer {
                     }
                     sampler.style=style;sampler.plateNode=depthNode;sampler.mini=binding.mini;sampler.bound=frameSerial
                     ensureContents(sampler)
-                    val rect=RectF(binding.local)
-                    val world=Matrix()
-                    binding.view.transformMatrixToGlobal(world)
-                    world.mapRect(rect)
                     // Native overscroll can re-record the icon even when the
                     // live updater skips it. Retain its existing edge sample.
                     val motion=com.cosmod.launcherglass.util.LiveBlurEngine
@@ -571,11 +569,20 @@ object IconMaterialRenderer {
                         !IconGlassHook.isDrawerIcon(binding.view) && sampler.worldValid && sampler.lift==null &&
                         sampler.wallpaper===wallpaper && sampler.appliedStyle==style
                     if(!sampleFolderPanel(sampler,binding.view,style) && !style.folderBackdrop && wallpaper!=null &&
-                        !hold && (sampler.source==null || ((binding.dragPreview || !motion.deferWorkspaceSampling) &&
-                            !freezeEdge(binding.view,world))) &&
-                        samplerEffect(sampler,wallpaper,WallpaperFootprint.source(wallpaper,binding.screenW,binding.screenH,rect),view=binding.view)){
-                        sampler.world.set(world);sampler.worldValid=true
-                        sampler.scroll=com.cosmod.launcherglass.util.LiveBlurEngine.wallpaperScrollRatio
+                        !hold && (sampler.source==null || binding.dragPreview || !motion.deferWorkspaceSampling)){
+                        val world=sampleTransform.get()!!
+                        world.reset()
+                        binding.view.transformMatrixToGlobal(world)
+                        if(sampler.source==null || IconGlassHook.isDrawerIcon(binding.view) || !freezeEdge(binding.view,world)){
+                            val rect=samplerFootprint.get()!!
+                            rect.set(binding.local)
+                            world.mapRect(rect)
+                            val crop=WallpaperFootprint.source(wallpaper,binding.screenW,binding.screenH,rect,rect)
+                            if(samplerEffect(sampler,wallpaper,crop,view=binding.view)){
+                                sampler.world.set(world);sampler.worldValid=true
+                                sampler.scroll=motion.wallpaperScrollRatio
+                            }
+                        }
                     }
                     plate.drawRenderNode(liftNode(sampler,binding) ?: sampler.node)
                 }else if(wallpaper!=null && source!=null){
