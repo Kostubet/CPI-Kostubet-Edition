@@ -161,7 +161,9 @@ internal object SoftGlassShader {
 
     // Older expanded cards use the compositor's BackgroundBlurDrawable instead of the
     // post-effect drawable. Sample CPI's wallpaper layer with the same optical function.
-    fun activitySource() = """
+    fun activitySource() = plateSource
+
+    private val plateSource by lazy { """
         uniform float3 onbSoftGlass;
         uniform float4 onbOptics;
         uniform float3 onbToneControls;
@@ -185,7 +187,7 @@ internal object SoftGlassShader {
             half3 stock = capture.rgb / max(.001, capture.a);
             return half4(onbMaterial(stock, capture, p, p, float2(1.0), sdf, true), 1.0);
         }
-    """.trimIndent()
+    """.trimIndent() }
 
     const val HEIGHT_PROFILE = """
         float onbHeight(float x, float power) {

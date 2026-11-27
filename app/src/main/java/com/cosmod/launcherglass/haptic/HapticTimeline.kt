@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RenderNode
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
@@ -25,8 +26,23 @@ internal class HapticTimeline(
     data class Viewport(val zoom: Float, val left: Float)
 
     var editorLanes = false
+        set(value) {
+            if (field == value) return
+            field = value
+            curvesChanged()
+        }
     var audioLabel = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            chartChanged()
+        }
     var hapticLabel = ""
+        set(value) {
+            if (field == value) return
+            field = value
+            chartChanged()
+        }
     var pattern: HapticPattern? = null
         set(value) {
             field = value
@@ -40,9 +56,17 @@ internal class HapticTimeline(
     var limits = 0f..1f
         set(value) { field = value; curvesChanged() }
     var selected: Int? = null
-        set(value) { field = value; invalidate() }
+        set(value) {
+            if (field == value) return
+            field = value
+            chartChanged()
+        }
     var cursor = 0
-        set(value) { field = value; invalidate() }
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
     var drawMode = HapticDrawMode.NAVIGATE
     private val stroke = java.util.TreeMap<Int, Float>()
     private var editTime: Int? = null
@@ -53,7 +77,9 @@ internal class HapticTimeline(
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val wave = Path()
+    private val chart = RenderNode("CPI.hapticChart")
     private var curvesDirty = true
+    private var chartDirty = true
     private val tickIntervals = intArrayOf(50, 100, 250, 500, 1000, 2500, 5000, 10_000, 20_000, 30_000)
     private val density = resources.displayMetrics.density
     private var leftMs = 0f
@@ -85,15 +111,53 @@ internal class HapticTimeline(
         }
     })
 
-    private fun curvesChanged() { curvesDirty = true; invalidate() }
+    private fun chartChanged() {
+        chartDirty = true
+        invalidate()
+    }
+
+    private fun curvesChanged() {
+        curvesDirty = true
+        chartChanged()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        chart.setPosition(0, 0, w, h)
         curvesChanged()
+    }
+
+    override fun onDetachedFromWindow() {
+        chart.discardDisplayList()
+        super.onDetachedFromWindow()
     }
 
     override fun onDraw(canvas: Canvas) {
         val project = pattern ?: return
-        val visibleStart = clampLeft(leftMs)
+        val start = clampLeft(leftMs)
+        if (canvas.isHardwareAccelerated && width > 0 && height > 0) {
+            if (chartDirty || !chart.hasDisplayList()) {
+                val recording = chart.beginRecording()
+                try {
+                    drawChart(recording, project, start)
+                    chartDirty = false
+                } finally {
+                    chart.endRecording()
+                }
+            }
+            canvas.drawRenderNode(chart)
+        } else {
+            drawChart(canvas, project, start)
+        }
+        paint.style = Paint.Style.FILL
+        paint.strokeWidth = density
+        paint.color = ink
+        paint.alpha = 210
+        val playhead = (cursor - start) * width / visible
+        canvas.drawLine(playhead, 0f, playhead, graphHeight, paint)
+    }
+
+    private fun drawChart(canvas: Canvas, project: HapticPattern, visibleStart: Float) {
         val visibleEnd = visibleStart + visible
         fun x(time: Float) = (time - visibleStart) * width / visible
         fun y(value: Float) = graphTop + 8 * density +
@@ -174,10 +238,6 @@ internal class HapticTimeline(
             lastMarker = marker
             canvas.drawCircle(marker, y(value(project.at(time))), (if (point.ms == selected) 5f else 2.4f) * density, paint)
         }
-        paint.color = ink
-        paint.alpha = 210
-        val playhead = x(cursor.toFloat())
-        canvas.drawLine(playhead, 0f, playhead, graphHeight, paint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

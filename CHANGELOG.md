@@ -4,6 +4,12 @@
 
 ## Русский
 
+### Сборка 475
+
+- Предпросмотр стекла рассчитывает размытие в фоне и объединяет частые обновления при движении ползунков.
+- Снижена нагрузка в лаунчере и System UI. Уменьшено число повторных обходов интерфейса, расчётов геометрии и копирований фона.
+- Ускорено программное размытие с сохранением результата по пикселям. Редактор вибрации переиспользует график при воспроизведении.
+
 ### Сборка 474
 
 - Стекло иконок работает на вкладках «Все» и «Категории». Рендерер пропускает элементы за пределами видимой области и переиспользует данные для выборки фона.
@@ -394,6 +400,12 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 475
+
+- Glass previews calculate blur in the background and coalesce rapid slider updates.
+- Reduced repeated view traversal, geometry calculations, and backdrop copies in the launcher and System UI.
+- Improved software blur performance with pixel-identical output. The haptic editor reuses its graph during playback.
 
 ### Build 474
 

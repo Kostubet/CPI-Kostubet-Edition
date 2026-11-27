@@ -732,11 +732,15 @@ internal object LockscreenGlass {
         return if(matches("getStartAffordanceView") || matches("getEndAffordanceView"))Surface.SHORTCUTS else null
     }
 
+    private val pinLayoutTypes = HashMap<Class<*>, Boolean>()
+
     private fun isInPinLayout(view:View):Boolean {
         var parent=view.parent as? View
         repeat(8){
             val group=parent ?: return false
-            if(generateSequence(group.javaClass as Class<*>?) {it.superclass}.any {it.name==COUI_PIN_ROOT})return true
+            if (pinLayoutTypes.getOrPut(group.javaClass) {
+                    generateSequence(group.javaClass as Class<*>) { it.superclass }.any { it.name == COUI_PIN_ROOT }
+                }) return true
             parent=group.parent as? View
         }
         return false
@@ -858,7 +862,25 @@ internal object LockscreenGlass {
     }
 
     private data class NotificationLayer(val left:Int,val width:Int,val height:Int,val top:Int,val bottom:Int,val progress:Float)
-    private class CapsuleMotion(var progress:Float,var row:WeakReference<View>?=null)
+    private class CapsuleMotion(var progress: Float) {
+        var row: WeakReference<View>? = null
+        var rowBackground: WeakReference<View>? = null
+        var capsuleBackground: WeakReference<View>? = null
+    }
+
+    private fun View.belongsTo(container: View): Boolean {
+        var owner = parent
+        while (owner is View && owner !== container) owner = owner.parent
+        return owner === container
+    }
+
+    private fun rowBackground(state: CapsuleMotion, row: View): View? {
+        if (notificationId == View.NO_ID) return null
+        state.rowBackground?.get()?.takeIf { it.belongsTo(row) }?.let { return it }
+        val background = row.findViewById<View>(notificationId)
+        state.rowBackground = background?.let(::WeakReference)
+        return background
+    }
 
     private fun updateCapsuleProgress(p:XC_MethodHook.MethodHookParam){
         if(!visible || p.hasThrowable() || Surface.NOTIFICATIONS !in profiles || Surface.CAPSULE !in profiles)return
@@ -871,18 +893,23 @@ internal object LockscreenGlass {
             if(previous!==row){
                 if(previous!=null && rowMotion[previous]===state){
                     rowMotion.remove(previous)
-                    if(notificationId!=View.NO_ID)previous.findViewById<View>(notificationId)?.invalidate()
+                    rowBackground(state, previous)?.invalidate()
                 }
                 state.row=row?.let(::WeakReference)
+                state.rowBackground=null
             }
             if(state.progress==progress && previous===row)return
             state.progress=progress
             if(row!=null){
                 if(progress>0f)rowMotion[row]=state
                 else if(rowMotion[row]===state)rowMotion.remove(row)
-                if(notificationId!=View.NO_ID)row.findViewById<View>(notificationId)?.invalidate()
+                rowBackground(state, row)?.invalidate()
             }
-            (NativeIconAccess.call(item,"getBgView") as? View)?.invalidate()
+            val background = state.capsuleBackground?.get()?.takeIf { it.belongsTo(item) }
+                ?: (NativeIconAccess.call(item, "getBgView") as? View)?.also {
+                    state.capsuleBackground = WeakReference(it)
+                }
+            background?.invalidate()
             if(!positionRefreshPending && movingTargets.isNotEmpty()){
                 positionRefreshPending=true
                 Choreographer.getInstance().postFrameCallback {

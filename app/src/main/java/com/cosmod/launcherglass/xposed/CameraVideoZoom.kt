@@ -2,7 +2,6 @@ package com.cosmod.launcherglass.xposed
 
 import android.app.Application
 import android.content.Context
-import android.database.ContentObserver
 import android.hardware.camera2.CaptureResult
 import android.os.Build
 import android.os.Bundle
@@ -114,13 +113,14 @@ internal object CameraVideoZoom {
         }
 
         fun observeSettings() {
-            fun reload() {
-                val prefs = runCatching { app.contentResolver.call(SettingsProvider.CONTENT_URI, Settings.READ, null, null) }.getOrNull()
-                val next = if (prefs == null) Config() else Config(
-                    prefs.getBoolean(Settings.ENABLED), prefs.getBoolean(Settings.DIAGNOSTICS),
-                    Input.entries.filter { prefs.getBoolean(it.key) }.toSet(),
-                    Settings.tuning { key -> prefs.getInt(key, Settings.integers.getValue(key)) },
-                )
+            val observer = HostSettingsReload(main, read = {
+                val prefs = app.contentResolver.call(SettingsProvider.CONTENT_URI, Settings.READ, null, null)
+                prefs?.let {
+                    Config(it.getBoolean(Settings.ENABLED), it.getBoolean(Settings.DIAGNOSTICS),
+                        Input.entries.filter { input -> it.getBoolean(input.key) }.toSet(),
+                        Settings.tuning { key -> it.getInt(key, Settings.integers.getValue(key)) })
+                }
+            }, apply = { next ->
                 val previous = config
                 config = next
                 if (previous.enabled && (!next.enabled || previous.inputs != next.inputs)) finishWithStockTarget()
@@ -129,14 +129,11 @@ internal object CameraVideoZoom {
                     reportedRatio = Float.NaN
                     status(state, mechanism, force = true)
                 }
-            }
-            reload()
+            })
             runCatching {
-                app.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, false,
-                    object : ContentObserver(main) {
-                        override fun onChange(selfChange: Boolean) = reload()
-                    })
+                app.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, false, observer)
             }
+            observer.reloadImmediately()
         }
 
         fun bind(loader: ClassLoader) {

@@ -125,6 +125,13 @@ class MainActivity : AppCompatActivity() {
     private val featureKeys get()=(previewControls ?: pageControls).keys
     private val refreshers get()=(previewControls ?: pageControls).refreshers
     private val previewDraft=mutableMapOf<String,Int>()
+    private var previewPreferences: Bundle? = null
+    private var previewFramePending = false
+    private val renderPreviewFrame = Runnable {
+        previewFramePending = false
+        updateGlassPreview()
+        shadePreview?.refresh()
+    }
     private var glassPreview:GlassPreview?=null
     private var glassPreviewScreen:Screen?=null
     private var lockPreviewSurface=LockscreenSettings.Surface.NOTIFICATIONS
@@ -204,6 +211,7 @@ class MainActivity : AppCompatActivity() {
     private var fluxWarning:View?=null
     private var frameworkWarning:View?=null
     private val supportListener=SharedPreferences.OnSharedPreferenceChangeListener { _,key ->
+        previewPreferences = null
         if(key==SettingsProvider.KEY_NATIVE_FLUX_SUPPORT)runOnUiThread {updateFluxWarning()}
         if(key?.startsWith("runtime_")==true)runOnUiThread {updateStatus()}
     }
@@ -382,7 +390,10 @@ class MainActivity : AppCompatActivity() {
         previewTouch?.velocity?.recycle()
         previewTouch=null
         settingsDialogOwner?.dispose()
-        if(::page.isInitialized)page.removeCallbacks(refreshPreview)
+        if(::page.isInitialized){
+            page.removeCallbacks(refreshPreview)
+            page.removeCallbacks(renderPreviewFrame)
+        }
         backDestination=null
         if(::prefs.isInitialized)prefs.unregisterOnSharedPreferenceChangeListener(supportListener)
         previewExecutor.shutdownNow()
@@ -2035,7 +2046,7 @@ class MainActivity : AppCompatActivity() {
             val band=ColorBand(this,i,darkUi,primary).apply {
                 contentDescription=getString(title)
                 onChange={next,commit->
-                    values[i]=next;previewDraft[keys[i]]=next;repaint();updateGlassPreview()
+                    values[i]=next;previewDraft[keys[i]]=next;repaint();requestPreviewFrame()
                     if(commit){previewDraft.remove(keys[i]);save(keys[i],next)}
                 }
             }
@@ -3133,7 +3144,7 @@ class MainActivity : AppCompatActivity() {
                     values[index]=next
                     previewDraft[keys[index]]=next
                     paintPreview()
-                    updateGlassPreview()
+                    requestPreviewFrame()
                     if(commit){previewDraft.remove(keys[index]);save(keys[index],next)}
                 }
             }
@@ -3185,6 +3196,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearGlassPreview(){
+        page.removeCallbacks(renderPreviewFrame)
+        previewFramePending = false
         shadePreview?.release()
         shadePreview=null
         previewDraft.clear()
@@ -3574,12 +3587,18 @@ class MainActivity : AppCompatActivity() {
             .apply { putInt(DesktopAppearance.MODE, DesktopAppearance.Mode.MANUAL.ordinal) }
     }
 
+    private fun requestPreviewFrame() {
+        if (previewFramePending || (glassPreview == null && shadePreview == null)) return
+        previewFramePending = true
+        page.postOnAnimation(renderPreviewFrame)
+    }
+
     private fun updateGlassPreview(){
         val preview=glassPreview ?: return
         val screen=glassPreviewScreen ?: return
-        val stored = settingsSnapshot()
+        val stored = previewPreferences ?: settingsSnapshot().also { previewPreferences = it }
         val bundle = if (number(DesktopAppearance.MODE) != DesktopAppearance.Mode.MANUAL.ordinal &&
-            previewDraft.keys.any(DesktopAppearance::affectsManualSettings)) manualAppearanceSnapshot(stored) else stored
+            previewDraft.keys.any(DesktopAppearance::affectsManualSettings)) manualAppearanceSnapshot(stored) else Bundle(stored)
         previewDraft.forEach {key,value->bundle.putInt(key,value)}
         val bannerDark=renderGlassPreview(preview,screen,bundle)
         if(bannerDark!=null && previewBannerDark!=bannerDark){
@@ -3792,8 +3811,7 @@ class MainActivity : AppCompatActivity() {
             onPreview?.invoke(stored(progress+min))
             if(glassPreview!=null || shadePreview!=null){
                 previewDraft[key]=stored(progress+min)
-                updateGlassPreview()
-                shadePreview?.refresh()
+                requestPreviewFrame()
             }
         }
         refreshers.add {

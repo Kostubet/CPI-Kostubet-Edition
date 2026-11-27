@@ -1,10 +1,12 @@
 package com.cosmod.launcherglass.xposed
 
 import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -58,9 +60,12 @@ internal object LauncherAppMenuGlass {
     private val menus = WeakHashMap<View, Menu>()
     private val bindings = WeakHashMap<View, Menu>()
     private val clearBackground = ThreadLocal<Boolean>()
-    private val outlinePath by lazy {
+    private val outlinePath by lazy(::resolveOutlinePath)
+
+    // Only used in the hooked launcher. A blocked field falls back to the COUI radius.
+    @SuppressLint("SoonBlockedPrivateApi")
+    private fun resolveOutlinePath() =
         runCatching { Outline::class.java.getDeclaredField("mPath").apply { isAccessible = true } }.getOrNull()
-    }
 
     fun update(settings: Bundle, moduleEnabled: Boolean) {
         material = if (moduleEnabled && settings.getBoolean(FeatureSections.key("APP_MENU"))) {
@@ -391,6 +396,7 @@ internal object LauncherAppMenuGlass {
     }
 
     private fun composeBackdrop(context: Context, area: Rect, width: Int, height: Int, workspace: Bitmap?): Bitmap? {
+        if (workspace != null && !workspace.hasAlpha()) return workspace
         val snapshot = WallpaperHelper.readSystemSnapshot(context, maxSide = 1560)
             ?: return workspace
         var wallpaper = snapshot
@@ -398,10 +404,13 @@ internal object LauncherAppMenuGlass {
             if (snapshot.config == Bitmap.Config.HARDWARE) {
                 wallpaper = snapshot.copy(Bitmap.Config.ARGB_8888, false) ?: return workspace
             }
-            val result = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            // PixelCopy's destination already has the required size and color space.
+            // Fill its transparent background in-place to avoid a second full bitmap.
+            val result = workspace ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(result)
             val dest = RectF(0f, 0f, width.toFloat(), height.toFloat())
             val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+            if (workspace != null) paint.blendMode = BlendMode.DST_OVER
             val source = WallpaperFootprint.source(wallpaper, area.right, area.bottom, RectF(area))
             val sx = width / source.width()
             val sy = height / source.height()
@@ -412,8 +421,6 @@ internal object LauncherAppMenuGlass {
                 })
             }
             canvas.drawRect(dest, paint)
-            paint.shader = null
-            workspace?.let { canvas.drawBitmap(it, null, dest, paint) }
             return result
         } finally {
             if (wallpaper !== snapshot) wallpaper.recycle()

@@ -17,6 +17,7 @@ import com.cosmod.launcherglass.util.ShadeGlassRenderer.Frame
 import java.util.WeakHashMap
 import java.util.concurrent.Executors
 import kotlin.math.ceil
+import kotlin.math.floor
 
 /** Main-thread lifecycle, one shared frame and one compositor request in flight. */
 internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> Unit,
@@ -46,6 +47,11 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
     private var consecutiveFailures = 0
 
     fun diagnostics() = "frames=$captures, readers=${readers.size}, busy=$busy, misses=$consecutiveFailures"
+
+    private fun bandEdge(edge: Int, limit: Int, upper: Boolean): Int {
+        val band = (limit / 8).coerceAtLeast(1)
+        return minOf(limit, (edge.coerceIn(0, limit) + if (upper) band - 1 else 0) / band * band)
+    }
 
     fun frameFor(view: View, bounds: RectF, padding: Int, visible: (View) -> Boolean, controlTrack: Boolean): Frame? {
         val display = view.display ?: return null
@@ -111,11 +117,11 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
             clear()
             return
         }
-        val snapshot = readers.keys.weakSnapshot()
-        for (view in snapshot) {
-            val reader = readers[view] ?: continue
+        val entries = readers.entries.iterator()
+        while (entries.hasNext()) {
+            val (view, reader) = entries.next()
             if (!isVisible(view) || !reader.visible(view)) {
-                readers.remove(view)
+                entries.remove()
                 if (frame != null) onHidden(view)
             }
         }
@@ -137,18 +143,24 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
         if (area.isEmpty) return
         // Keep a blur/refraction margin around all live readers, then snap the
         // crop to stable bands so small animation steps reuse capture arguments.
-        var top = area.bottom
+        val displayWidth = area.right
+        val displayHeight = area.bottom
+        var left = displayWidth
+        var right = 0
+        var top = displayHeight
         var bottom = 0
         for (reader in readers.values) {
-            top = minOf(top,reader.bounds.top.toInt()-reader.padding)
+            left = minOf(left,floor(reader.bounds.left).toInt()-reader.padding)
+            right = maxOf(right,ceil(reader.bounds.right).toInt()+reader.padding)
+            top = minOf(top,floor(reader.bounds.top).toInt()-reader.padding)
             bottom = maxOf(bottom,ceil(reader.bounds.bottom).toInt()+reader.padding)
         }
-        val band = (area.height()/8).coerceAtLeast(1)
-        val displayHeight = area.bottom
-        area.top = (top.coerceIn(0,displayHeight)/band)*band
-        area.bottom = minOf(displayHeight,((bottom.coerceIn(0,displayHeight)+band-1)/band)*band)
+        area.left = bandEdge(left,displayWidth,upper=false)
+        area.right = bandEdge(right,displayWidth,upper=true)
+        area.top = bandEdge(top,displayHeight,upper=false)
+        area.bottom = bandEdge(bottom,displayHeight,upper=true)
         if (area.isEmpty) return
-        val width = PerformancePolicy.alertWidth
+        val scale=minOf(1f,PerformancePolicy.alertWidth.toFloat()/displayWidth)
         val layers = AlertBackdrop.excludedSurfaces()
         if (layers.isEmpty()) {
             // A capture without exclusions would feed back into the material.
@@ -160,7 +172,7 @@ internal class ShadeBackdrop(context: Context, private val onHidden: (View) -> U
         clock.record(System.nanoTime(), fps)
         busy = true
         worker.execute {
-            val result = runCatching { AlertBackdrop.capture(area,minOf(1f,width.toFloat()/area.width()),layers) }
+            val result = runCatching { AlertBackdrop.capture(area,scale,layers) }
             main.post {
                 busy = false
                 if (token == epoch && readers.isNotEmpty()) {

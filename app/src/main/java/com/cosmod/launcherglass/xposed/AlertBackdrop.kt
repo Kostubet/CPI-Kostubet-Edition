@@ -143,39 +143,49 @@ internal object AlertBackdrop {
             nextFrame()
             return
         }
-        val visible=readers.keys.weakSnapshot().filter {
-            if(!it.isAttachedToWindow){
-                readers.remove(it)
-                AlertGlassLens.forget(it)
-                return@filter false
+        val alertViews=ArrayList<View>()
+        val volumeViews=ArrayList<View>()
+        var volume:View?=null
+        var volumeWindowToken:IBinder?=null
+        val iterator=readers.entries.iterator()
+        while(iterator.hasNext()){
+            val (view,reader)=iterator.next()
+            if(!view.isAttachedToWindow){
+                iterator.remove()
+                AlertGlassLens.forget(view)
+                continue
             }
-            it.isShown && it.windowVisibility==View.VISIBLE &&
-                NativeAlertMaterial.visibleAlpha(it)>0f &&
-                when(readers[it]){
-                    Reader.LIVE_ALERT->true
-                    Reader.BANNER->NotificationBannerGlass.isBanner(it)
-                    Reader.VOLUME->VolumeGlass.isVisibleTrack(it)
-                    null->false
+            if(!view.isShown || view.windowVisibility!=View.VISIBLE || !(NativeAlertMaterial.visibleAlpha(view)>0f))continue
+            when(reader){
+                Reader.LIVE_ALERT->alertViews.add(view)
+                Reader.BANNER->if(NotificationBannerGlass.isBanner(view))alertViews.add(view)
+                Reader.VOLUME->if(VolumeGlass.isVisibleTrack(view)){
+                    volumeViews.add(view)
+                    if(volume==null){
+                        val token=view.windowToken
+                        if(token!=null){volume=view;volumeWindowToken=token}
+                    }
                 }
+            }
         }
-        if(visible.isEmpty() || !canSample()){
+        if((alertViews.isEmpty() && volumeViews.isEmpty()) || !canSample()){
             // A worker finishing after close must not seed the next app's card.
             epoch++
-            if(alertFrame!=null || volumeFrame!=null)visible.forEach {it.invalidate()}
+            if(alertFrame!=null || volumeFrame!=null){
+                alertViews.forEach {it.invalidate()}
+                volumeViews.forEach {it.invalidate()}
+            }
             clearReaders()
             return
         }
-        val volume=visible.firstOrNull {readers[it]==Reader.VOLUME && it.windowToken!=null}
-        val volumeWindowToken=volume?.windowToken
-        val alerts=visible.filter {readers[it]!=Reader.VOLUME}
         if(volumeOwner!=volumeWindowToken){volumeFrame=null;volumeOwner=volumeWindowToken;volumeRetryAt=0L}
-        if(alerts.isEmpty()){alertFrame=null;alertRetryAt=0L}
+        if(alertViews.isEmpty()){alertFrame=null;alertRetryAt=0L}
         val volumeReady=volume!=null && now>=volumeRetryAt
-        val alertsReady=alerts.isNotEmpty() && now>=alertRetryAt
+        val alertsReady=alertViews.isNotEmpty() && now>=alertRetryAt
         if(!volumeReady && !alertsReady){
-            if(volume==null && alerts.isEmpty()){clearReaders();return}
+            if(volume==null && alertViews.isEmpty()){clearReaders();return}
             val retry=minOf(if(volume!=null)volumeRetryAt else Long.MAX_VALUE,
-                if(alerts.isNotEmpty())alertRetryAt else Long.MAX_VALUE)
+                if(alertViews.isNotEmpty())alertRetryAt else Long.MAX_VALUE)
             main.removeCallbacks(retryCapture)
             main.postAtTime(retryCapture,retry)
             return
@@ -185,7 +195,7 @@ internal object AlertBackdrop {
         val volumeView=volume.takeIf {captureVolume}
         val owner=volumeWindowToken.takeIf {captureVolume}
         lastCaptureWasVolume=captureVolume
-        val host=volumeView ?: alerts.first()
+        val host=volumeView ?: alertViews.first()
         val rotation=host.display?.rotation ?: 0
         val metrics=host.resources.displayMetrics
         val area=Rect(0,0,metrics.widthPixels,metrics.heightPixels)
@@ -195,7 +205,7 @@ internal object AlertBackdrop {
             val bucket=(area.height()/8).coerceAtLeast(1)
             val padding=(32f*metrics.density).toInt()
             var bottom=bucket*2
-            for(view in alerts){
+            for(view in alertViews){
                 view.getLocationOnScreen(screenPosition)
                 val height=(view.height*maxOf(1f,view.scaleY)).toInt()
                 bottom=maxOf(bottom,screenPosition[1]+height+maxOf(padding*2,height/2))
@@ -208,8 +218,8 @@ internal object AlertBackdrop {
             // shade and other windows under it remain in the sample.
             val pad=(32f*metrics.density).toInt()
             area.setEmpty()
-            for(view in visible){
-                if(readers[view]!=Reader.VOLUME || view.windowToken!=owner)continue
+            for(view in volumeViews){
+                if(view.windowToken!=owner)continue
                 view.getLocationOnScreen(screenPosition)
                 val left=(screenPosition[0]-pad).coerceIn(0,metrics.widthPixels)
                 val top=(screenPosition[1]-pad).coerceIn(0,metrics.heightPixels)
@@ -246,13 +256,19 @@ internal object AlertBackdrop {
         }
     }
     private fun publish(captured:Captured){
-        val volumeCapture=captured.volume!=null
-        val visible=readers.keys.weakSnapshot().filter {view ->
-            view.isAttachedToWindow && view.isShown && view.display?.rotation==captured.rotation &&
-                if(volumeCapture)readers[view]==Reader.VOLUME && view.windowToken==captured.volume
-                else readers[view]!=Reader.VOLUME
+        if(!enabled || captured.epoch!=epoch){
+            captured.bitmap.recycle()
+            return
         }
-        if(!enabled || captured.epoch!=epoch || visible.isEmpty()){
+        val volumeCapture=captured.volume!=null
+        val visible=ArrayList<View>()
+        for((view,reader) in readers){
+            if(volumeCapture){
+                if(reader!=Reader.VOLUME || view.windowToken!=captured.volume)continue
+            }else if(reader==Reader.VOLUME)continue
+            if(view.isAttachedToWindow && view.isShown && view.display?.rotation==captured.rotation)visible.add(view)
+        }
+        if(visible.isEmpty()){
             captured.bitmap.recycle()
             return
         }
@@ -294,8 +310,10 @@ internal object AlertBackdrop {
     }
 
     internal fun excludedSurfaces():Array<SurfaceControl> {
-        val r=roots;val surfaces=ArrayList<SurfaceControl>()
-        for(name in r.names.invoke(r.global) as Array<*>){
+        val r=roots
+        val names=r.names.invoke(r.global) as Array<*>
+        val surfaces=ArrayList<SurfaceControl>(names.size)
+        for(name in names){
             val view=r.root.invoke(r.global,name) as? View ?: continue
             val impl=r.impl.invoke(view) ?: continue
             val surface=r.surface.invoke(impl) as? SurfaceControl ?: continue

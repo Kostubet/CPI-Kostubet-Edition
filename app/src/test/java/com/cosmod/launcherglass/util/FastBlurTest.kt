@@ -8,7 +8,7 @@ import kotlin.random.Random
 class FastBlurTest {
     @Test fun packedBlurPreservesTheIntegerKernelAndOriginalAlpha() {
         for ((width, height, radius) in listOf(Triple(40, 41, 1), Triple(9, 3, 3),
-            Triple(1, 7, 8), Triple(11, 1, 65), Triple(3, 2, 0))) {
+            Triple(1, 7, 8), Triple(11, 1, 65), Triple(7, 5, 110), Triple(3, 2, 0))) {
             val random = Random(17)
             val source = IntArray(width * height) { random.nextInt() }
             val expected = referencePass(referencePass(source, width, height, radius, vertical = false),
@@ -17,6 +17,25 @@ class FastBlurTest {
             FastBlur.stackBlur(actual, width, height, radius)
             assertArrayEquals("${width}x${height}, radius=$radius", expected, actual)
         }
+    }
+
+    @Test fun rollingChannelsDoNotCarryIntoEachOther() {
+        val width = 17
+        val height = 8
+        val radius = 6
+        val source = IntArray(width * height) { index ->
+            val color = when (index % 4) {
+                0 -> 0xff0000
+                1 -> 0x00ff00
+                2 -> 0x0000ff
+                else -> 0xffffff
+            }
+            ((index * 19 and 255) shl 24) or color
+        }
+        val expected = referencePass(referencePass(source, width, height, radius, vertical = false),
+            width, height, radius, vertical = true)
+        FastBlur.stackBlur(source, width, height, radius)
+        assertArrayEquals(expected, source)
     }
 
     private fun referencePass(pixels: IntArray, width: Int, height: Int, radius: Int, vertical: Boolean): IntArray {

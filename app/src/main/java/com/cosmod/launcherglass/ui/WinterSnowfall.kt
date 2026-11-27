@@ -24,7 +24,9 @@ import kotlin.random.Random
 /** One overlay/display list per window; no touch target, bitmap capture or per-particle animator. */
 internal class WinterSnowfall(decor: ViewGroup) : Drawable(), Choreographer.FrameCallback {
     private class Flake(var x: Float, var y: Float, val size: Float, val speed: Float,
-        val phase: Float, val rotation: Float)
+        val phase: Float, val rotation: Float) {
+        var driftX = 0f
+    }
     private class Ledge(val view: WeakReference<View>, val radius: Float, val priority: Int) {
         val bounds = RectF()
         var opacity = 1f
@@ -120,20 +122,25 @@ internal class WinterSnowfall(decor: ViewGroup) : Drawable(), Choreographer.Fram
             discover(host)
             lastDiscovery = frameTimeNanos
         }
-        positionLedges(host)
+        if (ledges.isNotEmpty()) positionLedges(host)
         seconds += dt
         val w = host.width.toFloat().coerceAtLeast(1f)
         val h = host.height.toFloat().coerceAtLeast(1f)
+        val sway = seconds * .65f
+        val margin = 5 * density
         for (flake in flakes) {
             val before = flake.y * h
             flake.y += flake.speed * density * dt / h
-            val x = flake.x * w + sin(seconds * .65f + flake.phase) * 12f * density
+            val next = flake.y * h
+            flake.driftX = sin(sway + flake.phase) * 12f * density
+            val x = flake.x * w + flake.driftX
             if (drifts.size < 10) {
                 val landing = ledges.firstOrNull { ledge ->
                     val r = ledge.bounds
+                    if (r.isEmpty || next < r.top || before > r.top + ledge.radius ||
+                        x <= r.left + margin || x >= r.right - margin) return@firstOrNull false
                     val edge = r.top + arcHeight(x - r.left, r.width(), ledge.radius)
-                    !r.isEmpty && x > r.left + 5 * density && x < r.right - 5 * density &&
-                        before <= edge && flake.y * h >= edge &&
+                    before <= edge && next >= edge &&
                         drifts.none { it.ledge === ledge && kotlin.math.abs(it.fraction * r.width() + r.left - x) < 14 * density }
                 }
                 if (landing != null && random.nextFloat() < .48f) {
@@ -204,9 +211,11 @@ internal class WinterSnowfall(decor: ViewGroup) : Drawable(), Choreographer.Fram
     override fun draw(canvas: Canvas) {
         if (!enabled) return
         paint.color = 0xffeaf5ff.toInt()
+        val width = bounds.width()
+        val height = bounds.height()
         for (flake in flakes) {
-            val x = flake.x * bounds.width() + sin(seconds * .65f + flake.phase) * 12f * density
-            val y = flake.y * bounds.height()
+            val x = flake.x * width + flake.driftX
+            val y = flake.y * height
             paint.alpha = ((.32f + flake.size * .15f) * opacity).toInt().coerceIn(0, 230)
             if (flake.size < 1.8f) {
                 paint.style = Paint.Style.FILL

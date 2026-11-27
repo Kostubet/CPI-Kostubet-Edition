@@ -15,6 +15,18 @@ internal object AlertContour {
         internal var drawable:Drawable?=null;internal val rect=Rect()
     }
     private val shapes=WeakHashMap<View,Shape>()
+    private class Geometry {
+        val rect=Rect()
+        val outlined=Rect()
+        val outline=Outline()
+
+        inline fun readRoundRect(draw: (Outline) -> Unit): Boolean {
+            outline.setEmpty()
+            draw(outline)
+            return outline.getRect(outlined) && !outlined.isEmpty && outline.radius>0f
+        }
+    }
+    private val geometry=ThreadLocal.withInitial { Geometry() }
     private val fields=HashMap<Class<*>,Field?>()
     private fun path(drawable:Drawable?):Path? {
         if(drawable==null)return null
@@ -33,16 +45,15 @@ internal object AlertContour {
     private fun generation(path:Path):Int=if(android.os.Build.VERSION.SDK_INT>=34)path.generationId else try {(generationMethod?.invoke(path) as? Int) ?: 0}catch(_:Exception){0}
     fun resolve(view:View,native:Drawable?):Shape {
         val shape=shapes.getOrPut(view){Shape()}
-        val rect=Rect(native?.bounds ?: Rect())
+        val scratch=geometry.get()!!
+        val rect=scratch.rect
+        if(native!=null)rect.set(native.bounds)else rect.setEmpty()
         if(rect.isEmpty || !rect.intersect(0,0,view.width,view.height))rect.set(0,0,view.width,view.height)
-        val nativeOutline=Outline()
-        native?.getOutline(nativeOutline)
-        val outlined=Rect()
-        val nativeRound=nativeOutline.getRect(outlined) && !outlined.isEmpty && nativeOutline.radius>0f
         val source=path(native)?.takeUnless {it.isEmpty}
         if(source!=null){
-            if(shape.source!==source || shape.generation!=generation(source) || shape.rect!=rect){
-                shape.source=source;shape.generation=generation(source);shape.rect.set(rect)
+            val generation=generation(source)
+            if(shape.source!==source || shape.generation!=generation || shape.rect!=rect){
+                shape.source=source;shape.generation=generation;shape.rect.set(rect)
                 shape.path.set(source)
                 shape.path.computeBounds(shape.bounds,true)
                 // BackgroundBlurDrawable's path is already in view pixels.
@@ -51,25 +62,21 @@ internal object AlertContour {
                 if(!shape.bounds.isEmpty &&
                     shape.bounds.left>=-.5f && shape.bounds.top>=-.5f &&
                     shape.bounds.right<=rect.width()+.5f && shape.bounds.bottom<=rect.height()+.5f &&
-                    !RectF(rect).contains(shape.bounds)){
+                    !(rect.left<=shape.bounds.left && rect.top<=shape.bounds.top &&
+                        rect.right>=shape.bounds.right && rect.bottom>=shape.bounds.bottom)){
                     shape.path.offset(rect.left.toFloat(),rect.top.toFloat())
                     shape.bounds.offset(rect.left.toFloat(),rect.top.toFloat())
                 }
-                shape.radius=if(nativeRound)nativeOutline.radius else minOf(rect.width(),rect.height())*.28f
+                shape.radius=if(scratch.readRoundRect {native?.getOutline(it)})scratch.outline.radius
+                    else minOf(rect.width(),rect.height())*.28f
                 shape.nativePath=true;shape.revision++
             }
         }else {
             var radius=minOf(rect.width(),rect.height())*.25f
-            if(nativeRound){
-                rect.set(outlined)
-                radius=nativeOutline.radius
-            }else{
-                val outline=Outline()
-                view.outlineProvider?.getOutline(view,outline)
-                if(outline.getRect(outlined) && !outlined.isEmpty && outline.radius>0f){
-                    rect.set(outlined)
-                    radius=outline.radius
-                }
+            if(scratch.readRoundRect {native?.getOutline(it)} ||
+                scratch.readRoundRect {view.outlineProvider?.getOutline(view,it)}){
+                rect.set(scratch.outlined)
+                radius=scratch.outline.radius
             }
             if(shape.source!=null || shape.drawable!==native || shape.rect!=rect || shape.radius!=radius){
                 shape.source=null;shape.drawable=native;shape.rect.set(rect);shape.bounds.set(rect);shape.radius=radius

@@ -4,7 +4,6 @@ import android.app.Application
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.res.Configuration
-import android.database.ContentObserver
 import android.graphics.Canvas
 import android.graphics.RenderEffect
 import android.graphics.RenderNode
@@ -101,23 +100,20 @@ internal object SoftGlassNative {
                 bound = true
                 var session: Session? = null
                 val uri = SettingsProvider.CONTENT_URI
-                val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
-                    override fun onChange(selfChange: Boolean) {
-                        if (Build.VERSION.SDK_INT < 33) return
-                        val preferences = runCatching { app.contentResolver.call(uri, SettingsProvider.METHOD_GET_ALL, null, null) }
-                            .getOrNull() ?: return
-                        val profiles = readProfiles(preferences, true)
-                        if (session == null && profiles.isNotEmpty()) session = create(app, loader, true)
-                        session?.update(profiles)
-                    }
-                }
+                val observer = HostSettingsReload(Handler(Looper.getMainLooper()), read = {
+                    app.contentResolver.call(uri, SettingsProvider.METHOD_GET_ALL, null, null)
+                        ?.let { readProfiles(it, true) }
+                }, apply = { profiles ->
+                    if (session == null && profiles.isNotEmpty()) session = create(app, loader, true)
+                    session?.update(profiles)
+                })
                 runCatching {
                     val sidebarProcess = Application.getProcessName()
                     com.cosmod.launcherglass.util.HostControl.install(app, "sidebar", details = {
                         "process=$sidebarProcess, material=${session != null}"
                     })
                     app.contentResolver.registerContentObserver(uri, false, observer)
-                    observer.onChange(false)
+                    observer.reloadImmediately()
                 }.onFailure { GlassLogger.e("SoftGlass", "Sidebar preferences unavailable", it) }
             }
         })

@@ -166,13 +166,12 @@ internal object PhotoWidgetMaterial {
 
     private fun returnProgress(view:View,canvas:Canvas):Float {
         if(transitionDraw.get()==true || !canvas.isHardwareAccelerated)return 1f
-        val visible=view.isShown && view.windowVisibility==View.VISIBLE && view.alpha>.01f
-        val focused = view.hasWindowFocus()
-        val now=SystemClock.uptimeMillis()
         var needsFrame = false
         val progress = synchronized(returns) {
             val state=returns[view] ?: return 1f
-            if (!visible || !state.native && !focused) 0f else {
+            if (!view.isShown || view.windowVisibility!=View.VISIBLE || view.alpha<=.01f ||
+                !state.native && !view.hasWindowFocus()) 0f else {
+                val now=SystemClock.uptimeMillis()
                 needsFrame = true
                 if (now < state.startAfter) return@synchronized 0f
                 if(state.firstDrawAt<0L)state.firstDrawAt=now

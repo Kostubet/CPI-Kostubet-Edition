@@ -35,7 +35,7 @@ object IconGlassHook {
             bindPreviewContainer(drawable!!,owner,depth+1)
         }
         if(!container && item!=null && drawable!=null && SpecialIconSupport.bind(drawable,item,{recording.get()==true}) {icon,canvas -> drawMaterial(icon,canvas,icon.bounds)}){
-            if(owner!=null){hosts[drawable]=WeakReference(owner);registerLiveView(owner)}
+            if(owner!=null)rememberHost(drawable,owner)
         }
         val nested=NativeIconAccess.call(params,"getCurrentStackedParams") as? Iterable<*>
         nested?.forEach {if(it!=null)bindPreviewItem(it,owner,depth+1)}
@@ -51,7 +51,7 @@ object IconGlassHook {
         val revision:Long,val material:Drawable,var foreground: FloatingForeground? = null)
     private val floatingMaterials=WeakHashMap<View,FloatingMaterial>()
     private val hosts=WeakHashMap<Drawable,WeakReference<View>>()
-    private val liveViews=WeakHashMap<View,Boolean>()
+    private val liveViews=WeakHashMap<View,WeakReference<ViewTreeObserver>?>()
     private val pendingIconBackdrops=WeakHashMap<View,Boolean>()
     private var drawerBakeDeadline = 0L
     private var liveSnapshot=emptyList<WeakReference<View>>()
@@ -60,7 +60,13 @@ object IconGlassHook {
         if(liveSnapshotDirty){liveSnapshot=liveViews.keys.map(::WeakReference);liveSnapshotDirty=false}
         return liveSnapshot
     }
-    private val liveRoots=WeakHashMap<View,ViewTreeObserver.OnPreDrawListener>()
+    private class LiveRoot(
+        val observer:WeakReference<ViewTreeObserver>,
+        val listener:ViewTreeObserver.OnPreDrawListener
+    ) {
+        fun unregister(){observer.get()?.takeIf {it.isAlive}?.removeOnPreDrawListener(listener)}
+    }
+    private val liveRoots=WeakHashMap<View,LiveRoot>()
     // Passive counters only: never create a timer or a frame for diagnostics.
     private var idleSince=0L
     private var idlePreDraws=0
@@ -86,10 +92,21 @@ object IconGlassHook {
     }
     private fun registerLiveView(view:View){
         if(Looper.myLooper()!=Looper.getMainLooper()){view.post {registerLiveView(view)};return}
-        if(liveViews.put(view,true)==null)liveSnapshotDirty=true
+        val previous=liveViews[view]
+        if(!view.isAttachedToWindow){
+            if(!liveViews.containsKey(view)){liveViews[view]=null;liveSnapshotDirty=true}
+            return
+        }
+        val observer=view.viewTreeObserver
+        if(previous?.get()===observer)return
+        if(!liveViews.containsKey(view))liveSnapshotDirty=true
         val root=view.rootView
-        if(!root.isAttachedToWindow)return
-        if(liveRoots.containsKey(root))return
+        val rootRegistration=liveRoots[root]
+        if(rootRegistration!=null && rootRegistration.observer.get()===observer){
+            liveViews[view]=rootRegistration.observer
+            return
+        }
+        rootRegistration?.unregister()
         val weak=WeakReference(root)
         val listener=ViewTreeObserver.OnPreDrawListener {
             val current=weak.get()
@@ -116,12 +133,15 @@ object IconGlassHook {
             }
             true
         }
-        liveRoots[root]=listener;root.viewTreeObserver.addOnPreDrawListener(listener)
+        observer.addOnPreDrawListener(listener)
+        val reference=WeakReference(observer)
+        liveRoots[root]=LiveRoot(reference,listener)
+        liveViews[view]=reference
     }
     internal fun registerMaterialView(view:View){registerLiveView(view)}
     internal fun onModuleDisabled(){
-        for((root,listener) in liveRoots.strongSnapshot()){
-            if(root.viewTreeObserver.isAlive)root.viewTreeObserver.removeOnPreDrawListener(listener)
+        for((root,registration) in liveRoots.strongSnapshot()){
+            registration.unregister()
             root.invalidate()
         }
         liveRoots.clear()
@@ -138,9 +158,11 @@ object IconGlassHook {
         val wallpaper=if(pendingIconBackdrops.isNotEmpty() && PrefsHelper.blurEnabled)
             WallpaperHelper.getBlurredWallpaper(appContext)else null
         val visible=Rect()
+        val observer=root.viewTreeObserver
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
-            if(view.rootView!==root || !view.isAttachedToWindow || !view.isShown || isAppearanceRedrawPending(view))continue
+            if(!view.isAttachedToWindow || view.viewTreeObserver!==observer || !view.isShown ||
+                isAppearanceRedrawPending(view))continue
             if(LiveBlurEngine.drawerOccludesWorkspace && (!isDrawerIcon(view) || !view.getGlobalVisibleRect(visible)))continue
             val restored=IconMaterialRenderer.restoreDiscardedSamples(view)
             if(recoverIconBackdrop(view,wallpaper,visible) || restored){view.invalidate();recovered++}
@@ -199,16 +221,19 @@ object IconGlassHook {
             catch(t:Throwable){if(preparationFailures.add(t.javaClass.name+":"+t.message))GlassLogger.e("MaterialEngine","Material preparation failed",t)}
         }
     }
+    private fun rememberHost(drawable:Drawable,view:View):View {
+        if(hosts[drawable]?.get()!==view)hosts[drawable]=WeakReference(view)
+        registerLiveView(view)
+        return view
+    }
     private fun host(drawable:Drawable):View? {
-        (drawingView.get() ?: loadingView.get())?.let {hosts[drawable]=WeakReference(it);registerLiveView(it);return it}
+        (drawingView.get() ?: loadingView.get())?.let {return rememberHost(drawable,it)}
         var callback=drawable.callback
-        repeat(8){
+        for(depth in 0 until 8){
             if(callback is View){
-                val view=callback as View
-                hosts[drawable]=WeakReference(view);registerLiveView(view)
-                return view
+                return rememberHost(drawable,callback)
             }
-            callback=(callback as? Drawable)?.callback
+            callback=(callback as? Drawable)?.callback ?: break
         }
         return hosts[drawable]?.get()?.takeIf {it.isAttachedToWindow}
     }
@@ -337,12 +362,13 @@ object IconGlassHook {
         val full=RectF()
         val scroll=(LiveBlurEngine.wallpaperScrollRatio*10000).toInt()
         val paging=LiveBlurEngine.isWorkspaceScrolling
-        val roots=LinkedHashSet<View>()
+        val observer=beforeDraw?.viewTreeObserver
+        val roots=if(beforeDraw==null)LinkedHashSet<View>()else null
         val drawerOnly=onlyChangedDrawerSamples && LiveBlurEngine.drawerOccludesWorkspace
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
-            if (isAppearanceRedrawPending(view) || (beforeDraw != null && view.rootView !== beforeDraw)) continue
-            if(NativeSurfaceLive.ownsSource(view) || !view.isAttachedToWindow || !view.isShown)continue
+            if(!view.isAttachedToWindow || (observer!=null && view.viewTreeObserver!==observer) ||
+                isAppearanceRedrawPending(view) || NativeSurfaceLive.ownsSource(view) || !view.isShown)continue
             if(drawerOnly && (!isDrawerIcon(view) || !view.getGlobalVisibleRect(visible)))continue
             world.reset()
             view.transformMatrixToGlobal(world)
@@ -370,7 +396,7 @@ object IconGlassHook {
             }
             if(onlyChangedDrawerSamples && !forceEdge && IconMaterialRenderer.hasBindings(view)){
                 when (IconMaterialRenderer.updateSamplers(view, wallpaper, world)) {
-                    IconMaterialRenderer.SampleUpdate.CHANGED -> if (beforeDraw == null) roots.add(view.rootView)
+                    IconMaterialRenderer.SampleUpdate.CHANGED -> roots?.add(view.rootView)
                     IconMaterialRenderer.SampleUpdate.RECORD -> {
                         if (beforeDraw != null && !LiveBlurEngine.isMoving) idleInvalidations++
                         view.invalidate()
@@ -391,7 +417,7 @@ object IconGlassHook {
                 view.invalidate()
             }
         }
-        if(beforeDraw==null)roots.forEach {it.invalidate()}
+        roots?.forEach {it.invalidate()}
     }
     fun onIconThemeChanged(){
         FolderMaterialHook.invalidateGeometry()

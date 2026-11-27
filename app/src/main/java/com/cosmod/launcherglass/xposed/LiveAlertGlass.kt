@@ -3,7 +3,6 @@ package com.cosmod.launcherglass.xposed
 import android.app.Application
 import com.cosmod.launcherglass.BuildConfig
 import android.content.Context
-import android.database.ContentObserver
 import android.graphics.*
 import android.os.*
 import android.view.View
@@ -28,6 +27,19 @@ internal object LiveAlertGlass {
         } ?: background.parent as? View ?: background
     }
     private var uiHooksInstalled=false
+    private var discoveryEnabled = false
+    private val discoveryRoots = LinkedHashSet<View>()
+    private val scanPendingRoots = Runnable {
+        val pending = LinkedHashSet(discoveryRoots)
+        discoveryRoots.clear()
+        if (discoveryEnabled) {
+            for (root in pending) {
+                var parent = root.parent
+                while (parent is View && parent !in pending) parent = parent.parent
+                if (parent !is View) discover(root)
+            }
+        }
+    }
     private var allowed=false
     private var guardEvaluated=false
     private var guard:android.content.SharedPreferences?=null
@@ -163,9 +175,41 @@ internal object LiveAlertGlass {
         }}
         catch(t:Throwable){disable(t)}
     }
+
+    private fun scheduleDiscovery(view: View?) {
+        if (view == null) return
+        if (Looper.myLooper() != main.looper) {
+            main.post { scheduleDiscovery(view) }
+            return
+        }
+        if (!discoveryEnabled) return
+        if (view.javaClass.name == LiveAlertTargets.CARD) {
+            discover(view)
+        } else if (view is ViewGroup && discoveryRoots.add(view) && !main.hasCallbacks(scanPendingRoots)) {
+            main.post(scanPendingRoots)
+        }
+    }
+
+    private fun enableDiscovery(enabled: Boolean) {
+        if (discoveryEnabled == enabled) return
+        discoveryEnabled = enabled
+        if (!enabled) {
+            main.removeCallbacks(scanPendingRoots)
+            discoveryRoots.clear()
+            return
+        }
+        try {
+            if (!uiHooksInstalled) installViewHooks()
+            scanRoots()
+        } catch (error: Throwable) {
+            disable(error)
+        }
+    }
+
     private fun disable(t:Throwable){
         allowed=false
         guardEvaluated=true
+        enableDiscovery(false)
         NotificationBannerGlass.configure(false,prefs,null)
         AlertBackdrop.configure(false)
         LockscreenGlass.configure(Bundle(),false)
@@ -185,15 +229,14 @@ internal object LiveAlertGlass {
         // their dependencies are fully loaded before reflection or Kotlin code runs.
         XposedHelpers.findAndHookMethod(LayoutInflater::class.java,"inflate",org.xmlpull.v1.XmlPullParser::class.java,
             ViewGroup::class.java,Boolean::class.javaPrimitiveType,object:XC_MethodHook(){
-                override fun afterHookedMethod(p:MethodHookParam){discover(p.result as? View)}
+                override fun afterHookedMethod(p:MethodHookParam){scheduleDiscovery(p.result as? View)}
             })
         XposedHelpers.findAndHookMethod(ViewGroup::class.java,"addView",View::class.java,Int::class.javaPrimitiveType,
             ViewGroup.LayoutParams::class.java,object:XC_MethodHook(){
-                override fun afterHookedMethod(p:MethodHookParam){discover(p.args[0] as? View)}
+                override fun afterHookedMethod(p:MethodHookParam){scheduleDiscovery(p.args[0] as? View)}
             })
         uiHooksInstalled=true
         GlassLogger.i("LiveAlertGlass","View discovery active; no ClassLoader hooks")
-        scanRoots()
     }
     private fun scanRoots(){
         try {
@@ -206,9 +249,9 @@ internal object LiveAlertGlass {
         views.keys.weakSnapshot().filter(View::isShown).forEach(View::postInvalidateOnAnimation)
     }
 
-    private fun load(){
+    private fun load(next: Bundle){
         val c=context ?: return
-        prefs=try {c.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_GET_ALL,null,null) ?: Bundle()}catch(_:Throwable){Bundle()}
+        prefs=next
         PerformancePolicy.update(c,prefs)
         EdgeLight.update(prefs)
         KyantGlassEngine.update(prefs)
@@ -251,7 +294,7 @@ internal object LiveAlertGlass {
             NativeAlertMaterial.adjustBlur(view, if (active) nativeBlur else 12, false)
             view.postInvalidateOnAnimation()
         }
-        if (needsMaterial) try { installViewHooks() } catch (t: Throwable) { disable(t) }
+        enableDiscovery(needsMaterial)
     }
     fun install(loader:ClassLoader){
         hostLoader=loader
@@ -267,13 +310,18 @@ internal object LiveAlertGlass {
                     }
                     val store=c.createDeviceProtectedStorageContext().getSharedPreferences("cherrypick_alert_guard_v2",Context.MODE_PRIVATE)
                     guard=store
+                    val reload = HostSettingsReload(main, read = {
+                        c.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_GET_ALL,null,null)
+                    }, apply = { snapshot ->
+                        try { load(snapshot) } catch (t: Throwable) { disable(t) }
+                    })
                     HostControl.install(c,"systemui",{diagnostics()+"\n"+LockscreenGlass.diagnostics()+"\n"+ShadeGlass.diagnostics()},retry@{
                         AlertBackdrop.configure(false)
                         if(!AlertStartupGuard.clear(store))return@retry
                         guardEvaluated=false
                         allowed=false
-                        load()
-                        if(allowed)scanRoots()
+                        enableDiscovery(false)
+                        reload.reloadImmediately()
                     })
                     val restart=object:android.content.BroadcastReceiver(){
                         override fun onReceive(context:Context?,intent:android.content.Intent?){
@@ -287,15 +335,8 @@ internal object LiveAlertGlass {
                     val filter=android.content.IntentFilter(SystemUiControl.ACTION)
                     androidx.core.content.ContextCompat.registerReceiver(c,restart,filter,SystemUiControl.PERMISSION,main,
                         androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
-                    val reload = Runnable {
-                        try { load() } catch (t: Throwable) { disable(t) }
-                    }
-                    c.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, true, object : ContentObserver(main) {
-                        override fun onChange(selfChange: Boolean) {
-                            if (!main.hasCallbacks(reload)) main.post(reload)
-                        }
-                    })
-                    load()
+                    c.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, true, reload)
+                    reload.reloadImmediately()
                 }catch(t:Throwable){disable(t)}
             }
         })

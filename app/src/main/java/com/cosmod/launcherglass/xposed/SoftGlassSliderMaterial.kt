@@ -56,7 +56,9 @@ internal class SoftGlassSliderMaterial(context: Context) {
         val metrics = view.resources.displayMetrics
         val frame = backdrop.frameFor(view, screen, (112 * metrics.density).toInt(), visible,
             kind == SoftGlassPanelTargets.Kind.SEEK_TRACK) ?: return
-        if (frame.image.isRecycled || screen.top < frame.area.top || screen.bottom > frame.area.bottom) return
+        if (frame.image.isRecycled || screen.top < frame.area.top || screen.bottom > frame.area.bottom ||
+            screen.left < frame.area.left && frame.area.left > 0 ||
+            screen.right > frame.area.right && frame.area.right < metrics.widthPixels) return
         val w = local.width()
         val h = local.height()
         val corner = (if (radius > 0f) radius else minOf(w,h) * .5f).coerceAtMost(minOf(w,h) * .5f)

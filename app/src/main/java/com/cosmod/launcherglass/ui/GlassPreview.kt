@@ -14,10 +14,14 @@ import android.graphics.RectF
 import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import androidx.annotation.RequiresApi
 import androidx.core.graphics.ColorUtils
 import com.cosmod.launcherglass.util.BackdropVibrancy
+import com.cosmod.launcherglass.util.GlassBlur
+import com.cosmod.launcherglass.util.ShadowTone
 import com.cosmod.launcherglass.util.VolumeRim
 import com.cosmod.launcherglass.util.WallpaperHelper
 import com.cosmod.launcherglass.util.PreviewIcons
@@ -26,6 +30,7 @@ import com.cosmod.launcherglass.util.FolderPreviewKind
 import com.cosmod.launcherglass.xposed.GlassGeometry
 import com.cosmod.launcherglass.xposed.GlassStyle
 import com.cosmod.launcherglass.xposed.LiquidGlassShader
+import java.util.concurrent.Executors
 
 /** A small sample scene rendered with the same lens shader as the launcher. */
 internal class GlassPreview(
@@ -79,6 +84,7 @@ internal class GlassPreview(
     fun setLargeFolderMaterial(profile: Material?) {
         if (largeFolderMaterial == profile) return
         largeFolderMaterial = profile
+        if (profile == null) largeFolderSample.clear()
         invalidate()
     }
     fun configure(bundle:android.os.Bundle,scope:Int,opticsOverride:GlassEngineSettings.Optics?=null){
@@ -100,7 +106,24 @@ internal class GlassPreview(
         else if(dark)0xff333942.toInt() else 0xffbcc4d0.toInt()
     private var backdrop: Bitmap? = null
     private data class BlurSample(val radius:Int,val vibrancy:Int,val brightness:Int,val opacity:Int)
+    private data class SampleRequest(val base: Bitmap, val sample: BlurSample, val generation: Int)
+    private class SampleSlot {
+        var desired: SampleRequest? = null
+        var available: Bitmap? = null
+        var failed: BlurSample? = null
+
+        fun clear() {
+            desired = null
+            available = null
+            failed = null
+        }
+    }
+
     private val samples=android.util.LruCache<BlurSample,Bitmap>(3)
+    private val regularSample = SampleSlot()
+    private val largeFolderSample = SampleSlot()
+    private var generation = 0
+    private var renderingSample: SampleRequest? = null
     private val optics by lazy { if (Build.VERSION.SDK_INT >= 33) Optics() else null }
 
     fun show(next: Material) {
@@ -118,7 +141,7 @@ internal class GlassPreview(
 
     fun setWallpaper(wallpaper: Bitmap?) {
         if (this.wallpaper === wallpaper) return
-        this.wallpaper = wallpaper?.let(WallpaperHelper::forSoftwareCanvas)
+        this.wallpaper = wallpaper
         rebuildBackdrop()
         invalidate()
     }
@@ -136,8 +159,8 @@ internal class GlassPreview(
         val sh = (height * sw / width).coerceAtLeast(1)
         backdrop = Bitmap.createBitmap(sw, sh, Bitmap.Config.ARGB_8888).apply {
             val canvas = Canvas(this)
-            val image = wallpaper
-            if (image != null && !image.isRecycled) {
+            val image = wallpaper?.takeUnless(Bitmap::isRecycled)?.let(WallpaperHelper::forSoftwareCanvas)
+            if (image != null) {
                 val scale = maxOf(sw.toFloat() / image.width, sh.toFloat() / image.height)
                 val insetX = (sw - image.width * scale) * .5f
                 val insetY = (sh - image.height * scale) * .5f
@@ -147,7 +170,19 @@ internal class GlassPreview(
                 canvas.drawColor(ColorUtils.blendARGB(wallpaperColor, 0xff101828.toInt(), .4f))
             }
         }
+        clearSamples()
+    }
+
+    private fun clearSamples() {
+        generation++
+        regularSample.clear()
+        largeFolderSample.clear()
         samples.evictAll()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        clearSamples()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -228,29 +263,92 @@ internal class GlassPreview(
     }
 
     private fun blurred(base: Bitmap, current: Material): Bitmap {
-        if (!current.enabled) return base
+        val large = current === largeFolderMaterial
+        val slot = if (large) largeFolderSample else regularSample
+        if (!current.enabled) {
+            slot.clear()
+            return base
+        }
         val radius = if (current.banner) {
             (current.blur * base.width / resources.displayMetrics.widthPixels.toFloat()).toInt().coerceIn(0, 40)
         } else {
             (current.blur / if (current.liquid) 5 else 3).coerceIn(0, 18)
         }
-        val optics=if(current===largeFolderMaterial)largeFolderOptics else engineOptics
+        val optics=if(large)largeFolderOptics else engineOptics
         val opacity=optics.blur.opacity
-        if ((radius == 0 || opacity == 0) && current.vibrancy == 0 && current.brightness == 50) return base
+        if ((radius == 0 || opacity == 0) && current.vibrancy == 0 && current.brightness == 50) {
+            slot.clear()
+            return base
+        }
         val key=BlurSample(radius,current.vibrancy,current.brightness,opacity)
-        samples.get(key)?.let {return it}
-        val vivid=BackdropVibrancy.applyCpu(base,current.vibrancy)
+        if (slot.desired?.sample != key) {
+            slot.desired = SampleRequest(base, key, generation)
+            slot.failed = null
+        }
+        samples.get(key)?.let {
+            slot.available = it
+            return it
+        }
+        startSample()
+        return slot.available ?: base
+    }
+
+    private fun startSample() {
+        if (renderingSample != null || !isAttachedToWindow) return
+        val regular = pendingSample(regularSample)
+        val slot = if (regular != null) regularSample else largeFolderSample
+        val request = regular ?: pendingSample(largeFolderSample) ?: return
+        renderingSample = request
+        sampleExecutor.execute {
+            val bitmap = runCatching { prepareSample(request.base, request.sample) }.getOrNull()
+            main.post {
+                renderingSample = null
+                if (generation == request.generation) {
+                    if (bitmap == null) {
+                        if (regularSample.desired == request) regularSample.failed = request.sample
+                        if (largeFolderSample.desired == request) largeFolderSample.failed = request.sample
+                    } else {
+                        samples.put(request.sample, bitmap)
+                        if (slot.desired != null) slot.available = bitmap
+                        if (regularSample.desired == request) regularSample.available = bitmap
+                        if (largeFolderSample.desired == request) largeFolderSample.available = bitmap
+                        invalidate()
+                    }
+                    // Resolve the next recipe from a new draw, after that frame has read both profiles.
+                    if (bitmap == null && (pendingSample(regularSample) != null ||
+                            pendingSample(largeFolderSample) != null)) invalidate()
+                } else {
+                    if (bitmap != null && bitmap !== request.base) bitmap.recycle()
+                    if (isAttachedToWindow) invalidate()
+                }
+            }
+        }
+    }
+
+    private fun pendingSample(slot: SampleSlot): SampleRequest? = slot.desired?.takeIf {
+        it.sample != slot.failed && samples.get(it.sample) == null
+    }
+
+    private fun prepareSample(base: Bitmap, key: BlurSample): Bitmap {
+        val vivid=BackdropVibrancy.applyCpu(base,key.vibrancy)
         var blurred=vivid
         var prepared:Bitmap?=null
         try {
-            if(radius>0 && opacity>0)blurred=com.cosmod.launcherglass.util.GlassBlur.bitmap(vivid,radius.toFloat(),opacity)
-            return com.cosmod.launcherglass.util.ShadowTone.applyCpu(blurred,current.brightness).also {
-                prepared=it
-                samples.put(key,it)
-            }
+            if(key.radius>0 && key.opacity>0)blurred=GlassBlur.bitmap(vivid,key.radius.toFloat(),key.opacity)
+            return ShadowTone.applyCpu(blurred,key.brightness).also { prepared=it }
         } finally {
             if(blurred!==base && blurred!==vivid && blurred!==prepared)blurred.recycle()
             if(vivid!==base && vivid!==prepared)vivid.recycle()
+        }
+    }
+
+    private companion object {
+        val main = Handler(Looper.getMainLooper())
+        val sampleExecutor = Executors.newSingleThreadExecutor { task ->
+            Thread({
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                task.run()
+            }, "CPI preview blur")
         }
     }
 
