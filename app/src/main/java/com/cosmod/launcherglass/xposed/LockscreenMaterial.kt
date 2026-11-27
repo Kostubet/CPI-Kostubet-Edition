@@ -82,14 +82,14 @@ internal class LockscreenMaterial {
     fun draw(canvas:Canvas,view:View,surface:Surface,profile:Profile,frame:LockscreenBackdrop.Frame?,
         native:android.graphics.drawable.Drawable?=null,glyphs:Boolean=false,bounds:RectF?=null,amount:Float=1f,
         nativeRadius:Float?=null,replaceBackground:Boolean=false,useNativeMask:Boolean=true,drawRim:Boolean=true,
-        exactPath:Path?=null,maskOnly:Boolean=false){
-        if(amount<=0f)return
-        val input=frame?.images?.get(profile.sourceRadius(surface)) ?: return
+        exactPath:Path?=null,maskOnly:Boolean=false):Boolean {
+        if(amount<=0f)return false
+        val input=frame?.images?.get(profile.sourceRadius(surface)) ?: return false
         val image=current?.takeIf {profile.liquid && profile.engine?.blur?.live==false && it.profile==profile &&
             it.image.width==input.width && it.image.height==input.height && !it.image.isRecycled}?.image ?: input
         val w=view.width.toFloat()
         val h=view.height.toFloat()
-        if(w<=0f || h<=0f || !canvas.isHardwareAccelerated)return
+        if(w<=0f || h<=0f || !canvas.isHardwareAccelerated)return false
         val round=surface==Surface.PIN || surface==Surface.SHORTCUTS
         val diameter=minOf(w,h)
         if(round)local.set((w-diameter)*.5f,(h-diameter)*.5f,(w+diameter)*.5f,(h+diameter)*.5f)
@@ -106,7 +106,7 @@ internal class LockscreenMaterial {
             if(outline.getRect(outlineRect) && !outlineRect.isEmpty)local.set(outlineRect)
             if(outline.radius>0f)corner=outline.radius
         }
-        if(local.isEmpty)return
+        if(local.isEmpty)return false
         corner=if(glyphs || maskOnly)0f else (nativeRadius ?: corner).coerceIn(0f,minOf(local.width(),local.height())*.5f)
         path.rewind()
         if(exactPath!=null)path.set(exactPath)
@@ -126,7 +126,7 @@ internal class LockscreenMaterial {
                 replaceBackground->.88f
                 else->.96f
             }
-            if(exactPath!=null)canvas.clipPath(path)
+            if(exactPath!=null && !canvas.clipPath(path))return false
             drawBackdrop(canvas,view,image,profile,corner,backdropAlpha*amount,glyphs,neutral,exactPath!=null)
             val base=frame.color
             val dark=androidx.core.graphics.ColorUtils.calculateLuminance(base)<.40
@@ -163,6 +163,7 @@ internal class LockscreenMaterial {
                 if(!maskOnly)EdgeLight.drawPath(canvas,path,local,view,amount,surface.edgeSurface,profile.liquid)
             }
         }finally {canvas.restoreToCount(mixed)}
+        return true
     }
 
     private fun drawBackdrop(canvas:Canvas,view:View,image:Bitmap,profile:Profile,corner:Float,alpha:Float,glyphs:Boolean,neutral:Boolean,clipped:Boolean){
