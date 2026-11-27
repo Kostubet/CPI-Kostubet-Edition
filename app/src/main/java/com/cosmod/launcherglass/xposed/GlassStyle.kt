@@ -15,6 +15,7 @@ internal object GlassSurface {
     const val VOLUME=13
     const val LOCKSCREEN=14
     const val APP_MENU=15
+    const val DRAWER_FOLDERS=16
 }
 
 internal object BackdropBrightness {

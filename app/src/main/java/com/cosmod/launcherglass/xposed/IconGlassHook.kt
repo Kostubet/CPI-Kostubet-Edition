@@ -369,6 +369,8 @@ object IconGlassHook {
             val view=reference.get() ?: continue
             if(!view.isAttachedToWindow || (observer!=null && view.viewTreeObserver!==observer) ||
                 isAppearanceRedrawPending(view) || NativeSurfaceLive.ownsSource(view) || !view.isShown)continue
+            if (onlyChangedDrawerSamples && android.os.Build.VERSION.SDK_INT >= 33 && PrefsHelper.drawerBlurEnabled &&
+                isDrawerIcon(view) && DrawerGlass.iconReady(view)) continue
             if(drawerOnly && (!isDrawerIcon(view) || !view.getGlobalVisibleRect(visible)))continue
             world.reset()
             view.transformMatrixToGlobal(world)
@@ -655,7 +657,8 @@ object IconGlassHook {
             com.cosmod.launcherglass.util.PerformancePolicy.lightDrawer
         IconMaterialRenderer.draw(canvas,bounds,plateMask,parts.glyphBitmap,plateColor,
             plateOpacity*255/100,false,compatible,source,binding,
-            style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height),
+            style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height,
+                newEngine=style.newEngine && !lighterDrawer),
             glyphTint=parts.glyphTint){target,local,blurred ->
             if(!blurred){
                 val save=target.saveLayer(RectF(local),null)
@@ -851,7 +854,7 @@ object IconGlassHook {
                     val mini=MiniIconRefresh.isMini(preview,rect.width(),rect.height(),bounds.width(),bounds.height())
                     if(preview && PrefsHelper.optimizeMiniIcons && previewSizeLogs.add("${owner.javaClass.name}:${owner.width}x${owner.height}:$mini:${folderPreview.get()==true}"))
                         GlassLogger.i("MaterialEngine","Folder preview pacing: host=${owner.javaClass.simpleName}/${owner.width}x${owner.height}, local=${rect.width()}x${rect.height()}, native=${bounds.width()}x${bounds.height()}, mini=$mini, limit=${MiniIconRefresh.fps(PrefsHelper.liveFps,mini,PrefsHelper.optimizeMiniIcons)} FPS")
-                    IconMaterialRenderer.Binding(owner,identity,rect,a.screenW,a.screenH,mini,materialAlpha,lift=!drawer,foreign=foreign)
+                    IconMaterialRenderer.Binding(owner,identity,rect,a.screenW,a.screenH,mini,materialAlpha,lift=!drawer,foreign=foreign,drawer=drawer)
                 }else null
                 val layer=if(materialAlpha<255)canvas.saveLayerAlpha(RectF(bounds),materialAlpha)else canvas.save()
                 try {render(canvas,bounds,parts,a,wallpaper(a),binding)}finally{canvas.restoreToCount(layer)}
@@ -922,6 +925,7 @@ object IconGlassHook {
         DockMaterial.install(loader)
         PageIndicatorGlass.install(loader)
         LauncherAppMenuGlass.install(loader)
+        if (android.os.Build.VERSION.SDK_INT >= 33) DrawerGlass.install(loader)
         // Carry the source view through native asynchronous icon preparation.
         // The anchor belongs to this load request, never to a global last click.
         val modernLoader=XposedHelpers.findClassIfExists("com.android.launcher3.anim.iconsurfacemanager.loader.IconDrawableLoader",loader)

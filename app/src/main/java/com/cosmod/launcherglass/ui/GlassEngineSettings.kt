@@ -13,6 +13,7 @@ object GlassEngineSettings {
     const val LIVE = "glass_engine_live"
     const val VOLUME = "glass_engine_volume"
     const val APP_MENU = "glass_engine_app_menu"
+    const val DRAWER_FOLDERS = "glass_engine_drawer_folders"
     const val LOCKSCREEN = "glass_engine_lockscreen"
     enum class Parameter(val id:String,val default:Int,val max:Int) {
         POWER("power",125,250), EDGE_WIDTH("edge_width",34,100), EDGE_LIGHT("edge_light",62,100),
@@ -43,7 +44,7 @@ object GlassEngineSettings {
     }
 
     private val lockKeys get()=LockscreenSettings.Surface.entries.map {it.key("new_engine")}
-    internal val materialScopes get() = listOf(ICONS,FOLDERS,LARGE_FOLDERS,WIDGETS,DOCK,INDICATOR,BANNERS,LIVE,VOLUME,APP_MENU) + lockKeys
+    internal val materialScopes get() = listOf(ICONS,FOLDERS,LARGE_FOLDERS,WIDGETS,DOCK,INDICATOR,BANNERS,LIVE,VOLUME,APP_MENU,DRAWER_FOLDERS) + lockKeys
     val booleans get() = (materialScopes + LOCKSCREEN + materialScopes.map(::softKey)).associateWith { false }
     fun softKey(scope: String) = "${scope}_soft"
     fun softWidthKey(scope: String) = "${scope}_soft_width"

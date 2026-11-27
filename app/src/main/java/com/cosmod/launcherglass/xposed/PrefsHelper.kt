@@ -274,6 +274,7 @@ object PrefsHelper {
             val glassEngineChanged=KyantGlassEngine.update(bundle)
             PageIndicatorGlass.update(bundle)
             LauncherAppMenuGlass.update(bundle, newEnabled)
+            if (android.os.Build.VERSION.SDK_INT >= 33) DrawerGlass.update(bundle, newEnabled)
             val depthChanged=newColorDepth!=colorDepthBits || newDepthStage!=colorDepthStage
             val processingDepthChanged=depthChanged && ((colorDepthBits<24 && colorDepthStage<=ColorDepthEffect.AFTER_BLUR) ||
                 (newColorDepth<24 && newDepthStage<=ColorDepthEffect.AFTER_BLUR))

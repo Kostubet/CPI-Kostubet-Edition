@@ -518,6 +518,9 @@
     <string name="ui_folder_icons_blur">Glass on folder icons</string>
     <string name="ui_haptic_studio">Haptic Studio</string>
     <string name="ui_haptic_studio_keywords">vibration haptics pattern ringtone waveform</string>
+    <string name="ui_drawer_folders_title">App drawer folders</string>
+    <string name="ui_drawer_folders_keywords">app drawer categories suggested apps group folders glass</string>
+    <string name="ui_drawer_folders_material">Category card glass</string>
     <string name="ui_app_menu_title">App icon menu</string>
     <string name="ui_app_menu_keywords">launcher long press shortcuts popup other functions context menu</string>
     <string name="ui_app_menu_material">Menu glass</string>

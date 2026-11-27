@@ -1,8 +1,15 @@
-# CPI Kostubet Edition 0.3.3
+# CPI Kostubet Edition 0.3.4
 
 [Русский](#русский) · [English](#english)
 
 ## Русский
+
+### Сборка 476
+
+- Кнопка «Поддержать автора» открывает страницу поддержки на Boosty.
+
+- В «Функции → System Launcher» добавлен раздел «Папки в меню приложений». Для карточек «Категорий» можно выбрать Frosted, Liquid Glass, Liquid Glass с новым движком или «Мягкий свет» и отдельно настроить материал.
+- На совместимых прошивках стекло иконок в меню приложений использует фон, который уже нарисовал лаунчер, включая фон карточек категорий.
 
 ### Сборка 475
 
@@ -400,6 +407,13 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 476
+
+- The Support the author button opens the author's Boosty donation page.
+
+- Added App drawer folders under Features → System Launcher. Category cards have independent controls for Frosted, Liquid Glass, Liquid Glass with the new engine, and Soft Light.
+- On compatible firmware, app drawer icon glass samples the composited launcher background, including the category card underneath.
 
 ### Build 475
 

@@ -69,7 +69,7 @@ object IconMaterialRenderer {
      * [foreign]: an OEM decoration (edit-mode select dot) records this element
      * again into its own node; [local] is then relative to that node.
      */
-    data class Binding(val view:View,val drawable:Drawable,val local:RectF,val screenW:Int,val screenH:Int,val mini:Boolean=false,val alpha:Int=255,val lift:Boolean=true,val foreign:Boolean=false,val dragPreview:Boolean=false)
+    data class Binding(val view:View,val drawable:Drawable,val local:RectF,val screenW:Int,val screenH:Int,val mini:Boolean=false,val alpha:Int=255,val lift:Boolean=true,val foreign:Boolean=false,val dragPreview:Boolean=false,val drawer:Boolean=false)
     private class Sampler(val node:RenderNode,var material:Material,var local:RectF,var screenW:Int,var screenH:Int,var style:GlassStyle){
         val world=Matrix()
         var worldValid=false
@@ -447,7 +447,11 @@ object IconMaterialRenderer {
         val folderSample = style.folderBackdrop && binding?.foreign == false && PrefsHelper.gpuEffects &&
             canvas.isHardwareAccelerated && android.os.Build.VERSION.SDK_INT >= 33
         val trackPosition = binding?.foreign == false && canvas.isHardwareAccelerated && PrefsHelper.gpuEffects
-        val blurred = folderSample || (wallpaper != null && (source != null || trackPosition) && !style.folderBackdrop)
+        val liveDrawer = binding?.drawer == true && !binding.foreign && binding.alpha == 255 &&
+            trackPosition && PrefsHelper.drawerBlurEnabled && !style.folderBackdrop &&
+            android.os.Build.VERSION.SDK_INT >= 33 && DrawerGlass.backdropAvailable
+        val hasWallpaper = wallpaper != null && (source != null || trackPosition) && !style.folderBackdrop
+        val blurred = liveDrawer || folderSample || hasWallpaper
         val surfaceTint=SurfaceTints.get(style.surfaceScope)
         val key = Key(mask, mask.generationId, glyph, glyph.generationId, glyphTint, width, height, surfaceTint?.color ?: color,
             surfaceTint?.let {it.opacity*255/100} ?: tintAlpha, hideGlyph, blurred,
@@ -517,6 +521,9 @@ object IconMaterialRenderer {
         try {
             canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
             val finalDepth=blurred && style.surfaceScope!=GlassSurface.WIDGETS && ColorDepthEffect.finalPlate
+            val drawnDrawer = if (liveDrawer && material.mask != null && android.os.Build.VERSION.SDK_INT >= 33) {
+                DrawerGlass.drawIcon(canvas, checkNotNull(binding), width, height, material.mask, material.rounding, style)
+            } else false
             val depthNode=if(finalDepth && canvas.isHardwareAccelerated)
                 RenderNode("CherryPick.colorDepth").apply {
                     setPosition(0,0,width,height)
@@ -525,7 +532,7 @@ object IconMaterialRenderer {
             val softwarePlate=if(finalDepth && !canvas.isHardwareAccelerated)Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)else null
             val plate=depthNode?.beginRecording(width,height) ?: softwarePlate?.let(::Canvas) ?: canvas
             try {
-            if (blurred && material.mask != null) {
+            if (!drawnDrawer && (folderSample || hasWallpaper) && material.mask != null) {
                 val existing=if(binding?.foreign==true && canvas.isHardwareAccelerated)
                     foreignSampler(binding,material,width,height) else null
                 if(existing!=null){

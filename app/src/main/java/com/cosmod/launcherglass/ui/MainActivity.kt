@@ -167,6 +167,7 @@ class MainActivity : AppCompatActivity() {
         FOLDERS(R.string.ui_surface_folders, R.drawable.ic_catalog_folder, 0xF49B46, R.string.ui_catalog_keywords_folders),
         PHOTO(R.string.ui_catalog_photo, R.drawable.ic_catalog_photo, 0xF46785, R.string.ui_catalog_keywords_photo),
         DOCK(R.string.ui_surface_dock, R.drawable.ic_catalog_dock, 0x6D85F4, R.string.ui_catalog_keywords_dock),
+        DRAWER_FOLDERS(R.string.ui_drawer_folders_title, R.drawable.ic_catalog_folder, 0xF2A34F, R.string.ui_drawer_folders_keywords),
         APP_MENU(R.string.ui_app_menu_title, R.drawable.ic_catalog_island, 0x927AF0, R.string.ui_app_menu_keywords),
         BANNERS(R.string.ui_catalog_banners, R.drawable.ic_catalog_bell, 0x49A0FF, R.string.ui_catalog_keywords_banners),
         LIVE(R.string.ui_catalog_live, R.drawable.ic_catalog_island, 0x926DF5, R.string.ui_catalog_keywords_live),
@@ -1204,7 +1205,7 @@ class MainActivity : AppCompatActivity() {
         val entries=column()
         add(body,entries)
         val groups=listOf(
-            R.string.ui_catalog_launcher to listOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.APP_MENU,
+            R.string.ui_catalog_launcher to listOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.APP_MENU,Screen.DRAWER_FOLDERS,
                 Screen.MOTION),
             R.string.ui_catalog_systemui to listOf(Screen.LOCKSCREEN,Screen.SHADE,Screen.SIDEBAR,Screen.LIVE,Screen.BANNERS,Screen.VOLUME),
             R.string.camera_tab to listOf(Screen.CAMERA_ZOOM),
@@ -1552,6 +1553,7 @@ class MainActivity : AppCompatActivity() {
             Screen.PHOTO->photoSection(body,general,colors)
             Screen.DOCK->dockSection(body,general,colors)
             Screen.APP_MENU->appMenuSection(body)
+            Screen.DRAWER_FOLDERS->drawerFoldersSection(body)
             Screen.BANNERS->bannerSection(body,general,colors)
             Screen.LIVE->liveAlertSection(body,colors)
             Screen.VOLUME->volumeSection(body,general,colors)
@@ -2282,7 +2284,7 @@ class MainActivity : AppCompatActivity() {
             return listOf(smallIcon(R.drawable.ic_restart,label,chrome=true,action=::confirmSidebarRestart)
                 .apply { tooltipText = label })
         }
-        val launcher=screen in setOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.APP_MENU,Screen.MOTION)
+        val launcher=screen in setOf(Screen.ICONS,Screen.FOLDERS,Screen.PHOTO,Screen.DOCK,Screen.APP_MENU,Screen.DRAWER_FOLDERS,Screen.MOTION)
         val systemUi=screen in setOf(Screen.BANNERS,Screen.LIVE,Screen.VOLUME,Screen.LOCKSCREEN,Screen.SHADE)
         if (!launcher && !systemUi) return emptyList()
         val actions = mutableListOf<View>()
@@ -2598,32 +2600,41 @@ class MainActivity : AppCompatActivity() {
         accordionCard(body,R.string.ui_page_indicator_glass,indicator)
     }
 
+    private fun drawerFoldersSection(body: LinearLayout) {
+        launcherMenuGlassSection(body, "drawer_folders_glass", GlassEngineSettings.DRAWER_FOLDERS,
+            R.string.ui_drawer_folders_material)
+    }
+
     private fun appMenuSection(body: LinearLayout) {
+        launcherMenuGlassSection(body, "app_menu_glass", GlassEngineSettings.APP_MENU, R.string.ui_app_menu_material)
+        add(body, card(switchRow(getString(R.string.ui_app_menu_background_blur), "app_menu_background_blur",
+            getString(R.string.ui_app_menu_background_blur_hint)).also { gate(it, ::master) }))
+    }
+
+    private fun launcherMenuGlassSection(body: LinearLayout, prefix: String, scope: String, title: Int) {
         val material = column()
-        val scope = GlassEngineSettings.APP_MENU
-        glassTypeChoice(material, "app_menu_glass_style", scope, allowed = ::master) {
-            addGlassBlur(it, "app_menu_glass_blur", GlassEngineSettings.blurOpacityKey(scope),
-                OpticalSettings.maximum("app_menu_glass_blur"), ::master)
+        val styleKey = "${prefix}_style"
+        val blurKey = "${prefix}_blur"
+        glassTypeChoice(material, styleKey, scope, allowed = ::master) {
+            addGlassBlur(it, blurKey, GlassEngineSettings.blurOpacityKey(scope), OpticalSettings.maximum(blurKey), ::master)
         }
         val refraction = column()
         for ((label, key) in listOf(
-            R.string.ui_liquid_width to "app_menu_glass_width",
-            R.string.ui_liquid_distortion to "app_menu_glass_distortion",
-            R.string.ui_glass_dispersion to "app_menu_glass_dispersion",
+            R.string.ui_liquid_width to "${prefix}_width",
+            R.string.ui_liquid_distortion to "${prefix}_distortion",
+            R.string.ui_glass_dispersion to "${prefix}_dispersion",
         )) {
             add(refraction, slider(getString(label), key, 0, OpticalSettings.maximum(key), "%"))
         }
         val refractionVisible = {
-            number("app_menu_glass_style") == 1 && !bool(scope) && !bool(GlassEngineSettings.softKey(scope))
+            number(styleKey) == 1 && !bool(scope) && !bool(GlassEngineSettings.softKey(scope))
         }
         refraction.visibility = if (refractionVisible()) View.VISIBLE else View.GONE
         refreshers.add { reveal(refraction, refractionVisible()) }
         add(material, refraction)
-        add(material, slider(getString(R.string.island_opacity), "app_menu_glass_opacity", 0, 100, "%"))
+        add(material, slider(getString(R.string.island_opacity), "${prefix}_opacity", 0, 100, "%"))
         gate(material, ::master)
-        accordionCard(body, R.string.ui_app_menu_material, material)
-        add(body, card(switchRow(getString(R.string.ui_app_menu_background_blur), "app_menu_background_blur",
-            getString(R.string.ui_app_menu_background_blur_hint)).also { gate(it, ::master) }))
+        accordionCard(body, title, material)
     }
 
     private fun communityCatalogSection(layer:FrameLayout) {

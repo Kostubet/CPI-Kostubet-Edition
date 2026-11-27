@@ -77,7 +77,7 @@ internal class CouiAboutPage(
                         Text(context.getString(R.string.ui_support_author_description), textAlign = TextAlign.Center,
                             style = COUITheme.textStyles.bodyL)
                         CouiAction(context.getString(R.string.ui_support_author), primary = true,
-                            onClick = { onLink("https://pay.cloudtips.ru/p/3d28d485") })
+                            onClick = { onLink("https://boosty.to/kostubet/single-payment/donation/845158/target?share=target_link") })
                     }
                 }
                 SmallTitle(context.getString(R.string.ui_authors))

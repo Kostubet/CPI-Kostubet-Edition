@@ -64,6 +64,16 @@ class FeatureSearchTest {
         assertTrue(R.string.ui_app_menu_background_blur in labels)
     }
 
+    @Test fun drawerFoldersIndexTheirIndependentGlassControls() {
+        val labels = FeatureSearch.labels("DRAWER_FOLDERS")
+        assertTrue(R.string.ui_drawer_folders_material in labels)
+        assertTrue(R.string.ui_blur_style in labels)
+        assertTrue(R.string.glass_lens_height in labels)
+        assertTrue(R.string.soft_glass_width in labels)
+        assertFalse(R.string.ui_app_menu_background_blur in labels)
+        assertFalse(FeatureSections.booleans.getValue(FeatureSections.key("DRAWER_FOLDERS")))
+    }
+
     @Test fun shadeSearchIndexesBothPanelsAndMaterialOptions(){
         val labels=FeatureSearch.labels("SHADE")
         assertTrue(R.string.shade_glass_control in labels)
