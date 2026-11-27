@@ -8,5 +8,6 @@
     "url": "https://github.com/Kostubet/CPI-Kostubet-Edition/releases/download/v0.3.4/CPI-Kostubet-Edition-0.3.4-build476.apk",
     "size": 34275899,
     "sha256": "18625cc5be23acc6f58dfd60513bc3e3b7303938ec6defcc8dc3c9143eeb3d6d"
-  }
+  },
+  "notes": "## Русский\n\n- Стекло меню по долгому нажатию на иконку. Четыре материала, подсветка под пальцем и отдельный выключатель размытия рабочего стола за меню.\n- Отдельное стекло для папок во вкладке «Категории». На совместимых прошивках иконки используют уже отрисованный фон меню приложений, включая карточки под ними.\n- Исправлено обрезание докбара при открытии меню. Сглажены углы стекла и тонкие контуры.\n- Меньше повторных перерисовок и копирований фона в лаунчере и System UI. Ускорены программное размытие, предпросмотр стекла и редактор вибрации.\n- В «Обновлениях» отображается чейнджлог. Кнопка «Поддержать автора» ведёт на Boosty.\n\n## English\n\n- Glass for long-press icon menus, with four materials, touch-following highlights, and a separate switch for the blur behind the menu.\n- Independent glass settings for app drawer category folders. On compatible firmware, icons sample the composited drawer background, including the card underneath.\n- Fixed dock clipping when opening an icon menu. Smoothed glass corners and thin outlines.\n- Reduced redraws and backdrop copies in Launcher and System UI. Improved software blur, glass previews, and haptic editor performance.\n- Release notes appear in Updates. The Support the author button now opens Boosty."
 }
