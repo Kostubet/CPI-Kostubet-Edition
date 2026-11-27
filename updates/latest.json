@@ -8,5 +8,6 @@
     "url": "https://github.com/Kostubet/CPI-Kostubet-Edition/releases/download/v0.3.5/CPI-Kostubet-Edition-0.3.5-build477.apk",
     "size": 34275899,
     "sha256": "22613b346fc1c7a4b2b343a08bf1207b766ece2fb71c36a0ceb95552b6607eed"
-  }
+  },
+  "notes": "### Русский\n\n- Убраны прямоугольные артефакты вокруг иконок в «Все» и «Категории», вокруг карточек категорий и ряда предложений.\n- Иконки используют штатный фон меню. Четыре материала карточек используют общий источник, а скрытый рабочий стол при открытом меню перестаёт обновлять своё стекло.\n\n### English\n\n- Removed rectangular artifacts around icons in All and Categories, around category cards, and around the suggested-apps row.\n- Icons blend over the native drawer background. All four card materials share one backdrop, and workspace glass updates pause while the drawer is open.\n\n[Полный список изменений / Full changelog](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/v0.3.5/CHANGELOG.md)"
 }
