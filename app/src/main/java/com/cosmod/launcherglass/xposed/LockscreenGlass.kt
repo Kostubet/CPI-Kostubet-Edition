@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.Rect
@@ -25,6 +26,7 @@ import android.view.Choreographer
 import android.view.Display
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.view.animation.PathInterpolator
 import android.widget.ImageView
 import android.widget.TextView
@@ -169,7 +171,10 @@ internal object LockscreenGlass {
     private val inspectedGroups=HashSet<Class<*>>()
     private val hookedGroupOwners=HashSet<Class<*>>()
     private val activeGroupOverrides=HashSet<ViewGroup>()
-    private val movingTargets=WeakHashMap<View,Boolean>()
+    private val movingTargets=WeakHashMap<View,MovingTarget>()
+    private val movementObservers=WeakHashMap<ViewTreeObserver,ViewTreeObserver.OnPreDrawListener>()
+    private val movementGeometry=MovingGeometry()
+    private val movementVisibleRect=Rect()
     private var positionRefreshPending=false
     private val capsuleMotion=WeakHashMap<View,CapsuleMotion>()
     private val rowMotion=WeakHashMap<View,CapsuleMotion>()
@@ -361,6 +366,7 @@ internal object LockscreenGlass {
             return
         }
         profiles=next
+        if(Surface.NOTIFICATIONS !in profiles)clearNotificationMovement()
         if(next[Surface.NOTIFICATIONS]?.corner?.let {it>=0}!=true)restoreNotificationCorners()
         clearBouncer=clear
         if(profiles.isEmpty() && !clear){
@@ -400,6 +406,7 @@ internal object LockscreenGlass {
                 nativeWidgetEffects.clear()
                 widgetEffectSetter=null
                 profiles=emptyMap()
+                clearNotificationMovement()
                 clearBouncer=false
                 GlassLogger.e("LockscreenGlass","Lockscreen hooks unavailable",t)
             }
@@ -441,6 +448,7 @@ internal object LockscreenGlass {
             restoreNotificationCorners()
             capsuleMotion.clear()
             rowMotion.clear()
+            clearNotificationMovement()
             movingTargets.clear()
             clearWidgetBackgrounds()
             if(android.os.Build.VERSION.SDK_INT>=33)SoftGlassActivityMaterial.clear()
@@ -557,7 +565,149 @@ internal object LockscreenGlass {
         if(softActivities)LiveAlertGlass.lockWallpaperChanged()
         repaint()
     }
+    // Notification display lists can move without running onDraw again. The
+    // cached glass then samples the wallpaper at the last recorded position.
+    private class MovingGeometry {
+        val matrix=Matrix()
+        val location=IntArray(2)
+        var width=0
+        var height=0
+
+        fun read(view:View){
+            matrix.reset()
+            view.transformMatrixToGlobal(matrix)
+            view.getLocationOnScreen(location)
+            width=view.width
+            height=view.height
+        }
+
+        fun matches(other:MovingGeometry)=matrix==other.matrix &&
+            location.contentEquals(other.location) && width==other.width && height==other.height
+
+        fun copyFrom(other:MovingGeometry){
+            matrix.set(other.matrix)
+            other.location.copyInto(location)
+            width=other.width
+            height=other.height
+        }
+    }
+
+    private sealed class MovingTarget {
+        object Widget:MovingTarget()
+        class Notification(tree:ViewTreeObserver):MovingTarget(){
+            val observer=WeakReference(tree)
+            val drawn=MovingGeometry()
+            val requested=MovingGeometry()
+            val requestedVisibleRect=Rect()
+            var attempts=0
+        }
+    }
+
+    private val notificationMovementAttach=object:View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(view:View){}
+        override fun onViewDetachedFromWindow(view:View){removeNotificationMovement(view)}
+    }
+
+    private fun recordNotificationMovement(view:View){
+        if(!visible || Surface.NOTIFICATIONS !in profiles || !view.isAttachedToWindow)return
+        val tree=view.viewTreeObserver
+        if(!tree.isAlive)return
+        val previous=movingTargets[view] as? MovingTarget.Notification
+        val motion=if(previous!=null && previous.observer.get()===tree)previous else {
+            removeNotificationMovement(view)
+            MovingTarget.Notification(tree).also {
+                movingTargets[view]=it
+                view.addOnAttachStateChangeListener(notificationMovementAttach)
+            }
+        }
+        // Only an actual glass draw advances the rendered geometry.
+        motion.drawn.read(view)
+        motion.attempts=0
+        if(tree !in movementObservers){
+            val observer=WeakReference(tree)
+            val listener=ViewTreeObserver.OnPreDrawListener {
+                observer.get()?.let(::refreshMovingTargets)
+                true
+            }
+            movementObservers[tree]=listener
+            tree.addOnPreDrawListener(listener)
+        }
+    }
+
+    private fun removeIdleMovementObserver(tree:ViewTreeObserver){
+        if(movingTargets.values.any {it is MovingTarget.Notification && it.observer.get()===tree})return
+        val listener=movementObservers.remove(tree) ?: return
+        if(tree.isAlive)tree.removeOnPreDrawListener(listener)
+    }
+
+    private fun removeNotificationMovement(view:View){
+        val motion=movingTargets[view] as? MovingTarget.Notification ?: return
+        movingTargets.remove(view)
+        view.removeOnAttachStateChangeListener(notificationMovementAttach)
+        motion.observer.get()?.let(::removeIdleMovementObserver)
+    }
+
+    private fun clearNotificationMovement(){
+        movingTargets.keys.weakSnapshot().forEach {view->
+            if(movingTargets[view] is MovingTarget.Notification){
+                movingTargets.remove(view)
+                view.removeOnAttachStateChangeListener(notificationMovementAttach)
+            }
+        }
+        movementObservers.forEach { (tree,listener)->
+            if(tree.isAlive)tree.removeOnPreDrawListener(listener)
+        }
+        movementObservers.clear()
+    }
+
+    // Share the capsule refresh path and one pre-draw callback per view tree.
+    // Pre-draw does not schedule a perpetual frame loop; stationary cards are
+    // left alone. Preserve the existing widget refresh on capsule progress.
+    private fun refreshMovingTargets(tree:ViewTreeObserver?=null){
+        if(!visible)return
+        movingTargets.keys.weakSnapshot().forEach {view->
+            when(val motion=movingTargets[view]){
+                MovingTarget.Widget->if(tree==null && view.isShown)view.invalidate()
+                is MovingTarget.Notification->{
+                    val observer=motion.observer.get()
+                    if(!view.isAttachedToWindow || observer!==view.viewTreeObserver){
+                        removeNotificationMovement(view)
+                        return@forEach
+                    }
+                    if(tree!=null && tree!==observer)return@forEach
+                    val profile=profiles[Surface.NOTIFICATIONS]
+                    if(profile==null || surfaceAmount<=0f ||
+                        LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.NOTIFICATIONS))!=true ||
+                        !view.isShown || view.alpha<=.01f || (view.parent as? View)?.let {it.alpha<=.01f}==true ||
+                        !view.getGlobalVisibleRect(movementVisibleRect)){
+                        motion.attempts=0
+                        return@forEach
+                    }
+                    movementGeometry.read(view)
+                    if(motion.drawn.matches(movementGeometry)){
+                        motion.attempts=0
+                        return@forEach
+                    }
+                    if(!motion.requested.matches(movementGeometry) || motion.requestedVisibleRect!=movementVisibleRect){
+                        motion.requested.copyFrom(movementGeometry)
+                        motion.requestedVisibleRect.set(movementVisibleRect)
+                        motion.attempts=0
+                    }
+                    // Allow an initial request plus two retries, then wait for
+                    // geometry, clipping, visibility or an existing repaint to change.
+                    if(motion.attempts<3){
+                        motion.attempts++
+                        view.invalidate()
+                    }
+                }
+                null->Unit
+            }
+        }
+        if(tree!=null)removeIdleMovementObserver(tree)
+    }
+
     private fun repaint(){
+        for(motion in movingTargets.values)if(motion is MovingTarget.Notification)motion.attempts=0
         if(Surface.WIDGETS !in profiles)clearWidgetBackgrounds()
         else if(visible)refreshWidgetEffects()
         refreshClockMaterial()
@@ -887,7 +1037,7 @@ internal object LockscreenGlass {
                 positionRefreshPending=true
                 Choreographer.getInstance().postFrameCallback {
                     positionRefreshPending=false
-                    if(visible)movingTargets.keys.weakSnapshot().forEach {if(it.isShown)it.invalidate()}
+                    refreshMovingTargets()
                 }
             }
         }catch(t:Throwable){
@@ -953,10 +1103,12 @@ internal object LockscreenGlass {
             else notificationPath.addRoundRect(notificationBounds,notificationRadii,Path.Direction.CW)
             // The OEM contour is already rounded. Use it as the single alpha
             // boundary instead of multiplying it by another rounded mask.
-            target(view,Surface.NOTIFICATIONS).material.draw(canvas,view,Surface.NOTIFICATIONS,profile,frame,
+            if(target(view,Surface.NOTIFICATIONS).material.draw(canvas,view,Surface.NOTIFICATIONS,profile,frame,
                 bounds=notificationBounds,nativeRadius=radius,useNativeMask=false,drawRim=false,
-                exactPath=notificationPath,amount=notificationAmount(Surface.NOTIFICATIONS,layer.progress))
-            rendered.add(Surface.NOTIFICATIONS)
+                exactPath=notificationPath,amount=notificationAmount(Surface.NOTIFICATIONS,layer.progress))){
+                recordNotificationMovement(view)
+                rendered.add(Surface.NOTIFICATIONS)
+            }
         }catch(t:Throwable){
             GlassLogger.limited("LockscreenGlass","notification") {"Native notification kept: "+t.javaClass.simpleName}
         }finally {canvas.restoreToCount(clip)}
@@ -1031,7 +1183,7 @@ internal object LockscreenGlass {
                 }
             }catch(t:Throwable){GlassLogger.limited("LockscreenGlass","widgetDraw"){"Native widget kept: "+t.javaClass.simpleName}}
         }
-        movingTargets[view]=true
+        movingTargets[view]=MovingTarget.Widget
         val tint=profile.widgetTint ?: return
         val tone=frame?.wallpaperTone ?: return
         val transparency=100-((100-tint.transparency)*surfaceAmount).roundToInt()
