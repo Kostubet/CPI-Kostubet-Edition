@@ -1,8 +1,13 @@
-# CPI Kostubet Edition 0.3.4
+# CPI Kostubet Edition 0.3.5
 
 [Русский](#русский) · [English](#english)
 
 ## Русский
+
+### Сборка 477
+
+- Исправлены прямоугольные артефакты вокруг иконок на вкладках «Все» и «Категории», вокруг карточек категорий и предложений.
+- Иконки просвечивают на штатный фон меню приложений. Все четыре материала карточек используют один подготовленный фон, а обновление стекла рабочего стола при открытом меню приостанавливается.
 
 ### Сборка 476
 
@@ -407,6 +412,11 @@
 - Основная конфигурация разработки — **OnePlus 13, ColorOS 17**. Набор системных эффектов зависит от версии System UI и лаунчера. Стекло обеих шторок рассчитано на ColorOS 17. Для его работы включите **System UI** в области LSPosed, а для стекла иконок выберите **Flux** в ColorOS. [Инструкция по установке](https://github.com/Kostubet/CPI-Kostubet-Edition/blob/main/INSTALL.md#русский)
 
 ## English
+
+### Build 477
+
+- Fixed rectangular artifacts around icons in All and Categories, including category and suggested-app cards.
+- Icons blend over the native drawer backdrop. All four card materials share one prepared background, and workspace glass updates pause while the drawer is open.
 
 ### Build 476
 

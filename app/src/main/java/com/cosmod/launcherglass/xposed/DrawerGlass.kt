@@ -1,18 +1,17 @@
 package com.cosmod.launcherglass.xposed
 
-import android.annotation.SuppressLint
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ComposeShader
+import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
-import android.graphics.RenderEffect
-import android.graphics.RenderNode
-import android.graphics.RuntimeShader
 import android.graphics.Shader
-import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -22,90 +21,38 @@ import androidx.annotation.RequiresApi
 import com.cosmod.launcherglass.ui.FeatureSections
 import com.cosmod.launcherglass.ui.GlassEngineSettings
 import com.cosmod.launcherglass.ui.OpticalSettings
-import com.cosmod.launcherglass.util.GlassBlur
 import com.cosmod.launcherglass.util.GlassLogger
+import com.cosmod.launcherglass.util.WallpaperHelper
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.WeakHashMap
 
-/**
- * Compositor backdrops for the drawer. The backdrop at each draw point contains
- * the launcher scrim and any category plate already drawn below the icon.
- */
+/** Category glass samples a shared texture and composites through the stock card silhouette. */
 @RequiresApi(33)
 internal object DrawerGlass {
     private const val TAG = "DrawerGlass"
-    private val setter by lazy { resolveSetter() }
     private val main = Handler(Looper.getMainLooper())
-    val backdropAvailable get() = setter != null
     private val cards = WeakHashMap<View, Card>()
-    private val icons = WeakHashMap<View, WeakHashMap<Drawable, Plate>>()
     private var contract: CategoryContract? = null
     private var reportedCategory = false
-    private var reportedIcon = false
     @Volatile private var categoryStyle: GlassStyle? = null
-
-    @SuppressLint("SoonBlockedPrivateApi")
-    private fun resolveSetter() = runCatching {
-        RenderNode::class.java.getDeclaredMethod("setBackdropRenderEffect", RenderEffect::class.java)
-            .apply { isAccessible = true }
-    }.getOrNull()
-
-    private class Plate {
-        val node = RenderNode("CPI.drawerBackdrop")
-        var style: GlassStyle? = null
-        var mask: Shader? = null
-        var rounding = 0f
-        var blurRadius = 0f
-        var failed = false
-
-        fun prepare(width: Int, height: Int, mask: Shader, rounding: Float, radius: Float, style: GlassStyle): Boolean {
-            if (failed) return false
-            val apply = setter ?: return false
-            if (this.style == style && this.mask === mask && this.rounding == rounding && blurRadius == radius &&
-                node.width == width && node.height == height && node.hasDisplayList()) return true
-
-            return runCatching {
-                val shader = LiquidGlassShader.lifted()?.updateLifted(
-                    mask, width, height, 0f, width, height, style.backdropFilter, rounding, style,
-                ) ?: return false
-                val lens = RenderEffect.createRuntimeShaderEffect(shader, "backdrop")
-                val blur = GlassBlur.effect(radius, style.engineOptics.blur.opacity)
-                val effect = if (blur == null) lens else RenderEffect.createChainEffect(lens, blur)
-                node.setPosition(0, 0, width, height)
-                if (!node.hasDisplayList()) {
-                    val recording = node.beginRecording(width, height)
-                    try {
-                        recording.drawColor(Color.TRANSPARENT)
-                    } finally {
-                        node.endRecording()
-                    }
-                }
-                if (apply.invoke(node, effect) == false) {
-                    failed = true
-                    return false
-                }
-                this.style = style
-                this.mask = mask
-                this.rounding = rounding
-                blurRadius = radius
-                true
-            }.onFailure { error ->
-                failed = true
-                GlassLogger.limited(TAG, "native-backdrop") {
-                    "Native drawer backdrop unavailable: ${error.javaClass.simpleName}: ${error.message}"
-                }
-            }.getOrDefault(false)
-        }
-    }
+    val categoriesEnabled get() = categoryStyle != null
+    private val refreshAfterScroll = Runnable { invalidateCards() }
 
     private class Card {
-        val plate = Plate()
         val bounds = RectF()
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val backdropPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val location = IntArray(2)
+        val crop = RectF()
+        val sampleMatrix = Matrix()
         var mask: Shader? = null
+        var lens: LiquidGlassShader? = null
+        var image: Bitmap? = null
+        var imageShader: Shader? = null
+        var composite: Shader? = null
         var corner = -1f
         var stockSuppressed = false
         var pending = false
@@ -136,6 +83,7 @@ internal object DrawerGlass {
                 radius = number("drawer_folders_glass_blur"),
                 opacity = number("drawer_folders_glass_opacity"),
                 filter = null,
+                extendedLens = true,
                 surfaceScope = GlassSurface.DRAWER_FOLDERS,
                 dispersion = number("drawer_folders_glass_dispersion"),
                 newEngine = settings.getBoolean(scope) && !settings.getBoolean(GlassEngineSettings.softKey(scope)),
@@ -145,16 +93,25 @@ internal object DrawerGlass {
         if (categoryStyle == next) return
         categoryStyle = next
         main.post {
+            if (categoryStyle == null) WallpaperHelper.clearDrawerBackdrop()
             val access = contract ?: return@post
             for ((view, card) in cards) {
                 if (categoryStyle == null) restoreStock(view, card, access)
                 if (view.isAttachedToWindow) view.invalidate()
             }
+            if (categoryStyle == null) cards.clear()
+        }
+    }
+
+    fun invalidateCards() {
+        if (!categoriesEnabled) return
+        for (view in cards.keys) {
+            if (view.isAttachedToWindow && view.isShown) view.invalidate()
         }
     }
 
     fun install(loader: ClassLoader) {
-        if (Build.VERSION.SDK_INT < 33 || setter == null) return
+        if (Build.VERSION.SDK_INT < 33) return
         runCatching {
             val category = loader.loadClass("com.android.launcher3.allapps.OplusCategoryIconContainer")
             val dimensions = loader.loadClass("com.android.launcher3.allapps.CategoryIconDimenManager")
@@ -198,6 +155,19 @@ internal object DrawerGlass {
                     }.getOrDefault(false)) param.result = null
                 }
             })
+            // Scroll movement reuses children; refresh their crops once the
+            // list settles instead of rebuilding shaders on every scroll frame.
+            val list = runCatching {
+                loader.loadClass("androidx.recyclerview.widget.RecyclerView")
+                    .getDeclaredMethod("dispatchOnScrolled", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            }.getOrNull()
+            if (list != null) XposedBridge.hookMethod(list, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (!categoriesEnabled || !IconGlassHook.isDrawerIcon(param.thisObject as View)) return
+                    main.removeCallbacks(refreshAfterScroll)
+                    main.postDelayed(refreshAfterScroll, 90L)
+                }
+            })
             contract = access
             GlassLogger.i(TAG, "Category background contract loaded")
         }.onFailure {
@@ -221,6 +191,13 @@ internal object DrawerGlass {
         val width = (view.width - 2 * inset).toInt()
         val height = view.height
         if (width <= 0 || canvas.quickReject(inset, 0f, inset + width, height.toFloat())) return false
+        val metrics = view.resources.displayMetrics
+        val blur = style.engineOptics.blur
+        val image = WallpaperHelper.getDrawerBackdrop(view.context, style.radius * metrics.density, blur.opacity)
+        if (image == null) {
+            restoreStock(view, card, access)
+            return false
+        }
         val edge = minOf(width, height)
         val corner = if (circle) edge / 2f else
             (access.radius.invoke(null, view.resources) as Number).toFloat().coerceIn(0f, edge / 2f)
@@ -234,13 +211,34 @@ internal object DrawerGlass {
             if (circle || access.smoothDraw == null) maskCanvas.drawRoundRect(bounds, corner, corner, card.paint)
             else access.smoothDraw.invoke(null, maskCanvas, bounds, corner, corner, card.paint, 3f)
             card.mask = GlassGeometry.wallpaperShader(bitmap)
+            card.composite = null
             card.corner = corner
         }
         val mask = card.mask ?: return false
-        val density = view.resources.displayMetrics.density
-        if (!card.plate.prepare(width, height, mask, corner / edge, style.radius * density, style)) {
-            restoreStock(view, card, access)
-            return false
+        view.getLocationOnScreen(card.location)
+        val left = card.location[0] + inset
+        val top = card.location[1].toFloat()
+        card.crop.set(left, top, left + width, top + height)
+        WallpaperFootprint.source(image, metrics.widthPixels, metrics.heightPixels, card.crop, card.crop)
+        val lens = if (style.liquid && PrefsHelper.gpuEffects) {
+            (card.lens ?: LiquidGlassShader.create().also { card.lens = it })
+                ?.update(image, mask, card.crop, width, height, style.backdropFilter, corner / edge, style)
+        } else null
+        val paint = card.backdropPaint
+        if (lens == null) {
+            if (card.image !== image) {
+                card.image = image
+                card.imageShader = GlassGeometry.wallpaperShader(image)
+                card.composite = null
+            }
+            val source = checkNotNull(card.imageShader)
+            card.sampleMatrix.setRectToRect(card.crop, bounds, Matrix.ScaleToFit.FILL)
+            source.setLocalMatrix(card.sampleMatrix)
+            paint.shader = card.composite ?: ComposeShader(source, mask, PorterDuff.Mode.DST_IN).also { card.composite = it }
+            paint.colorFilter = style.backdropFilter
+        } else {
+            paint.shader = lens
+            paint.colorFilter = null
         }
         // The stock controller owns a drawable set outside onDraw. Clear it on
         // the UI queue once CPI has a usable layer, then re-record the plate.
@@ -257,12 +255,14 @@ internal object DrawerGlass {
         if (!card.stockSuppressed) return false
         if (!reportedCategory) {
             reportedCategory = true
-            GlassLogger.i(TAG, "Compositor category card backdrop bound")
+            GlassLogger.i(TAG, "Masked category card bound to shared backdrop")
         }
         val saved = canvas.save()
         try {
             canvas.translate(inset, 0f)
-            canvas.drawRenderNode(card.plate.node)
+            // Keep the real drawer backdrop visible through the optical sample.
+            paint.alpha = 185
+            canvas.drawRect(bounds, paint)
             if (style.opacity > 0) {
                 val night = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
                     Configuration.UI_MODE_NIGHT_YES
@@ -290,24 +290,6 @@ internal object DrawerGlass {
         }
     }
 
-    fun iconReady(view: View): Boolean =
-        icons[view]?.values?.any { !it.failed && it.node.hasDisplayList() } == true
-
-    fun drawIcon(
-        canvas: Canvas, binding: IconMaterialRenderer.Binding, width: Int, height: Int,
-        mask: Shader, rounding: Float, style: GlassStyle,
-    ): Boolean {
-        if (setter == null || !binding.view.isAttachedToWindow || Looper.myLooper() != Looper.getMainLooper()) return false
-        val plate = icons.getOrPut(binding.view) { WeakHashMap() }.getOrPut(binding.drawable, ::Plate)
-        if (!plate.prepare(width, height, mask, rounding, style.radius.toFloat(), style)) return false
-        canvas.drawRenderNode(plate.node)
-        if (!reportedIcon) {
-            reportedIcon = true
-            GlassLogger.i(TAG, "Compositor drawer icon backdrop bound")
-        }
-        return true
-    }
-
-    private val DARK_TINT = android.graphics.PorterDuffColorFilter(0xff141414.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)
-    private val LIGHT_TINT = android.graphics.PorterDuffColorFilter(Color.WHITE, android.graphics.PorterDuff.Mode.SRC_IN)
+    private val DARK_TINT = PorterDuffColorFilter(0xff141414.toInt(), PorterDuff.Mode.SRC_IN)
+    private val LIGHT_TINT = PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN)
 }

@@ -66,9 +66,6 @@ object PrefsHelper {
     internal val shortcutGlassEnabled get() = enabled && blurEnabled && iconsFeatureEnabled
     val wallpaperEffectsEnabled get()=(blurEnabled && (iconsFeatureEnabled || folderBlurEnabled)) ||
         widgetGlassEnabled || dockGlassEnabled || PageIndicatorGlass.profile.mode>0
-    // The app drawer uses the same material as home-screen icons. Older configs
-    // can still contain a hidden drawer switch that shipped off by default.
-    val drawerBlurEnabled get() = blurEnabled && iconsFeatureEnabled
     @Volatile var blurRadius: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_RADIUS)
     @Volatile var blurMode: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_MODE)
     @Volatile var blurStyle: Int = SettingsDefaults.integer(SettingsProvider.KEY_BLUR_STYLE)

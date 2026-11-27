@@ -170,8 +170,10 @@ object LiveBlurEngine {
             if(remaining>0L){mainHandler.postDelayed(this,remaining);return}
             drawerRefreshQueued=false
             if(isResumed && PrefsHelper.enabled){
-                IconGlassHook.invalidateActiveIcons(onlyChangedDrawerSamples=true)
-                LauncherWallpaperCapture.startMotionWatch()
+                if (!drawerOccludesWorkspace) {
+                    IconGlassHook.invalidateActiveIcons(onlyChangedDrawerSamples=true)
+                    LauncherWallpaperCapture.startMotionWatch()
+                }
             }
         }
     }
@@ -202,7 +204,7 @@ object LiveBlurEngine {
         if (isWorkspaceBlurSuspended == suspended) return
         isWorkspaceBlurSuspended = suspended
         if (suspended) {
-            if (!PrefsHelper.drawerBlurEnabled) stopFrameLoop()
+            stopFrameLoop()
         } else {
             lastMotionTimeMs = SystemClock.uptimeMillis()
             transitionRefreshUntilMs = maxOf(transitionRefreshUntilMs, lastMotionTimeMs + 600L)
@@ -214,8 +216,7 @@ object LiveBlurEngine {
         }
     }
 
-    private fun hasLiveBlurWork(): Boolean = PrefsHelper.wallpaperEffectsEnabled &&
-        (!isWorkspaceBlurSuspended || PrefsHelper.drawerBlurEnabled)
+    private fun hasLiveBlurWork(): Boolean = PrefsHelper.wallpaperEffectsEnabled && !isWorkspaceBlurSuspended
 
     private fun transitionVisible()=com.cosmod.launcherglass.xposed.NativeSurfaceLive.active
     private fun workspaceVisible()=transitionVisible() || (isResumed && !isAppLaunchInProgress)

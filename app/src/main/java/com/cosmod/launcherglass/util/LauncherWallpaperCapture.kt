@@ -222,7 +222,7 @@ object LauncherWallpaperCapture {
         if (!PrefsHelper.enabled || !PrefsHelper.wallpaperEffectsEnabled ||
             (!LiveBlurEngine.isResumed && !com.cosmod.launcherglass.xposed.NativeSurfaceLive.active) ||
             (LiveBlurEngine.isAppLaunchInProgress && !com.cosmod.launcherglass.xposed.NativeSurfaceLive.active) ||
-            (LiveBlurEngine.isWorkspaceBlurSuspended && !PrefsHelper.drawerBlurEnabled) ||
+            LiveBlurEngine.isWorkspaceBlurSuspended ||
             PrefsHelper.blurMode != SettingsProvider.BLUR_MODE_LIVE) return
         val now = SystemClock.uptimeMillis()
         // Static ImageWallpaper also moves during ColorOS unlock. Capture that

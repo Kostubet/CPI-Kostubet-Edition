@@ -42,6 +42,7 @@ import com.cosmod.launcherglass.xposed.NeutralBackdrop
 import com.cosmod.launcherglass.xposed.PhotoWidgetMaterial
 import com.cosmod.launcherglass.xposed.WidgetMaterialSettings
 import com.cosmod.launcherglass.xposed.ColorDepthEffect
+import com.cosmod.launcherglass.xposed.DrawerGlass
 
 import java.io.File
 
@@ -67,6 +68,53 @@ object WallpaperHelper {
                                    val radius:Float,val opacity:Int,val gpu:Boolean,val image:Bitmap)
     private var widgetSource:PhotoSource?=null
     @Volatile private var largeFolderWallpaper:Bitmap?=null
+    private data class DrawerBlur(val revision: Long, val height: Int, val radius: Float, val opacity: Int)
+    private var drawerBlur: DrawerBlur? = null
+    private var drawerBackdrop: Bitmap? = null
+    private var drawerRequestPending = false
+
+    @Synchronized
+    internal fun getDrawerBackdrop(context: Context, radiusPx: Float, opacity: Int): Bitmap? {
+        val metrics = context.resources.displayMetrics
+        val height = metrics.heightPixels.coerceIn(1, 1080)
+        val blur = DrawerBlur(sourceRevision, height, radiusPx * height / metrics.heightPixels.coerceAtLeast(1), opacity)
+        if (drawerBlur == blur) return drawerBackdrop
+        if (drawerRequestPending) return drawerBackdrop
+        drawerRequestPending = true
+        val ctx = context.applicationContext ?: context
+        loader.execute {
+            val prepared = runCatching {
+                val raw = synchronized(this) { wallpaperInput?.let { it.reuse(it.key) } ?: systemSnapshot }?.takeUnless { it.isRecycled }
+                    ?: loadRawWallpaper(ctx) ?: return@runCatching null
+                val h = minOf(raw.height, blur.height)
+                val w = (raw.width.toLong() * h / raw.height).toInt().coerceAtLeast(1)
+                val radius = blur.radius * h / blur.height
+                if (radius <= 0f || blur.opacity == 0) return@runCatching Bitmap.createScaledBitmap(raw, w, h, true)
+                runCatching { GpuWallpaperBlur.blurPhoto(raw, w, h, radius, blur.opacity) }.getOrElse {
+                    val scaled = Bitmap.createScaledBitmap(raw, w, h, true)
+                    GlassBlur.bitmap(forSoftwareCanvas(scaled) ?: return@runCatching null, radius, blur.opacity)
+                }
+            }.onFailure {
+                GlassLogger.limited("DrawerGlass", "source") { "Drawer card sample unavailable: ${it.message}" }
+            }.getOrNull()
+            synchronized(this) {
+                drawerRequestPending = false
+                if (drawerBlur != blur && blur.revision == sourceRevision && DrawerGlass.categoriesEnabled) {
+                    drawerBlur = blur
+                    drawerBackdrop = prepared
+                }
+            }
+            mainHandler.post { DrawerGlass.invalidateCards() }
+        }
+        return drawerBackdrop
+    }
+
+    @Synchronized
+    internal fun clearDrawerBackdrop() {
+        drawerBlur = null
+        drawerBackdrop = null
+    }
+
     private data class Backdrops(val icons:Bitmap?,val folder:Bitmap?,val widgets:Bitmap?,val largeFolder:Bitmap?,
         val neutral:NeutralBackdrop.Images){
         fun discard(){
@@ -395,6 +443,8 @@ object WallpaperHelper {
         mainHandler.removeCallbacks(reloadAppearanceBackdrop)
 
         appContext?.let { requestLoad(it) }
+        if (android.os.Build.VERSION.SDK_INT >= 33 && DrawerGlass.categoriesEnabled)
+            mainHandler.post { DrawerGlass.invalidateCards() }
 
     }
 

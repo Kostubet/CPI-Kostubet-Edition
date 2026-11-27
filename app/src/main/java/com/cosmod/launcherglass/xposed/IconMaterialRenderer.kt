@@ -439,6 +439,7 @@ object IconMaterialRenderer {
         wallpaper: Bitmap?, source: RectF?,binding:Binding?=null,volume:Boolean=true,style:GlassStyle=GlassStyle.icons(),
         displayEdge:Float=binding?.local?.let {minOf(it.width(),it.height())} ?: minOf(bounds.width(),bounds.height()).toFloat(),
         glyphTint: PorterDuffColorFilter? = null,
+        drawer: Boolean = binding?.drawer == true,
         buildOverlay: (Canvas, Rect, Boolean) -> Unit
     ) {
         val width = bounds.width()
@@ -447,11 +448,11 @@ object IconMaterialRenderer {
         val folderSample = style.folderBackdrop && binding?.foreign == false && PrefsHelper.gpuEffects &&
             canvas.isHardwareAccelerated && android.os.Build.VERSION.SDK_INT >= 33
         val trackPosition = binding?.foreign == false && canvas.isHardwareAccelerated && PrefsHelper.gpuEffects
-        val liveDrawer = binding?.drawer == true && !binding.foreign && binding.alpha == 255 &&
-            trackPosition && PrefsHelper.drawerBlurEnabled && !style.folderBackdrop &&
-            android.os.Build.VERSION.SDK_INT >= 33 && DrawerGlass.backdropAvailable
+        // The stock drawer already composites its background. Blend the masked
+        // icon plate over it without sampling through another compositor layer.
+        val drawerPlate = drawer && PrefsHelper.blurEnabled && !style.folderBackdrop
         val hasWallpaper = wallpaper != null && (source != null || trackPosition) && !style.folderBackdrop
-        val blurred = liveDrawer || folderSample || hasWallpaper
+        val blurred = drawerPlate || folderSample || hasWallpaper
         val surfaceTint=SurfaceTints.get(style.surfaceScope)
         val key = Key(mask, mask.generationId, glyph, glyph.generationId, glyphTint, width, height, surfaceTint?.color ?: color,
             surfaceTint?.let {it.opacity*255/100} ?: tintAlpha, hideGlyph, blurred,
@@ -460,7 +461,7 @@ object IconMaterialRenderer {
             if (PrefsHelper.glyphStroke) PrefsHelper.glyphStrokeOpacity else 0,
             if (PrefsHelper.glyphStroke) PrefsHelper.glyphStrokeWidth else 0,
             if (PrefsHelper.glyphStroke) PrefsHelper.glyphStrokeBrightness else 0,PrefsHelper.colorDepthBits,PrefsHelper.colorDepthStage)
-        if(!PrefsHelper.gpuEffects && canvas.isHardwareAccelerated){
+        if(!drawerPlate && !PrefsHelper.gpuEffects && canvas.isHardwareAccelerated){
             var frame=cpuFrames.get(key)
             if(frame==null){frame=CpuFrame();cpuFrames.put(key,frame)}
             if(binding?.foreign==true)frame.bitmap?.let {canvas.drawBitmap(it,null,bounds,outputPaint);return}
@@ -480,7 +481,8 @@ object IconMaterialRenderer {
             if(changed && (frame.bitmap==null || remaining==0L)){
                 val bitmap=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)
                 val software=wallpaper?.let {com.cosmod.launcherglass.util.WallpaperHelper.forCanvas(it,Canvas(bitmap))}
-                draw(Canvas(bitmap),Rect(0,0,width,height),mask,glyph,color,tintAlpha,hideGlyph,software,footprint,null,volume,style,displayEdge,glyphTint,buildOverlay)
+                draw(Canvas(bitmap),Rect(0,0,width,height),mask,glyph,color,tintAlpha,hideGlyph,software,footprint,null,volume,style,displayEdge,glyphTint,
+                    buildOverlay=buildOverlay)
                 frame.bitmap=bitmap;frame.wallpaper=wallpaper;frame.source=footprint?.let(::RectF);frame.style=style;frame.finish=opticalKey();frame.clock.record(now,fps)
             }else if(changed)scheduleSampleRefresh(binding?.view,remaining)
             frame.bitmap?.let {canvas.drawBitmap(it,null,bounds,outputPaint)}
@@ -520,10 +522,7 @@ object IconMaterialRenderer {
         val save = canvas.save()
         try {
             canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
-            val finalDepth=blurred && style.surfaceScope!=GlassSurface.WIDGETS && ColorDepthEffect.finalPlate
-            val drawnDrawer = if (liveDrawer && material.mask != null && android.os.Build.VERSION.SDK_INT >= 33) {
-                DrawerGlass.drawIcon(canvas, checkNotNull(binding), width, height, material.mask, material.rounding, style)
-            } else false
+            val finalDepth=blurred && !drawerPlate && style.surfaceScope!=GlassSurface.WIDGETS && ColorDepthEffect.finalPlate
             val depthNode=if(finalDepth && canvas.isHardwareAccelerated)
                 RenderNode("CherryPick.colorDepth").apply {
                     setPosition(0,0,width,height)
@@ -532,7 +531,7 @@ object IconMaterialRenderer {
             val softwarePlate=if(finalDepth && !canvas.isHardwareAccelerated)Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888)else null
             val plate=depthNode?.beginRecording(width,height) ?: softwarePlate?.let(::Canvas) ?: canvas
             try {
-            if (!drawnDrawer && (folderSample || hasWallpaper) && material.mask != null) {
+            if (!drawerPlate && (folderSample || hasWallpaper) && material.mask != null) {
                 val existing=if(binding?.foreign==true && canvas.isHardwareAccelerated)
                     foreignSampler(binding,material,width,height) else null
                 if(existing!=null){

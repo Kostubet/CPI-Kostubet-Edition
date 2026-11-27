@@ -114,14 +114,14 @@ object IconGlassHook {
             drawerBakeDeadline = 0L
             if(current!=null && PrefsHelper.enabled && PrefsHelper.wallpaperEffectsEnabled) {
                 val deferSampling=LiveBlurEngine.deferWorkspaceSampling
-                val drawerSampling=LiveBlurEngine.drawerOccludesWorkspace && PrefsHelper.drawerBlurEnabled
-                val liveSampling=!deferSampling && (drawerSampling ||
+                val liveSampling=!deferSampling && !LiveBlurEngine.drawerOccludesWorkspace &&
                     (!PrefsHelper.ltpoIdle || LiveBlurEngine.hasRecentMotion) &&
-                    (LiveBlurEngine.isWorkspaceScrolling || PrefsHelper.blurMode==com.cosmod.launcherglass.ui.SettingsProvider.BLUR_MODE_LIVE)) &&
+                    (LiveBlurEngine.isWorkspaceScrolling || PrefsHelper.blurMode==com.cosmod.launcherglass.ui.SettingsProvider.BLUR_MODE_LIVE) &&
                     (LiveBlurEngine.isResumed || NativeSurfaceLive.active)
                 IconMaterialRenderer.beginFrame()
                 // The live pass already checks nested display lists.
-                if(!liveSampling && !deferSampling)recovered=recoverDiscardedIcons(current)
+                if(!liveSampling && !deferSampling && !LiveBlurEngine.drawerOccludesWorkspace)
+                    recovered=recoverDiscardedIcons(current)
                 // Lifted backdrops follow this frame's final DragView transform.
                 LiftedBackdrop.prepare()
                 IconMaterialRenderer.updateLifted(current)
@@ -351,7 +351,7 @@ object IconGlassHook {
     }
     fun invalidateActiveIcons(onlyChangedDrawerSamples:Boolean=false,beforeDraw:View?=null){
         if(!PrefsHelper.enabled)return
-        if(onlyChangedDrawerSamples && LiveBlurEngine.isDrawerTransitioning)return
+        if(onlyChangedDrawerSamples && (LiveBlurEngine.isDrawerTransitioning || LiveBlurEngine.drawerOccludesWorkspace))return
         // Icon config resets may clear drawable associations while native
         // RenderNodes keep their display lists. Keep view registration separate
         // so the next live tick can force those lists to be recorded again.
@@ -364,20 +364,17 @@ object IconGlassHook {
         val paging=LiveBlurEngine.isWorkspaceScrolling
         val observer=beforeDraw?.viewTreeObserver
         val roots=if(beforeDraw==null)LinkedHashSet<View>()else null
-        val drawerOnly=onlyChangedDrawerSamples && LiveBlurEngine.drawerOccludesWorkspace
         for(reference in registeredViews()){
             val view=reference.get() ?: continue
             if(!view.isAttachedToWindow || (observer!=null && view.viewTreeObserver!==observer) ||
                 isAppearanceRedrawPending(view) || NativeSurfaceLive.ownsSource(view) || !view.isShown)continue
-            if (onlyChangedDrawerSamples && android.os.Build.VERSION.SDK_INT >= 33 && PrefsHelper.drawerBlurEnabled &&
-                isDrawerIcon(view) && DrawerGlass.iconReady(view)) continue
-            if(drawerOnly && (!isDrawerIcon(view) || !view.getGlobalVisibleRect(visible)))continue
+            if(onlyChangedDrawerSamples && isDrawerIcon(view))continue
             world.reset()
             view.transformMatrixToGlobal(world)
             full.set(0f,0f,view.width.toFloat(),view.height.toFloat());world.mapRect(full)
             val metrics=view.resources.displayMetrics
             val offscreen=full.right<=0f || full.bottom<=0f || full.left>=metrics.widthPixels || full.top>=metrics.heightPixels
-            val edge=!drawerOnly && view.javaClass.name.contains("BubbleTextView") &&
+            val edge=view.javaClass.name.contains("BubbleTextView") &&
                 (full.left<-.5f || full.top<-.5f || full.right>metrics.widthPixels+.5f || full.bottom>metrics.heightPixels+.5f)
             // Both update paths obey the edge optimization. The old switch only
             // removed forceEdge, leaving the ordinary sampler path running.
@@ -407,7 +404,7 @@ object IconGlassHook {
                 }
                 continue
             }
-            if(!drawerOnly && !view.getGlobalVisibleRect(visible)){
+            if(!view.getGlobalVisibleRect(visible)){
                 if(!forceEdge)continue
                 visible.set(0,0,view.width,view.height)
             }
@@ -659,7 +656,7 @@ object IconGlassHook {
             plateOpacity*255/100,false,compatible,source,binding,
             style=style.copy(liquid=style.liquid && !lighterDrawer,extendedLens=width!=height,
                 newEngine=style.newEngine && !lighterDrawer),
-            glyphTint=parts.glyphTint){target,local,blurred ->
+            glyphTint=parts.glyphTint,drawer=a?.drawer==true || binding?.drawer==true){target,local,blurred ->
             if(!blurred){
                 val save=target.saveLayer(RectF(local),null)
                 val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {colorFilter=PorterDuffColorFilter((plateOpacity*255/100 shl 24) or (plateColor and 0xffffff),PorterDuff.Mode.SRC_IN)}
@@ -684,8 +681,8 @@ object IconGlassHook {
         else GlyphMaterialRenderer.draw(canvas, bounds, glyph, paint)
     }
 
-    private fun samplesWallpaper(a:Anchor?):Boolean = if(a?.drawer==true) PrefsHelper.drawerBlurEnabled
-        else PrefsHelper.blurEnabled && (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) && a?.openFolder!=true
+    private fun samplesWallpaper(a:Anchor?):Boolean = a?.drawer!=true && PrefsHelper.blurEnabled &&
+        (a?.folder!=true || PrefsHelper.folderIconsBlurEnabled) && a?.openFolder!=true
 
     private fun wallpaper(a:Anchor?):Bitmap? =
         if(samplesWallpaper(a))WallpaperHelper.getBlurredWallpaper(appContext)else null
