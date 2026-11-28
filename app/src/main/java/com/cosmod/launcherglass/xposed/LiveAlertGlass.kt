@@ -310,9 +310,49 @@ internal object LiveAlertGlass {
                     }
                     val store=c.createDeviceProtectedStorageContext().getSharedPreferences("cherrypick_alert_guard_v2",Context.MODE_PRIVATE)
                     guard=store
+                    var settingsReceived=false
+                    var recoveryContext:Context?=null
+                    var recoveryReceiver:android.content.BroadcastReceiver?=null
+                    var recoveryTask:Runnable?=null
+                    var recoveryAttempts=0
+
+                    fun stopRecovery(){
+                        recoveryTask?.let(main::removeCallbacks)
+                        recoveryTask=null
+                        val receiver=recoveryReceiver
+                        val owner=recoveryContext
+                        recoveryReceiver=null
+                        recoveryContext=null
+                        if(receiver!=null && owner!=null){
+                            try {owner.unregisterReceiver(receiver)}
+                            catch(error:Exception){
+                                GlassLogger.e("LiveAlertGlass","Could not remove settings recovery receiver",error)
+                            }
+                        }
+                    }
+
                     val reload = HostSettingsReload(main, read = {
-                        c.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_GET_ALL,null,null)
+                        var snapshot:Bundle?=null
+                        try {
+                            snapshot=c.contentResolver.call(SettingsProvider.CONTENT_URI,SettingsProvider.METHOD_GET_ALL,null,null)
+                            snapshot
+                        }finally {
+                            if(snapshot==null)main.post {
+                                if(!settingsReceived){
+                                    if(recoveryAttempts>=5){
+                                        GlassLogger.i("LiveAlertGlass","SystemUI settings recovery exhausted; awaiting settings changes")
+                                        stopRecovery()
+                                    }else recoveryTask?.let {if(!main.hasCallbacks(it))main.postDelayed(it,2000L)}
+                                }
+                            }
+                        }
                     }, apply = { snapshot ->
+                        if(!settingsReceived){
+                            settingsReceived=true
+                            GlassLogger.i("LiveAlertGlass","SystemUI settings received: enabled="+
+                                snapshot.getBoolean(SettingsProvider.KEY_ENABLED,false)+", recoveryAttempts="+recoveryAttempts)
+                            stopRecovery()
+                        }
                         try { load(snapshot) } catch (t: Throwable) { disable(t) }
                     })
                     HostControl.install(c,"systemui",{diagnostics()+"\n"+LockscreenGlass.diagnostics()+"\n"+ShadeGlass.diagnostics()},retry@{
@@ -337,6 +377,50 @@ internal object LiveAlertGlass {
                         androidx.core.content.ContextCompat.RECEIVER_EXPORTED)
                     c.contentResolver.registerContentObserver(SettingsProvider.CONTENT_URI, true, reload)
                     reload.reloadImmediately()
+                    if(!settingsReceived){
+                        GlassLogger.i("LiveAlertGlass","Initial SystemUI settings unavailable; waiting for recovery")
+                        // Register after Application.attach, using the same owner for removal.
+                        main.post {
+                            if(!settingsReceived){
+                                try {
+                                    val owner=c.applicationContext ?: c
+                                    val userManager=owner.getSystemService(UserManager::class.java)
+                                    val task=Runnable {
+                                        if(!settingsReceived && recoveryAttempts<5 && userManager?.isUserUnlocked==true){
+                                            recoveryAttempts++
+                                            GlassLogger.i("LiveAlertGlass","Retrying SystemUI settings: attempt "+recoveryAttempts)
+                                            reload.onChange(false)
+                                        }
+                                    }
+                                    recoveryTask=task
+                                    if(userManager?.isUserUnlocked==true){
+                                        main.post(task)
+                                    }else{
+                                        val receiver=object:android.content.BroadcastReceiver(){
+                                            override fun onReceive(context:Context?,intent:android.content.Intent?){
+                                                if(intent?.action==android.content.Intent.ACTION_USER_UNLOCKED &&
+                                                    !settingsReceived && !main.hasCallbacks(task))main.post(task)
+                                            }
+                                        }
+                                        try {
+                                            androidx.core.content.ContextCompat.registerReceiver(owner,receiver,
+                                                android.content.IntentFilter(android.content.Intent.ACTION_USER_UNLOCKED),null,main,
+                                                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+                                            recoveryContext=owner
+                                            recoveryReceiver=receiver
+                                        }catch(error:Exception){
+                                            GlassLogger.e("LiveAlertGlass","Settings recovery receiver unavailable",error)
+                                        }
+                                        // Close the race between the unlock check and registration.
+                                        if(userManager?.isUserUnlocked==true && !main.hasCallbacks(task))main.post(task)
+                                    }
+                                }catch(error:Exception){
+                                    GlassLogger.e("LiveAlertGlass","Settings recovery setup failed",error)
+                                    stopRecovery()
+                                }
+                            }
+                        }
+                    }
                 }catch(t:Throwable){disable(t)}
             }
         })

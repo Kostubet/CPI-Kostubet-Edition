@@ -112,7 +112,11 @@ internal object LockscreenBackdrop {
                     val changed=frame?.images!==result?.images
                     frame=result
                     frameHeight=request.height
-                    if(changed)LockscreenGlass.wallpaperChanged()
+                    val unavailable=result?.images.isNullOrEmpty()
+                    // A failed static request must not suppress the next prepare().
+                    if(unavailable && result?.live!=true)desired=null
+                    // A null-to-null failure also needs to reach the retry path.
+                    if(changed || unavailable && result?.live!=true)LockscreenGlass.wallpaperChanged()
                     if(result?.live==true){
                         liveMisses=if(changed && result.source=="live wallpaper layer")0
                             else (liveMisses+1).coerceAtMost(5)
