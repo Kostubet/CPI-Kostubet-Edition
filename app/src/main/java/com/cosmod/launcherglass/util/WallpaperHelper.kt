@@ -99,12 +99,15 @@ object WallpaperHelper {
             }.getOrNull()
             synchronized(this) {
                 drawerRequestPending = false
-                if (drawerBlur != blur && blur.revision == sourceRevision && DrawerGlass.categoriesEnabled) {
+                if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                    drawerBlur != blur && blur.revision == sourceRevision && DrawerGlass.categoriesEnabled) {
                     drawerBlur = blur
                     drawerBackdrop = prepared
                 }
             }
-            mainHandler.post { DrawerGlass.invalidateCards() }
+            mainHandler.post {
+                if (android.os.Build.VERSION.SDK_INT >= 33) DrawerGlass.invalidateCards()
+            }
         }
         return drawerBackdrop
     }
