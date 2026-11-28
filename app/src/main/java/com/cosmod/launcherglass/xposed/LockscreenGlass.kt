@@ -17,10 +17,12 @@ import android.graphics.RenderEffect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.view.Choreographer
 import android.view.Display
 import android.view.View
@@ -142,7 +144,23 @@ internal object LockscreenGlass {
     private var context:Context?=null
     private var loader:ClassLoader?=null
     private var keyguard:KeyguardManager?=null
+    private var powerManager:PowerManager?=null
     private var interactive=false
+    private var lastDisplayState=Display.STATE_UNKNOWN
+    private var wakeChecks=0
+    private var lastDrawWakeCheck=-250L
+    private val wakeVisibilityCheck=object:Runnable {
+        override fun run(){
+            refreshVisibility()
+            if(!visible && wakeChecks>0 && lastDisplayState==Display.STATE_ON &&
+                (profiles.isNotEmpty() || softActivities)){
+                wakeChecks--
+                main.postDelayed(this,250L)
+            }
+        }
+    }
+    private var hasStatusBarStateHook=false
+    private var hasKeyguardStateHook=false
     private var keyguardState:Int?=null
     private var keyguardShowing:Boolean?=null
     private var keyguardOccluded=false
@@ -233,7 +251,8 @@ internal object LockscreenGlass {
         this.context=context
         this.loader=loader
         keyguard=context.getSystemService(KeyguardManager::class.java)
-        interactive=context.getSystemService(PowerManager::class.java)?.isInteractive==true
+        powerManager=context.getSystemService(PowerManager::class.java)
+        interactive=powerManager?.isInteractive==true
         fun id(name:String)=context.resources.getIdentifier(name,"id",context.packageName).takeIf {it!=0} ?: View.NO_ID
         startId=id("start_button")
         endId=id("end_button")
@@ -253,11 +272,11 @@ internal object LockscreenGlass {
                     onMain {keyguardState=next;dozing=asleep;refreshVisibility()}
                 }
             }
-            XposedBridge.hookAllMethods(type,"setState",state)
+            hasStatusBarStateHook=XposedBridge.hookAllMethods(type,"setState",state).isNotEmpty()
             XposedBridge.hookAllMethods(type,"setIsDozing",state)
         }
         XposedHelpers.findClassIfExists(KEYGUARD_STATE,loader)?.let {type->
-            XposedBridge.hookAllMethods(type,"notifyKeyguardState",object:XC_MethodHook(){
+            hasKeyguardStateHook=XposedBridge.hookAllMethods(type,"notifyKeyguardState",object:XC_MethodHook(){
                 override fun afterHookedMethod(p:MethodHookParam){
                     if(p.hasThrowable() || p.args.size!=2)return
                     val showing=p.args[0] as? Boolean ?: return
@@ -268,7 +287,7 @@ internal object LockscreenGlass {
                         refreshVisibility()
                     }
                 }
-            })
+            }).isNotEmpty()
         }
         XposedHelpers.findClassIfExists(WALLPAPER,loader)?.let {type->
             XposedBridge.hookAllConstructors(type,object:XC_MethodHook(){
@@ -313,9 +332,13 @@ internal object LockscreenGlass {
         ContextCompat.registerReceiver(context,object:BroadcastReceiver(){
             override fun onReceive(c:Context?,intent:Intent?){
                 when(intent?.action){
-                    Intent.ACTION_SCREEN_OFF->interactive=false
-                    Intent.ACTION_SCREEN_ON->interactive=true
-                    Intent.ACTION_USER_PRESENT->{keyguardState=0;keyguardShowing=false}
+                    Intent.ACTION_SCREEN_OFF,Intent.ACTION_SCREEN_ON->{
+                        if(!hasKeyguardStateHook)keyguardShowing=null
+                    }
+                    Intent.ACTION_USER_PRESENT->{
+                        keyguardState=if(hasStatusBarStateHook)0 else null
+                        keyguardShowing=if(hasKeyguardStateHook && keyguardShowing!=null)false else null
+                    }
                     Intent.ACTION_WALLPAPER_CHANGED->{
                         if(visible)prepareWallpaper(refresh=true)
                         else if(clockAnimator==null)LockscreenBackdrop.stop()
@@ -325,6 +348,28 @@ internal object LockscreenGlass {
                 refreshVisibility()
             }
         },filter,ContextCompat.RECEIVER_NOT_EXPORTED)
+        // Display changes are independent of queued screen broadcasts.
+        val displays=context.getSystemService(DisplayManager::class.java)
+        lastDisplayState=displays?.getDisplay(Display.DEFAULT_DISPLAY)?.state ?: Display.STATE_UNKNOWN
+        displays?.registerDisplayListener(object:DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId:Int){}
+            override fun onDisplayRemoved(displayId:Int){}
+            override fun onDisplayChanged(displayId:Int){
+                if(displayId!=Display.DEFAULT_DISPLAY)return
+                val state=displays.getDisplay(displayId)?.state ?: return
+                if(state==lastDisplayState)return
+                lastDisplayState=state
+                main.removeCallbacks(wakeVisibilityCheck)
+                wakeChecks=0
+                refreshVisibility()
+                // Keyguard and power state may settle after the display turns on.
+                if(state==Display.STATE_ON && !visible && !hasKeyguardStateHook &&
+                    (profiles.isNotEmpty() || softActivities)){
+                    wakeChecks=2
+                    main.postDelayed(wakeVisibilityCheck,250L)
+                }
+            }
+        },main)
     }
 
     fun configure(prefs:Bundle,enabled:Boolean){
@@ -411,8 +456,16 @@ internal object LockscreenGlass {
 
     private fun onMain(action:()->Unit){if(Looper.myLooper()===Looper.getMainLooper())action()else main.post(action)}
 
+    private fun isLockscreenLocked():Boolean {
+        // Without native keyguard callbacks, never cache an unlocked state across relocks.
+        if(!hasKeyguardStateHook)return keyguard?.isKeyguardLocked==true
+        return keyguardShowing ?: ((hasStatusBarStateHook && keyguardState==KEYGUARD) || keyguard?.isKeyguardLocked==true)
+    }
+
     private fun refreshVisibility(){
-        val locked=keyguardShowing ?: (keyguardState==KEYGUARD || keyguard?.isKeyguardLocked==true)
+        // Broadcast actions are wake-up signals, not the current screen state.
+        interactive=powerManager?.isInteractive ?: interactive
+        val locked=isLockscreenLocked()
         val show=(profiles.isNotEmpty() || softActivities) && interactive && !dozing && locked
         if(show==visible){
             if((!interactive || dozing || keyguardOccluded || Surface.CLOCK !in profiles) &&
@@ -528,8 +581,7 @@ internal object LockscreenGlass {
         if(!visible){
             // Keep a bounded static backdrop ready for the next wake.
             // Live wallpaper capture and blur jobs stop in AOD.
-            val sleeping=(!interactive || dozing) && !keyguardOccluded &&
-                (keyguardShowing ?: (keyguard?.isKeyguardLocked==true))
+            val sleeping=(!interactive || dozing) && !keyguardOccluded && isLockscreenLocked()
             val clockRadius=profiles[Surface.CLOCK]?.sourceRadius(Surface.CLOCK)
             if(!LockscreenBackdrop.stop(keepStatic=sleeping,clockRadius=clockRadius)){
                 views.values.forEach {it.discard()}
@@ -826,19 +878,31 @@ internal object LockscreenGlass {
     }
 
     private fun beginNotification(p:XC_MethodHook.MethodHookParam){
-        if(!visible || surfaceAmount<=0f)return
         val profile=profiles[Surface.NOTIFICATIONS] ?: return
+        if(Looper.myLooper()!==Looper.getMainLooper())return
         val view=p.thisObject as View
         if(notificationId!=View.NO_ID && view.id!=notificationId)return
         val row=view.parent as? View ?: return
         if((rowId==View.NO_ID || row.id!=rowId) &&
             generateSequence(row.javaClass as Class<*>?) {it.superclass}.none {it.name==NOTIFICATION_ROW})return
+        // Register legitimate backgrounds even before the glass can draw.
+        // Existing repaint and entrance animation invalidation now reach them.
+        if(view.isAttachedToWindow && view.display?.displayId==Display.DEFAULT_DISPLAY)target(view,Surface.NOTIFICATIONS)
+        if(!visible && (!hasKeyguardStateHook || !hasStatusBarStateHook) && view.isAttachedToWindow &&
+            view.display?.displayId==Display.DEFAULT_DISPLAY && view.display?.state==Display.STATE_ON){
+            // Recover from a missed wake without starting animations inside onDraw.
+            val now=SystemClock.uptimeMillis()
+            if(now-lastDrawWakeCheck>=250L && !main.hasCallbacks(wakeVisibilityCheck)){
+                lastDrawWakeCheck=now
+                main.post(wakeVisibilityCheck)
+            }
+        }
+        if(!visible || surfaceAmount<=0f)return
         val canvas=p.args[0] as Canvas
         if(!renderable(view,canvas))return
         try {
             if(NativeIconAccess.call(row,"isHeadsUp")==true ||
                 NativeIconAccess.field(view,"mExpandAnimationRunning")==true)return
-            target(view,Surface.NOTIFICATIONS)
             if(LockscreenBackdrop.frame?.images?.containsKey(profile.sourceRadius(Surface.NOTIFICATIONS))!=true)return
             val actual=NativeIconAccess.call(view,"getActualHeight") as? Int ?: view.height
             if(actual<=0)return
